@@ -77,7 +77,7 @@ prepare_round() { # $1=round number → writes PROMPT_FILE + RUNNER
 set -uo pipefail
 mkdir -p reviews
 codex exec --sandbox read-only --skip-git-repo-check \\
-  --output-last-message "${out}" "\$(cat "${PROMPT_FILE}")"
+  --output-last-message "${out}" "\$(cat "${PROMPT_FILE}")" < /dev/null
 EOF
   chmod +x "$RUNNER"
 }
