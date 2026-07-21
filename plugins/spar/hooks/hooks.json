@@ -1,0 +1,17 @@
+{
+  "description": "Sparring loop stop hook: blocks exit until the independent reviewer declares CONVERGED",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-hook.sh",
+            "timeout": 30,
+            "statusMessage": "sparring: checking loop phase..."
+          }
+        ]
+      }
+    ]
+  }
+}
