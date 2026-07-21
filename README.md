@@ -2,7 +2,7 @@
 
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: 🚧 under active development.** Phase 1 (core loop) is in progress; nothing is installable yet. This README describes the direction the plugin is pursuing — the [Roadmap](#roadmap) marks what exists today.
+**Status: 🚧 under active development.** Phase 1 (core loop) is implemented and verified end-to-end against a real Codex reviewer — a planted-bug task went FINDINGS → fix → re-review → CONVERGED across two rounds. Later phases are design only; the [Roadmap](#roadmap) marks what exists today.
 
 ## Direction
 
@@ -79,7 +79,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Core loop: `/spar`, Stop hook, round machinery, per-finding response enforcement, round cap, read-only reviewer | 🚧 in progress |
+| 1 | Core loop: `/spar`, Stop hook, round machinery, per-finding response enforcement, round cap, read-only reviewer | ✅ done |
 | 2 | `[DESIGN]` user gate + stalemate blind judge | planned |
 | 3 | Final sweep + skip conditions (docs-only, tiny diff) | planned |
 | 4 | Unattended mode + final report | planned |
