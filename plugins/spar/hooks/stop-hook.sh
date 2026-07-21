@@ -108,6 +108,59 @@ Then read $(review_file 1):
   code/requirements>'. Then stop again." \
       "sparring [${REVIEW_ID}] round 1: run reviewer"
     ;;
+  review)
+    RF=$(review_file "$ROUND"); RESP=$(response_file "$ROUND")
+
+    if [ ! -f "$RF" ]; then
+      n=$(cat "$RETRY_FILE" 2>/dev/null || echo 0); n=$((n+1))
+      if [ "$n" -ge 3 ]; then
+        log "reviewer never produced $RF — fail open"; cleanup; approve
+      fi
+      echo "$n" > "$RETRY_FILE"
+      block "Round ${ROUND} review has not been produced yet. Run:
+\`\`\`
+bash ${RUNNER}
+\`\`\`" "sparring [${REVIEW_ID}] round ${ROUND}: reviewer pending"
+    fi
+    rm -f "$RETRY_FILE"
+
+    STATUS=$(head -1 "$RF" | tr -d '\r')
+    if [ "$STATUS" = "STATUS: CONVERGED" ]; then
+      log "converged at round $ROUND"; cleanup; approve
+    fi
+
+    if [ ! -f "$RESP" ]; then
+      block "Round ${ROUND} review has findings you have not responded to.
+
+Read ${RF}. Fix every [MECHANICAL] finding. Decide each [DESIGN] finding on
+the merits. Then write ${RESP} with one section per finding ID:
+'FIXED — <what you did>' or 'REJECTED — <reason grounded in code or the task
+requirements>'. Then stop again." \
+        "sparring [${REVIEW_ID}] round ${ROUND}: respond to findings"
+    fi
+
+    if [ "$ROUND" -ge "$MAX_ROUNDS" ]; then
+      log "round cap ${MAX_ROUNDS} reached — unconverged exit"
+      tmp="${STATE_FILE}.tmp.$$"
+      awk '/^active:/{print "active: false"; next}{print}' "$STATE_FILE" > "$tmp" \
+        && mv "$tmp" "$STATE_FILE"
+      block "Round cap (${MAX_ROUNDS}) reached and the reviewer has NOT
+converged. Do not keep fixing. Report to the user: the loop ended
+unconverged — summarize the unresolved findings from ${RF} honestly, then
+stop. The loop is now deactivated; your next stop will be released." \
+        "sparring [${REVIEW_ID}]: round cap — unconverged"
+    fi
+
+    NEXT=$((ROUND + 1))
+    prepare_round "$NEXT"
+    set_state review "$NEXT"
+    block "Response recorded. Round ${NEXT} verification review is required. Run:
+\`\`\`
+bash ${RUNNER}
+\`\`\`
+Then handle $(review_file "$NEXT") exactly as before (fix / respond / stop)." \
+      "sparring [${REVIEW_ID}] round ${NEXT}: run reviewer"
+    ;;
   *)
     log "unknown phase: $PHASE"; cleanup; approve
     ;;

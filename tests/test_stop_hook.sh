@@ -66,5 +66,57 @@ chk "state → round 1" 'round: 1' "$(cat .claude/spar.local.md)"
 chk "runner targets r1 review file" 'reviews/spar-20260721-120000-abc123-r1.md' "$(cat .claude/spar-run-reviewer.sh)"
 chk "runner is read-only sandbox" 'sandbox read-only' "$(cat .claude/spar-run-reviewer.sh)"
 
+# helper: enter review phase for round $1
+in_review() { fresh_dir; write_state review "$1"; mkdir -p reviews; }
+RF1="reviews/spar-20260721-120000-abc123-r1.md"
+RP1="reviews/spar-20260721-120000-abc123-r1-response.md"
+
+# ── 5. review file missing → block (retry), 3rd miss → fail-open ──
+in_review 1
+chk "review missing → block" '"decision":"block"' "$(run_hook)"
+run_hook >/dev/null
+chk "review missing 3rd → approve" '"decision":"approve"' "$(run_hook)"
+
+# ── 6. CONVERGED → approve + cleanup ──
+in_review 1
+printf 'STATUS: CONVERGED\n\nChecked diff, tests, security.\n' > "$RF1"
+chk "converged → approve" '"decision":"approve"' "$(run_hook)"
+chk "converged → state removed" "gone" "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
+
+# ── 7. FINDINGS + no response → block asking for response file ──
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] missing null check\n' > "$RF1"
+OUT=$(run_hook)
+chk "findings no response → block" '"decision":"block"' "$OUT"
+chk "block names response file" "$RP1" "$OUT"
+
+# ── 8. FINDINGS + response → next round prepared ──
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] missing null check\n' > "$RF1"
+printf '### F1-1: FIXED — added guard\n' > "$RP1"
+OUT=$(run_hook)
+chk "responded → block for round 2" '"decision":"block"' "$OUT"
+chk "state advanced to round 2" 'round: 2' "$(cat .claude/spar.local.md)"
+chk "r2 prompt references r1 review" "$RF1" "$(cat .claude/spar-reviewer-prompt.txt)"
+chk "r2 prompt references r1 response" "$RP1" "$(cat .claude/spar-reviewer-prompt.txt)"
+chk "r2 prompt: no leftover placeholder" 'CLEAN' "$(grep -q '{{' .claude/spar-reviewer-prompt.txt && echo DIRTY || echo CLEAN)"
+chk "runner targets r2" 'r2.md' "$(cat .claude/spar-run-reviewer.sh)"
+
+# ── 9. round cap → deactivate + final block, then approve ──
+in_review 5
+RF5="reviews/spar-20260721-120000-abc123-r5.md"
+RP5="reviews/spar-20260721-120000-abc123-r5-response.md"
+printf 'STATUS: FINDINGS\n\n### F5-1 [DESIGN] split module\n' > "$RF5"
+printf '### F5-1: REJECTED — out of scope for this task\n' > "$RP5"
+OUT=$(run_hook)
+chk "cap → block with unconverged notice" 'unconverged' "$OUT"
+chk "cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+chk "cap → next stop approves" '"decision":"approve"' "$(run_hook)"
+
+# ── 10. CRLF status line tolerated ──
+in_review 1
+printf 'STATUS: CONVERGED\r\n' > "$RF1"
+chk "CRLF converged → approve" '"decision":"approve"' "$(run_hook)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
