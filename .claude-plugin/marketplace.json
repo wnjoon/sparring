@@ -1,0 +1,18 @@
+{
+  "name": "sparring",
+  "owner": {
+    "name": "wnjoon"
+  },
+  "metadata": {
+    "description": "Cross-model review sparring loop: author implements, an independent reviewer iterates findings until it declares convergence"
+  },
+  "plugins": [
+    {
+      "name": "spar",
+      "source": "./plugins/spar",
+      "description": "Sparring loop: Claude implements, Codex reviews read-only, Stop hook forces rounds until the reviewer declares CONVERGED",
+      "license": "MIT",
+      "keywords": ["code-review", "codex", "convergence", "quality"]
+    }
+  ]
+}
