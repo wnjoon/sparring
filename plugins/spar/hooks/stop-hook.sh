@@ -12,6 +12,11 @@ RETRY_FILE=".claude/spar-retries"
 LEDGER_FILE=".claude/spar-ledger.md"
 REGISTRY_FILE=".claude/spar-registry.tsv"
 REG_MARKER=".claude/spar-registry-round"
+JUDGE_RUNNER=".claude/spar-run-judge.sh"
+JUDGE_PROMPT_FILE=".claude/spar-judge-prompt.txt"
+JUDGE_PENDING=".claude/spar-judge-pending"
+JUDGE_SEQ=".claude/spar-judge-seq"
+JUDGE_RETRY=".claude/spar-judge-retries"
 
 log() { mkdir -p "$(dirname "$LOG_FILE")"; echo "[$(date -u +%FT%TZ)] $*" >> "$LOG_FILE"; }
 approve() { printf '{"decision":"approve"}\n'; exit 0; }
@@ -22,7 +27,8 @@ block() { # $1=reason $2=statusMessage
   exit 0
 }
 cleanup() { rm -f "$STATE_FILE" "$RUNNER" "$PROMPT_FILE" "$RETRY_FILE" \
-  "$LEDGER_FILE" "$REGISTRY_FILE" "$REG_MARKER"; }
+  "$LEDGER_FILE" "$REGISTRY_FILE" "$REG_MARKER" \
+  "$JUDGE_RUNNER" "$JUDGE_PROMPT_FILE" "$JUDGE_PENDING" "$JUDGE_SEQ" "$JUDGE_RETRY"; }
 
 trap 'log "ERR trap line $LINENO"; cleanup; printf "{\"decision\":\"approve\"}\n"; exit 0' ERR
 
@@ -148,13 +154,22 @@ new_stalemates() {
   awk -F'\t' '$4>=2 && $5=="open" {print $1}' "$REGISTRY_FILE" 2>/dev/null
 }
 
-# Mark a fingerprint escalated so it never re-fires.
-mark_escalated() { # $1=fp
-  local fp="$1" tmp="${REGISTRY_FILE}.tmp.$$"
+# Set a fingerprint's status column.
+set_registry_status() { # $1=fp $2=status
+  local fp="$1" st="$2" tmp="${REGISTRY_FILE}.tmp.$$"
   [ -f "$REGISTRY_FILE" ] || return 0
-  awk -F'\t' -v OFS='\t' -v fp="$fp" '$1==fp{$5="escalated"} {print}' \
+  awk -F'\t' -v OFS='\t' -v fp="$fp" -v st="$st" '$1==fp{$5=st} {print}' \
     "$REGISTRY_FILE" > "$tmp" && mv "$tmp" "$REGISTRY_FILE"
 }
+
+# Tag of a fingerprint (MECHANICAL | DESIGN | UNKNOWN).
+registry_tag() { # $1=fp
+  [ -f "$REGISTRY_FILE" ] || return 0
+  awk -F'\t' -v fp="$1" '$1==fp{print $2; exit}' "$REGISTRY_FILE" 2>/dev/null
+}
+
+# Mark a fingerprint escalated so it never re-fires.
+mark_escalated() { set_registry_status "$1" escalated; }
 
 set_state() { # $1=phase $2=round
   local tmp="${STATE_FILE}.tmp.$$"
@@ -191,6 +206,65 @@ codex exec --sandbox read-only --skip-git-repo-check \\
   --output-last-message "${out}" < "${PROMPT_FILE}"
 EOF
   chmod +x "$RUNNER"
+}
+
+# Extract the markdown block of the finding whose fingerprint matches $2.
+extract_finding() { # $1=review file  $2=fingerprint
+  awk -v target="$2" '
+    function norm(s){ s=tolower(s); gsub(/[^a-z0-9]+/," ",s); gsub(/^ +| +$/,"",s); return s }
+    function flush(){
+      if (hdr!=""){
+        f=file; sub(/:[0-9]+.*$/,"",f); gsub(/^[ ]+|[ ]+$/,"",f)
+        if ((f " | " norm(title))==target) printf "%s", buf
+      }
+      hdr=""; title=""; file=""; buf=""
+    }
+    /^### F[0-9]+-[0-9]+/ {
+      flush()
+      hdr=$0; buf=$0 "\n"
+      title=$0; sub(/^### F[0-9]+-[0-9]+[ ]*(\[[A-Z]+\][ ]*)?/,"",title)
+      next
+    }
+    {
+      if (hdr!=""){
+        buf=buf $0 "\n"
+        if (file=="" && $0 ~ /^-[ ]*file:/){ file=$0; sub(/^-[ ]*file:[ ]*/,"",file) }
+      }
+    }
+    END { flush() }
+  ' "$1" 2>/dev/null
+}
+
+# Dispatch a blind judge for one fingerprint: writes prompt + runner + pending,
+# sets status judging. Returns non-zero (caller falls back to escalation) if the
+# template is missing or the finding cannot be extracted.
+prepare_judge() { # $1=fingerprint
+  local fp="$1"
+  local tpl_dir="${CLAUDE_PLUGIN_ROOT:-}/shared/prompts"
+  [ -f "$tpl_dir/judge.md" ] || { log "judge template missing"; return 1; }
+  local finding; finding=$(extract_finding "$(review_file "$ROUND")" "$fp")
+  [ -n "$finding" ] || { log "cannot extract finding for judge: $fp"; return 1; }
+  local prompt; prompt=$(cat "$tpl_dir/judge.md")
+  prompt=${prompt//\{\{TASK\}\}/$TASK}
+  prompt=${prompt//\{\{DIFF_BASE\}\}/$BASE}
+  prompt=${prompt//\{\{FINDING\}\}/$finding}
+  mkdir -p reviews .claude
+  printf '%s' "$prompt" > "$JUDGE_PROMPT_FILE"
+  local k; k=$(cat "$JUDGE_SEQ" 2>/dev/null || echo 0)
+  case "$k" in ''|*[!0-9]*) k=0;; esac; k=$((k+1)); echo "$k" > "$JUDGE_SEQ"
+  local out="reviews/spar-${REVIEW_ID}-judge-${k}.md"
+  cat > "$JUDGE_RUNNER" <<EOF
+#!/usr/bin/env bash
+# sparring judge runner (generated; do not edit)
+set -uo pipefail
+mkdir -p reviews
+codex exec --sandbox read-only --skip-git-repo-check \\
+  --output-last-message "${out}" < "${JUDGE_PROMPT_FILE}"
+EOF
+  chmod +x "$JUDGE_RUNNER"
+  printf '%s\t%s\n' "$fp" "$out" > "$JUDGE_PENDING"
+  set_registry_status "$fp" judging
+  return 0
 }
 
 command -v codex >/dev/null 2>&1 || {
@@ -267,22 +341,114 @@ requirements>'. Then stop again." \
 
     fold_registry "$ROUND"
 
+    # (A) A judge ruling is pending → resolve it before routing anything new.
+    if [ -f "$JUDGE_PENDING" ]; then
+      jfp=$(cut -f1 "$JUDGE_PENDING"); jout=$(cut -f2 "$JUDGE_PENDING")
+      if [ ! -f "$jout" ]; then
+        jn=$(cat "$JUDGE_RETRY" 2>/dev/null || echo 0); jn=$((jn+1))
+        if [ "$jn" -ge 3 ]; then
+          log "judge never produced $jout — fail open to user escalation"
+          rm -f "$JUDGE_PENDING" "$JUDGE_RUNNER" "$JUDGE_RETRY"
+          set_registry_status "$jfp" escalated
+          block "The independent judge produced no ruling. Surface finding
+'${jfp}' to the user for a decision, apply it, then stop." \
+            "sparring [${REVIEW_ID}]: judge failed — user decision needed"
+        fi
+        echo "$jn" > "$JUDGE_RETRY"
+        block "A judge ruling is pending. Run:
+\`\`\`
+bash ${JUDGE_RUNNER}
+\`\`\`
+Then stop again." "sparring [${REVIEW_ID}]: judge pending"
+      fi
+      JRULING=$(head -1 "$jout" | tr -d '\r')
+      if [ "$JRULING" = "RULING: UPHELD" ]; then
+        rm -f "$JUDGE_PENDING" "$JUDGE_RUNNER" "$JUDGE_RETRY"
+        set_registry_status "$jfp" upheld
+        block "The independent judge UPHELD finding '${jfp}': it is a real
+defect. You may no longer reject it — FIX it now. The next round's review
+verifies the fix. Then stop again." \
+          "sparring [${REVIEW_ID}]: judge upheld — fix required"
+      elif [ "$JRULING" = "RULING: DISMISSED" ]; then
+        rm -f "$JUDGE_PENDING" "$JUDGE_RUNNER" "$JUDGE_RETRY"
+        set_registry_status "$jfp" dismissed
+        log "judge dismissed $jfp"
+        # fall through — this same stop routes any remaining stalemate
+      else
+        jn=$(cat "$JUDGE_RETRY" 2>/dev/null || echo 0); jn=$((jn+1))
+        if [ "$jn" -ge 3 ]; then
+          log "judge ruling invalid ${jn}x — fail open to user escalation"
+          rm -f "$JUDGE_PENDING" "$JUDGE_RUNNER" "$JUDGE_RETRY"
+          set_registry_status "$jfp" escalated
+          block "The judge ruling was unreadable three times. Surface finding
+'${jfp}' to the user for a decision, apply it, then stop." \
+            "sparring [${REVIEW_ID}]: judge unreadable — user decision needed"
+        fi
+        echo "$jn" > "$JUDGE_RETRY"
+        mv "$jout" "${jout}.invalid-${jn}" 2>/dev/null
+        if prepare_judge "$jfp"; then
+          block "The judge output was invalid (first line was neither
+'RULING: UPHELD' nor 'RULING: DISMISSED'; set aside). Re-run:
+\`\`\`
+bash ${JUDGE_RUNNER}
+\`\`\`
+Then stop again." "sparring [${REVIEW_ID}]: judge invalid — rerun"
+        else
+          rm -f "$JUDGE_PENDING"
+          set_registry_status "$jfp" escalated
+          block "The judge could not be re-dispatched. Surface finding
+'${jfp}' to the user for a decision, apply it, then stop." \
+            "sparring [${REVIEW_ID}]: judge unavailable — user decision needed"
+        fi
+      fi
+    fi
+
+    # (B) Route new stalemates: [MECHANICAL] → blind judge, [DESIGN] → user escalation.
     STALE=$(new_stalemates)
     if [ -n "$STALE" ]; then
-      while IFS= read -r fp; do [ -n "$fp" ] && mark_escalated "$fp"; done <<STALE_EOF
+      mech_fp=""; design_fps=""
+      while IFS= read -r fp; do
+        [ -n "$fp" ] || continue
+        if [ "$(registry_tag "$fp")" = "MECHANICAL" ]; then
+          [ -z "$mech_fp" ] && mech_fp="$fp"
+        else
+          design_fps="${design_fps}${fp}
+"
+        fi
+      done <<STALE_EOF
 $STALE
 STALE_EOF
-      block "Stalemate: the following finding(s) were raised by the reviewer AND
-rejected by you for 2 consecutive rounds:
 
-${STALE}
+      if [ -n "$mech_fp" ]; then
+        if prepare_judge "$mech_fp"; then
+          rm -f "$JUDGE_RETRY"
+          block "Factual stalemate on '${mech_fp}': an independent blind judge
+must rule (you cannot decide your own rejection). Run:
+\`\`\`
+bash ${JUDGE_RUNNER}
+\`\`\`
+Then stop again." "sparring [${REVIEW_ID}] round ${ROUND}: judge dispatched"
+        else
+          set_registry_status "$mech_fp" escalated
+          design_fps="${design_fps}${mech_fp}
+"
+        fi
+      fi
 
-Automated adjudication (blind judge / batched user gate) lands in Phase 2b.
-For now, do NOT keep deciding this yourself: surface the disagreement to the
-user — give the reviewer's problem and your rejection reason — and let them
-rule. Apply their decision and note it. Then stop again; the loop continues
-on everything else (this stalemate will not be raised again)." \
-        "sparring [${REVIEW_ID}] round ${ROUND}: stalemate — user decision needed"
+      if [ -n "$design_fps" ]; then
+        while IFS= read -r fp; do [ -n "$fp" ] && mark_escalated "$fp"; done <<D_EOF
+$design_fps
+D_EOF
+        block "Stalemate: the following design finding(s) were raised AND
+rejected for 2 consecutive rounds:
+
+${design_fps}
+Automated design adjudication (batched user gate) lands in Phase 2c. For now,
+surface each to the user — give the reviewer's problem and your rejection
+reason — let them rule, apply it, and stop again. The loop continues on
+everything else (these will not be raised again)." \
+          "sparring [${REVIEW_ID}] round ${ROUND}: design stalemate — user decision needed"
+      fi
     fi
 
     if [ "$ROUND" -ge "$MAX_ROUNDS" ]; then

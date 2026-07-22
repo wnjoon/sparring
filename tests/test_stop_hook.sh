@@ -225,5 +225,81 @@ printf '### F2-1: FIXED — split it\n' > "$RPb"
 OUT=$(run_hook)
 chk "fixed second round → no stalemate block" 'round: 3' "$(cat .claude/spar.local.md)"
 
+# helpers for two-round stalemate scenarios
+RFa="reviews/spar-20260721-120000-abc123-r1.md"
+RPa="reviews/spar-20260721-120000-abc123-r1-response.md"
+RFb="reviews/spar-20260721-120000-abc123-r2.md"
+RPb="reviews/spar-20260721-120000-abc123-r2-response.md"
+mech_stalemate() { # drive a MECHANICAL finding rejected in rounds 1 and 2; leaves state at round 2 processed
+  fresh_dir; write_state review 1; mkdir -p reviews
+  printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] null deref\n- file: a.py:5\n- problem: npe\n- suggestion: guard\n' > "$RFa"
+  printf '### F1-1: REJECTED — not reachable\n' > "$RPa"
+  run_hook >/dev/null   # fold r1 (streak 1), advance to r2
+  printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] null deref\n- file: a.py:5\n- problem: npe\n- suggestion: guard\n' > "$RFb"
+  printf '### F2-1: REJECTED — still not reachable\n' > "$RPb"
+}
+
+# ── 18. MECHANICAL stalemate → blind judge dispatched ──
+mech_stalemate
+OUT=$(run_hook)   # fold r2 (streak 2) → MECHANICAL stalemate → dispatch judge
+chk "mech stalemate → judge block" 'run-judge' "$OUT"
+chk_file "judge runner generated" .claude/spar-run-judge.sh
+chk "judge runner read-only sandbox" 'sandbox read-only' "$(cat .claude/spar-run-judge.sh)"
+chk "judge pending records fingerprint" 'a.py | null deref' "$(cat .claude/spar-judge-pending)"
+chk "judge prompt carries the finding" 'null deref' "$(cat .claude/spar-judge-prompt.txt)"
+chk "judge prompt has no leftover placeholder" 'CLEAN' "$(grep -q '{{' .claude/spar-judge-prompt.txt && echo DIRTY || echo CLEAN)"
+chk "judge prompt is blind (no response text)" "absent" \
+  "$(grep -qi 'not reachable' .claude/spar-judge-prompt.txt && echo present || echo absent)"
+chk "registry status judging" "$(printf 'a.py | null deref\tMECHANICAL\t2\t2\tjudging')" "$(cat .claude/spar-registry.tsv)"
+
+# ── 19. judge UPHELD → fix-required block, status upheld, pending cleared ──
+JOUT=$(cut -f2 .claude/spar-judge-pending)
+printf 'RULING: UPHELD\n\nReachable via the public API.\n' > "$JOUT"
+OUT=$(run_hook)
+chk "upheld → block demands fix" 'UPHELD' "$OUT"
+chk "upheld → status upheld" "$(printf '\t2\t2\tupheld')" "$(cat .claude/spar-registry.tsv)"
+chk "upheld → pending cleared" "gone" "$([ -f .claude/spar-judge-pending ] && echo present || echo gone)"
+
+# ── 20. judge DISMISSED → status dismissed, no judge block, round advances ──
+mech_stalemate
+run_hook >/dev/null                      # dispatch judge
+JOUT=$(cut -f2 .claude/spar-judge-pending)
+printf 'RULING: DISMISSED\n\nGuarded upstream; not a defect.\n' > "$JOUT"
+run_hook >/dev/null                      # resolve dismissed → fall through → advance
+chk "dismissed → status dismissed" "$(printf '\t2\t2\tdismissed')" "$(cat .claude/spar-registry.tsv)"
+chk "dismissed → round advanced to 3" 'round: 3' "$(cat .claude/spar.local.md)"
+
+# ── 21. judge ruling missing → pending block (retry) ──
+mech_stalemate
+run_hook >/dev/null                      # dispatch judge (ruling file not written)
+OUT=$(run_hook)                          # ruling still absent
+chk "ruling missing → pending block" 'judge' "$OUT"
+chk "ruling missing → still pending" "kept" "$([ -f .claude/spar-judge-pending ] && echo kept || echo gone)"
+
+# ── 22. judge ruling invalid 3× → fail open to user escalation ──
+mech_stalemate
+run_hook >/dev/null                      # dispatch judge
+JOUT=$(cut -f2 .claude/spar-judge-pending)
+printf 'codex crashed\n' > "$JOUT"; run_hook >/dev/null      # invalid 1 → set aside + re-dispatch
+JOUT=$(cut -f2 .claude/spar-judge-pending)
+printf 'still broken\n' > "$JOUT"; run_hook >/dev/null       # invalid 2
+JOUT=$(cut -f2 .claude/spar-judge-pending)
+printf 'nope\n' > "$JOUT"
+OUT=$(run_hook)                                              # invalid 3 → fail open
+chk "invalid ruling 3× → user escalation" 'user decision' "$OUT"
+chk "invalid ruling 3× → status escalated" 'escalated' "$(cat .claude/spar-registry.tsv)"
+
+# ── 23. DESIGN stalemate still uses Phase 2a user escalation (unchanged) ──
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFa"
+printf '### F1-1: REJECTED — cohesive\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFb"
+printf '### F2-1: REJECTED — cohesive\n' > "$RPb"
+OUT=$(run_hook)
+chk "design stalemate → user escalation, not judge" "$([ -f .claude/spar-run-judge.sh ] && echo judge || echo escalation)" "escalation"
+chk "design stalemate → escalated status" 'escalated' "$(cat .claude/spar-registry.tsv)"
+chk "design stalemate → block mentions stalemate" 'stalemate' "$OUT"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
