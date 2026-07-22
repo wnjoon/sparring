@@ -282,6 +282,21 @@ extract_finding() { # $1=review file  $2=fingerprint
   ' "$1" 2>/dev/null
 }
 
+# Finding text for a canonical fp in a round's review, falling back to any
+# variant fingerprint that aliases to it (the review may carry only the variant).
+gate_finding_text() { # $1=review file  $2=canonical fp
+  local t; t=$(extract_finding "$1" "$2")
+  if [ -z "$t" ] && [ -f "$ALIASES_FILE" ]; then
+    local vfp cfp
+    while IFS=$'\t' read -r vfp cfp; do
+      [ "$cfp" = "$2" ] || continue
+      t=$(extract_finding "$1" "$vfp")
+      [ -n "$t" ] && break
+    done < "$ALIASES_FILE"
+  fi
+  printf '%s' "$t"
+}
+
 # Dispatch a blind judge for one fingerprint: writes prompt + runner + pending,
 # sets status judging. Returns non-zero (caller falls back to escalation) if the
 # template is missing or the finding cannot be extracted.
@@ -329,7 +344,7 @@ build_matcher() { # $1=round
   while IFS=$'\t' read -r id tag file nt; do
     [ -n "$id" ] || continue
     fp=$(resolve_alias "${file} | ${nt}")
-    grep -qF -- "${fp}"$'\t' "$REGISTRY_FILE" 2>/dev/null && continue
+    awk -F'\t' -v fp="$fp" '$1==fp{f=1} END{exit !f}' "$REGISTRY_FILE" 2>/dev/null && continue
     new_fps="${new_fps}${fp}
 "
   done < <(parse_findings "$rf")
@@ -655,7 +670,7 @@ again. (To abandon the loop instead: /spar-cancel.)" \
         printf 'P%s\t%s\n' "$k" "$pfp" >> "$GATE_MANIFEST"
         {
           echo "## P${k}  (${pfp})"
-          extract_finding "$(review_file "$ROUND")" "$pfp"
+          gate_finding_text "$(review_file "$ROUND")" "$pfp"
           echo
         } >> "$GATE_FILE"
       done < <(parked_fingerprints)
