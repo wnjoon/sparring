@@ -57,9 +57,10 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
 
 ## Phase roadmap
 
-Phase 1 (this): core loop. Phase 2: Gate + deadlock judge. Phase 3: sweep +
-skip conditions. Phase 4: unattended mode + final report. Phase 5: Codex-side
-adapter (git pre-commit enforcement). Phase 6: model economics — reviewer
-model/effort config, same-model fallback, tiered writers (judgment never
-delegates; edit execution may go to a cheaper tier, verified by the next
-round's full re-review; escalates back on fix-induced findings).
+Phases 1–2 (implemented): core loop + design findings, blind judge, gate,
+decision ledger, semantic matcher. Phase 3: single-agent mode — same-family
+Claude reviewer/judge/matcher so `/spar` runs without Codex (auto-detect +
+override; cross-model stays default). Phase 4: final sweep + skip conditions.
+Phase 5: unattended mode + final report. Phase 6: Codex-hosted adapter (git
+pre-commit enforcement). Phase 7: model economics (reviewer/effort config,
+tiered fix writers).

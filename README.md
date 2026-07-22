@@ -92,10 +92,11 @@ The same structure runs in both directions. The seats swap; the invariants don't
 |---|---|---|
 | 1 | Core loop: `/spar`, Stop hook, round machinery, per-finding response enforcement, round cap, read-only reviewer | ✅ done |
 | 2 | `[DESIGN]` debate-first (conveyance boundary + decision ledger) · stalemate blind judge · batched end-of-loop gate · cross-round semantic finding matcher | ✅ done |
-| 3 | Final sweep + skip conditions (docs-only, tiny diff) | planned |
-| 4 | Unattended mode + final report | planned |
-| 5 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
-| 6 | Model economics: reviewer model + effort config, same-model fallback, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
+| 3 | Single-agent mode: same-family sparring (Claude reviewer/judge/matcher) so `/spar` works without Codex — auto-detect + explicit override; cross-model stays the default | planned (next) |
+| 4 | Final sweep + skip conditions (docs-only, tiny diff) | planned |
+| 5 | Unattended mode + final report | planned |
+| 6 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
+| 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
 
 ## Install
 
