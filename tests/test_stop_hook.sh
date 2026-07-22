@@ -24,6 +24,7 @@ active: true
 phase: $1
 round: $2
 review_id: 20260721-120000-abc123
+base_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 reviewer: codex
 max_rounds: 5
 ---
@@ -65,6 +66,16 @@ chk "state → phase review" 'phase: review' "$(cat .claude/spar.local.md)"
 chk "state → round 1" 'round: 1' "$(cat .claude/spar.local.md)"
 chk "runner targets r1 review file" 'reviews/spar-20260721-120000-abc123-r1.md' "$(cat .claude/spar-run-reviewer.sh)"
 chk "runner is read-only sandbox" 'sandbox read-only' "$(cat .claude/spar-run-reviewer.sh)"
+chk "prompt pins diff baseline" 'git diff aaaaaaaa' "$(cat .claude/spar-reviewer-prompt.txt)"
+chk "prompt covers untracked files" 'untracked-files' "$(cat .claude/spar-reviewer-prompt.txt)"
+chk "runner feeds prompt via stdin" '< ".claude/spar-reviewer-prompt.txt"' "$(cat .claude/spar-run-reviewer.sh)"
+
+# ── 4b. state without base_sha → falls back to HEAD baseline ──
+fresh_dir; write_state task 0
+sed -i '' '/^base_sha:/d' .claude/spar.local.md 2>/dev/null \
+  || sed -i '/^base_sha:/d' .claude/spar.local.md
+run_hook >/dev/null
+chk "no base_sha → HEAD fallback" 'git diff HEAD' "$(cat .claude/spar-reviewer-prompt.txt)"
 
 # helper: enter review phase for round $1
 in_review() { fresh_dir; write_state review "$1"; mkdir -p reviews; }
@@ -117,6 +128,18 @@ chk "cap → next stop approves" '"decision":"approve"' "$(run_hook)"
 in_review 1
 printf 'STATUS: CONVERGED\r\n' > "$RF1"
 chk "CRLF converged → approve" '"decision":"approve"' "$(run_hook)"
+
+# ── 11. invalid reviewer output → set aside + retry, 3rd → fail-open ──
+in_review 1
+printf 'codex exploded mid-review\n' > "$RF1"
+OUT=$(run_hook)
+chk "invalid review → block" 'invalid' "$OUT"
+chk "invalid review set aside" "gone" "$([ -f "$RF1" ] && echo present || echo gone)"
+chk "invalid copy kept" "kept" "$([ -f "${RF1}.invalid-1" ] && echo kept || echo lost)"
+printf '\n' > "$RF1"
+run_hook >/dev/null
+printf 'still broken\n' > "$RF1"
+chk "invalid 3rd → fail open" '"decision":"approve"' "$(run_hook)"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

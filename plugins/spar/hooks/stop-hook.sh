@@ -37,6 +37,9 @@ echo "$REVIEW_ID" | grep -qE '^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$' \
 case "$ROUND" in ''|*[!0-9]*) log "invalid round: $ROUND"; cleanup; approve;; esac
 case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=5;; esac
 
+BASE=$(field base_sha)
+echo "$BASE" | grep -qE '^([0-9a-f]{7,40}|none)$' || BASE="HEAD"
+
 TASK=$(awk '/^---$/{c++; next} c>=2{print}' "$STATE_FILE")
 
 review_file() { echo "reviews/spar-${REVIEW_ID}-r${1}.md"; }
@@ -65,6 +68,7 @@ prepare_round() { # $1=round number → writes PROMPT_FILE + RUNNER
   fi
   prompt=${prompt//\{\{TASK\}\}/$TASK}
   prompt=${prompt//\{\{ROUND\}\}/$n}
+  prompt=${prompt//\{\{DIFF_BASE\}\}/$BASE}
   prompt=${prompt//\{\{PREV_CONTEXT\}\}/$prev_ctx}
 
   mkdir -p reviews .claude
@@ -77,7 +81,7 @@ prepare_round() { # $1=round number → writes PROMPT_FILE + RUNNER
 set -uo pipefail
 mkdir -p reviews
 codex exec --sandbox read-only --skip-git-repo-check \\
-  --output-last-message "${out}" "\$(cat "${PROMPT_FILE}")" < /dev/null
+  --output-last-message "${out}" < "${PROMPT_FILE}"
 EOF
   chmod +x "$RUNNER"
 }
@@ -122,12 +126,27 @@ Then read $(review_file 1):
 bash ${RUNNER}
 \`\`\`" "sparring [${REVIEW_ID}] round ${ROUND}: reviewer pending"
     fi
-    rm -f "$RETRY_FILE"
-
     STATUS=$(head -1 "$RF" | tr -d '\r')
     if [ "$STATUS" = "STATUS: CONVERGED" ]; then
       log "converged at round $ROUND"; cleanup; approve
     fi
+
+    if [ "$STATUS" != "STATUS: FINDINGS" ]; then
+      n=$(cat "$RETRY_FILE" 2>/dev/null || echo 0); n=$((n+1))
+      if [ "$n" -ge 3 ]; then
+        log "reviewer output invalid ${n}x — fail open"; cleanup; approve
+      fi
+      echo "$n" > "$RETRY_FILE"
+      mv "$RF" "${RF}.invalid-${n}" 2>/dev/null
+      block "Round ${ROUND} reviewer output is invalid — its first line is
+neither 'STATUS: CONVERGED' nor 'STATUS: FINDINGS', so the reviewer likely
+failed (the bad output was set aside as ${RF}.invalid-${n}). Never treat a
+blank or malformed review as findings or as convergence. Re-run:
+\`\`\`
+bash ${RUNNER}
+\`\`\`" "sparring [${REVIEW_ID}] round ${ROUND}: invalid reviewer output"
+    fi
+    rm -f "$RETRY_FILE"
 
     if [ ! -f "$RESP" ]; then
       block "Round ${ROUND} review has findings you have not responded to.

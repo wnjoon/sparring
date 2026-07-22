@@ -8,9 +8,18 @@ round {{ROUND}}.
 
 ## What to review
 
-Run `git status` and `git diff HEAD` in this repository to see the author's
-uncommitted changes (if the diff is empty, review `git diff HEAD~1`). Review
-ONLY the changed code and files it directly touches.
+Loop baseline: `{{DIFF_BASE}}`
+
+- Run `git diff {{DIFF_BASE}}` — every change made since the loop started,
+  including fixes from earlier rounds, measured against this frozen baseline.
+  Never diff against a moving `HEAD`: commits made during the loop would hide
+  part of the reviewed surface.
+- Run `git status --porcelain --untracked-files=all` and READ each untracked
+  file directly — brand-new files never appear in a diff.
+- If the baseline is `none` (the repository had no commits when the loop
+  started), skip the diff and review every file `git status` lists.
+
+Review ONLY the changed or new code and the files it directly touches.
 
 {{PREV_CONTEXT}}
 

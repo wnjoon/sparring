@@ -18,12 +18,14 @@ command -v codex >/dev/null 2>&1 || { echo "Error: Codex CLI not installed. Run:
 if [ -f .claude/spar.local.md ]; then echo "Error: a sparring loop is already active. Use /spar-cancel first."; exit 1; fi
 mkdir -p .claude reviews
 SPAR_ID="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+SPAR_BASE="$(git rev-parse HEAD 2>/dev/null || echo none)"
 cat > .claude/spar.local.md << STATE_EOF
 ---
 active: true
 phase: task
 round: 0
 review_id: ${SPAR_ID}
+base_sha: ${SPAR_BASE}
 reviewer: codex
 max_rounds: 5
 ---
