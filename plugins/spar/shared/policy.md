@@ -17,7 +17,7 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
    itself. Conveyance boundary — the reviewer is NEVER told what was fixed
    or rejected; every round is a full fresh re-review against the frozen
    baseline. The only loop-generated context conveyed is the decision ledger
-   (empty until Phase 2b).
+   (empty until Phase 2c).
 3. Reviewer output: first line `STATUS: CONVERGED` or `STATUS: FINDINGS`;
    findings tagged `[MECHANICAL]` or `[DESIGN]` with file/problem/suggestion.
 4. Author must fix every MECHANICAL finding, decide DESIGN findings on the
