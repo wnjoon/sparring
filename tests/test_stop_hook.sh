@@ -447,5 +447,35 @@ printf 'SAME N1 E1\n' > "$MOUT"
 run_hook >/dev/null               # alias applied, canonical parked, gate fires → worksheet written
 chk "worksheet body shows variant finding text" 'break up mod.py into parts' "$(cat .claude/spar-gate.md)"
 
+set_reviewer() { # $1 = codex|claude|<garbage>
+  sed -i '' "s/^reviewer: .*/reviewer: $1/" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^reviewer: .*/reviewer: $1/" .claude/spar.local.md
+}
+
+# ── 35. reviewer: claude → runners target claude -p read-only, not codex ──
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] x\n- file: a.py:1\n' > "$RF1"
+printf '### F1-1: FIXED — y\n' > "$RP1"
+set_reviewer claude
+run_hook >/dev/null   # prepares round 2 runner
+chk "claude family → runner uses claude -p" 'claude -p' "$(cat .claude/spar-run-reviewer.sh)"
+chk "claude family → read-only tools" 'Read Grep Glob' "$(cat .claude/spar-run-reviewer.sh)"
+chk "claude family → isolated" 'safe-mode' "$(cat .claude/spar-run-reviewer.sh)"
+chk "claude family → no codex exec" "absent" "$(grep -q 'codex exec' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# ── 36. reviewer: codex → runner unchanged (regression) ──
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] x\n- file: a.py:1\n' > "$RF1"
+printf '### F1-1: FIXED — y\n' > "$RP1"
+run_hook >/dev/null
+chk "codex family → runner uses codex exec" 'codex exec --sandbox read-only' "$(cat .claude/spar-run-reviewer.sh)"
+
+# ── 37. garbage reviewer value → fail open (approve), no runner ──
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] x\n- file: a.py:1\n' > "$RF1"
+printf '### F1-1: FIXED — y\n' > "$RP1"
+set_reviewer bogus
+chk "garbage reviewer → approve" '"decision":"approve"' "$(run_hook)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
