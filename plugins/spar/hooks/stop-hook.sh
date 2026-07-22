@@ -267,6 +267,24 @@ requirements>'. Then stop again." \
 
     fold_registry "$ROUND"
 
+    STALE=$(new_stalemates)
+    if [ -n "$STALE" ]; then
+      while IFS= read -r fp; do [ -n "$fp" ] && mark_escalated "$fp"; done <<STALE_EOF
+$STALE
+STALE_EOF
+      block "Stalemate: the following finding(s) were raised by the reviewer AND
+rejected by you for 2 consecutive rounds:
+
+${STALE}
+
+Automated adjudication (blind judge / batched user gate) lands in Phase 2b.
+For now, do NOT keep deciding this yourself: surface the disagreement to the
+user — give the reviewer's problem and your rejection reason — and let them
+rule. Apply their decision and note it. Then stop again; the loop continues
+on everything else (this stalemate will not be raised again)." \
+        "sparring [${REVIEW_ID}] round ${ROUND}: stalemate — user decision needed"
+    fi
+
     if [ "$ROUND" -ge "$MAX_ROUNDS" ]; then
       log "round cap ${MAX_ROUNDS} reached — unconverged exit"
       tmp="${STATE_FILE}.tmp.$$"

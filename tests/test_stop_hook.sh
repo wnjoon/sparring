@@ -192,7 +192,38 @@ run_hook >/dev/null   # folds round 1 (streak 1), advances to round 2
 printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: still big\n- suggestion: split\n' > "$RFb2"
 printf '### F2-1: REJECTED — still cohesive\n' > "$RPb2"
 run_hook >/dev/null   # folds round 2 (streak 2)
-chk "consecutive rejection → streak 2" "$(printf 'mod.py | split the module\tDESIGN\t2\t2\topen')" "$(cat .claude/spar-registry.tsv)"
+chk "consecutive rejection → streak 2" "$(printf 'mod.py | split the module\tDESIGN\t2\t2\tescalated')" "$(cat .claude/spar-registry.tsv)"
+
+# ── 15. stalemate: same finding rejected two consecutive rounds → escalation block ──
+fresh_dir; write_state review 1; mkdir -p reviews
+RFa="reviews/spar-20260721-120000-abc123-r1.md"
+RPa="reviews/spar-20260721-120000-abc123-r1-response.md"
+RFb="reviews/spar-20260721-120000-abc123-r2.md"
+RPb="reviews/spar-20260721-120000-abc123-r2-response.md"
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFa"
+printf '### F1-1: REJECTED — cohesive on purpose\n' > "$RPa"
+run_hook >/dev/null            # fold r1 (streak 1), advance to r2
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: still big\n- suggestion: split\n' > "$RFb"
+printf '### F2-1: REJECTED — still cohesive\n' > "$RPb"
+OUT=$(run_hook)                # fold r2 (streak 2) → stalemate
+chk "stalemate → block" '"decision":"block"' "$OUT"
+chk "stalemate → message says stalemate" 'stalemate' "$OUT"
+chk "stalemate → fingerprint marked escalated" 'escalated' "$(cat .claude/spar-registry.tsv)"
+
+# ── 16. stalemate fires once: next stop resumes the loop (round 3 prepared) ──
+OUT2=$(run_hook)
+chk "stalemate one-shot → advances to round 3" 'round: 3' "$(cat .claude/spar.local.md)"
+chk "stalemate one-shot → block runs reviewer" 'run-reviewer' "$OUT2"
+
+# ── 17. no stalemate when the streak is broken by a FIXED round ──
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFa"
+printf '### F1-1: REJECTED — cohesive\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFb"
+printf '### F2-1: FIXED — split it\n' > "$RPb"
+OUT=$(run_hook)
+chk "fixed second round → no stalemate block" 'round: 3' "$(cat .claude/spar.local.md)"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
