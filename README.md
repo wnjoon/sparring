@@ -1,8 +1,20 @@
 # sparring
 
+<img src="image/main.png" alt="sparring — a cross-model code-review loop" width="100%">
+
+
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: v0.1.0 — the Claude-hosted loop is complete.** Phases 1 and 2 are implemented and verified end-to-end against a real Codex reviewer (a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED). Today the loop enforces review, iterates to reviewer-declared convergence, adjudicates factual stalemates with a blind judge, batches design decisions to a user gate with a decision ledger, and matches re-worded findings across rounds. Phases 3–6 (final sweep, unattended mode, the Codex-hosted mirror, model economics) are design only; the [Roadmap](#roadmap) marks what exists today.
+**Status: v0.1.0 — the Claude-hosted loop is complete.**
+
+Phases 1 and 2 are implemented and verified end-to-end against a real Codex reviewer — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar` gives you:
+
+- an **enforced** review loop that iterates until the *reviewer* declares convergence;
+- a **blind Codex judge** that rules factual (`[MECHANICAL]`) stalemates;
+- a **batched user gate + decision ledger** for genuine design choices;
+- **cross-round matching** of re-worded findings.
+
+Phases 3–6 (final sweep, unattended mode, the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today.
 
 ## Direction
 
@@ -12,7 +24,7 @@ Coding agents are good at writing code and bad at noticing what they got wrong. 
 
 1. **Review is enforced, not requested.** A deterministic Stop hook blocks the author's exit until the loop completes. Prompt discipline is never trusted — if the harness can't guarantee it, it didn't happen.
 2. **Only the reviewer can declare the work done.** The loop ends when the reviewer outputs `STATUS: CONVERGED` — the author has no way to grade its own work as finished. Self-assessment bias is removed structurally, not by exhortation.
-3. **Debate, with guardrails against persuasion.** Findings are split into `[MECHANICAL]` (fixed immediately, no questions asked) and `[DESIGN]` (a choice among valid alternatives). Design findings don't interrupt the loop: the author states a position, the reviewer accepts or contests it next round, and only a genuine stalemate escalates — a *blind judge* (a fresh agent that sees the code and the finding but **never the debate**) for factual disputes, or a single batched question to the human at loop end for real design choices. Convergence must come from evidence, not from whoever argues more confidently. *(Implemented for the Claude-hosted `/spar` loop: `[MECHANICAL]` auto-fix; `[DESIGN]` debate → a blind Codex judge rules factual stalemates, a batched user gate + decision ledger settles genuine design choices; re-worded repeats of a finding are matched across rounds by a blind matcher.)*
+3. **Debate, with guardrails against persuasion.** Findings split into `[MECHANICAL]` (fixed on sight) and `[DESIGN]` (a choice among valid alternatives). Design findings don't interrupt the loop — the author states a position, and the reviewer accepts or contests it the next round. Only a genuine stalemate escalates: a **blind judge** (sees the code and the finding, never the debate) settles factual disputes; a single batched question to the human settles real design choices. Convergence comes from evidence, not from whoever argues more confidently.
 
 sparring is inspired by [hamelsmu/claude-review-loop](https://github.com/hamelsmu/claude-review-loop), which pioneered the Stop-hook-enforced Codex review. Several loop-hardening ideas — the fixed review baseline, the conveyance boundary (never tell the reviewer what was "fixed"), the decision ledger, design-intent harvesting, and tiered fix writers — are adapted from the review-loop protocol in [jongwony/epistemic-protocols](https://github.com/jongwony/epistemic-protocols). sparring keeps hamelsmu's skeleton and extends it where a single-pass review falls short:
 
@@ -29,37 +41,34 @@ sparring is inspired by [hamelsmu/claude-review-loop](https://github.com/hamelsm
 
 ## How it works
 
-The diagram below is the **full target design**. `✅` marks what runs today
-(Phases 1–2); `(planned Pn)` marks steps that are designed but not yet built.
+Everything below runs today, except the steps tagged `(planned Pn)`.
 
 ```
 /spar <task description>
       │
       ▼
-[Implement]   the author writes the code, then tries to stop            ✅
+[Implement]   the author writes the code, then tries to stop
       │
       ▼
- Stop hook ─── skip conditions (docs-only, tiny diff)? ──yes──▶ exit    (planned P3)
-      │ no
+ Stop hook ─── skip conditions (docs-only, tiny diff)? ──▶ exit   (planned P3)
+      │
       ▼
-[Round N]     reviewer (read-only sandbox) reviews diff + requirements  ✅
-      │        (re-worded repeats matched to the canonical finding)      ✅
+[Round N]     reviewer (read-only sandbox) reviews diff + requirements
+      │        re-worded repeats are matched to the canonical finding
       ├─ STATUS: FINDINGS
-      │    ├─ [MECHANICAL] ──▶ author fixes immediately, no questions asked   ✅
-      │    ├─ [DESIGN]     ──▶ debate-first; parked, batched at the gate       ✅
-      │    ├─ stalemate (2 rounds on the same finding)                        ✅
-      │    │    ├─ factual → blind Codex judge: sees code + finding,
-      │    │    │            never the debate; UPHELD/DISMISSED is binding    ✅
-      │    │    └─ design  → batched user gate + decision ledger at loop end  ✅
-      │    └─ author writes a per-finding response → round N+1 (cap: 5)        ✅
+      │    ├─ [MECHANICAL] → author fixes immediately, no questions asked
+      │    ├─ [DESIGN]     → debate-first; parked, then batched at the gate
+      │    ├─ stalemate (2 rounds on the same finding)
+      │    │    ├─ factual → blind Codex judge (code + finding, never the
+      │    │    │            debate); UPHELD / DISMISSED is binding
+      │    │    └─ design  → batched user gate + decision ledger at loop end
+      │    └─ author writes a per-finding response → round N+1 (cap: 5)
       │
-      └─ STATUS: CONVERGED
-           ├─ exit (state cleaned up)                                         ✅
-           │        └─ final report                                          (planned P4)
-           └─ high-stakes? (risky repo · 3+ rounds · design findings)         (planned P3)
-                 ▼
-           [Final sweep]  fresh author-model subagent, blind to loop history,
-                          verifies diff + requirements → clean ? exit : loop
+      └─ STATUS: CONVERGED → exit (state cleaned up)
+              ├─ final report                                     (planned P4)
+              └─ high-stakes? risky repo · 3+ rounds · design     (planned P3)
+                   → final sweep: a fresh blind author-model subagent
+                     re-verifies diff + requirements → clean ? exit : loop
 ```
 
 The same structure runs in both directions. The seats swap; the invariants don't:
@@ -86,7 +95,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 3 | Final sweep + skip conditions (docs-only, tiny diff) | planned |
 | 4 | Unattended mode + final report | planned |
 | 5 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
-| 6 | Model economics: reviewer model + effort config, same-model fallback, tiered writers (judgment stays on the session model; a cheaper tier types the fixes from a brief; escalates when fixes cause new findings) | planned |
+| 6 | Model economics: reviewer model + effort config, same-model fallback, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
 
 ## Install
 
