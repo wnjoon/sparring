@@ -1,19 +1,5 @@
 # sparring
 
-```
- ══════════════════════════════════════════════════════════
-
-        s  p  a  r  r  i  n  g
-
-     Claude  ──writes──▶            ◀──reviews──  Codex
-      author                        read-only reviewer
-           ╲                                  ╱
-            ╲──   fix · re-review · repeat   ──╱
-                       until  CONVERGED
-
- ══════════════════════════════════════════════════════════
-```
-
 > A cross-model review sparring loop — the author never grades its own work.
 
 **Status: v0.1.0 — the Claude-hosted loop is complete.**
