@@ -361,7 +361,7 @@ bash ${JUDGE_RUNNER}
 \`\`\`
 Then stop again." "sparring [${REVIEW_ID}]: judge pending"
       fi
-      JRULING=$(head -1 "$jout" | tr -d '\r')
+      JRULING=$(head -1 "$jout" | tr -d '\r' | sed 's/[[:space:]]*$//')
       if [ "$JRULING" = "RULING: UPHELD" ]; then
         rm -f "$JUDGE_PENDING" "$JUDGE_RUNNER" "$JUDGE_RETRY"
         set_registry_status "$jfp" upheld

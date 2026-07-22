@@ -67,7 +67,10 @@ sparring Stop hook takes over from there.
 
 ## Hard rules
 
-- Never edit, rewrite, or delete reviewer output files (`reviews/spar-*-r*.md`).
+- Never edit, rewrite, or delete reviewer output files (`reviews/spar-*-r*.md`) or
+  judge ruling files (`reviews/spar-*-judge-*.md`). You may only *run* the judge
+  runner (`bash .claude/spar-run-judge.sh`) — never write, edit, or fabricate a
+  `RULING:` line yourself.
 - Never write `STATUS: CONVERGED` anywhere yourself. Convergence is the
   reviewer's call alone.
 - Never edit `.claude/spar.local.md` by hand; cancellation is `/spar-cancel`.
