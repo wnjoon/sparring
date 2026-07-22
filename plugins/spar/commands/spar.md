@@ -21,6 +21,16 @@ set +f
 SPAR_REVIEWER="${RESOLVED%%$'\t'*}"
 SPAR_TASK="${RESOLVED#*$'\t'}"
 mkdir -p .claude reviews
+# Keep the review surface to real code: hide sparring's own loop artifacts from
+# git's untracked listing (both reviewer families inspect that listing, and the
+# author's response files are debate content — reviewers must stay blind to them).
+# Local-only via .git/info/exclude; never touches the user's tracked .gitignore.
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  SPAR_EXCLUDE="$(git rev-parse --git-dir)/info/exclude"
+  for pat in 'reviews/spar-*' '.claude/spar*'; do
+    grep -qxF "$pat" "$SPAR_EXCLUDE" 2>/dev/null || printf '%s\n' "$pat" >> "$SPAR_EXCLUDE"
+  done
+fi
 SPAR_ID="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 SPAR_BASE="$(git rev-parse HEAD 2>/dev/null || echo none)"
 {
