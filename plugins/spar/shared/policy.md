@@ -17,7 +17,7 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
    itself. Conveyance boundary — the reviewer is NEVER told what was fixed
    or rejected; every round is a full fresh re-review against the frozen
    baseline. The only loop-generated context conveyed is the decision ledger
-   (empty until Phase 2b).
+   (empty until Phase 2c).
 3. Reviewer output: first line `STATUS: CONVERGED` or `STATUS: FINDINGS`;
    findings tagged `[MECHANICAL]` or `[DESIGN]` with file/problem/suggestion.
 4. Author must fix every MECHANICAL finding, decide DESIGN findings on the
@@ -26,11 +26,14 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
 5. Exit is released only by reviewer convergence, the round cap (default 5,
    exits with an honest "unconverged" summary), or explicit cancel.
 6. Stalemate — a finding the reviewer raises AND the author rejects for 2
-   consecutive rounds. The orchestrator detects it deterministically (a
-   file+title fingerprint) and escalates ONCE to the user, then continues the
-   loop on everything else. (Phase 2b routes factual stalemates to a blind
-   judge and design stalemates to a batched end-of-loop gate; Phase 2a does
-   the single user escalation for both.)
+   consecutive rounds. Routing is by tag. A [MECHANICAL] stalemate goes to a
+   blind judge: the hook generates a `codex exec --sandbox read-only` judge
+   runner that sees only the finding, the code, and the task (never the
+   debate); its first-line ruling `RULING: UPHELD` (author must fix, may no
+   longer reject) or `RULING: DISMISSED` (finding dropped) is binding. The
+   author only runs the judge — it cannot author the ruling. A [DESIGN]
+   stalemate escalates once to the user for a decision. (The batched
+   end-of-loop design gate and the decision ledger are Phase 2c.)
 
 ## Invariants
 
