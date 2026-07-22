@@ -1,10 +1,45 @@
-# Design decisions (agreed, not yet implemented)
+# Design decisions
 
 Decisions settled in design sessions, recorded so a fresh session can write
-each phase's implementation plan without re-litigating them. When a phase is
-implemented, its section here is the spec source for the plan document.
-Ideas marked *(EP)* are adapted from the review-loop protocol in
+each phase's implementation plan without re-litigating them. Phase 1 is
+implemented — its section below is an as-built summary; later sections are
+specs awaiting implementation, and each phase's plan document starts from its
+section here. Ideas marked *(EP)* are adapted from the review-loop protocol in
 [jongwony/epistemic-protocols](https://github.com/jongwony/epistemic-protocols) (MIT).
+
+## Phase 1 — core loop (implemented, as-built)
+
+Spec: [superpowers/plans/2026-07-21-phase1-core-loop.md](superpowers/plans/2026-07-21-phase1-core-loop.md) ·
+tests: `tests/test_stop_hook.sh` (38 cases) · verified E2E against a real
+Codex reviewer (planted-bug task: FINDINGS → fix → re-review → CONVERGED, 2 rounds).
+
+- `/spar <task>` writes the state file (`.claude/spar.local.md`); a bash Stop
+  hook is the state machine: task phase → review rounds → converged/cap.
+- Reviewer = `codex exec --sandbox read-only`, stateless per round, prompt
+  from `shared/prompts/reviewer.md`; first line `STATUS: CONVERGED |
+  FINDINGS` is the only exit signal; findings tagged `[MECHANICAL]|[DESIGN]`.
+- The author must write a per-finding response file (`FIXED — … / REJECTED —
+  <grounded reason>`) before the hook prepares the next round.
+- Round cap default 5 → deactivate + honest "unconverged" exit. Hook fails
+  open on any internal error.
+
+Post-plan patches (rationale absorbed from *(EP)*, landed after the plan doc
+— the plan was not retro-edited):
+
+- **Frozen review baseline**: `base_sha` captured at setup; every round
+  reviews `git diff <base_sha>`, so mid-loop commits cannot shrink the
+  reviewed surface or fake convergence. Missing/invalid → `HEAD` fallback.
+- **Untracked files**: the reviewer explicitly lists and reads untracked
+  files — new files never appear in a diff.
+- **Invalid reviewer output**: a review whose first line is neither status is
+  set aside (`.invalid-N`) and re-run (3 strikes → fail open); a blank review
+  can never converge nor count as findings.
+- **Stdin prompt**: the runner feeds the prompt via stdin (no ARG_MAX limit;
+  also fixes a codex hang on inherited open non-TTY stdin).
+
+Note: `shared/prompts/reviewer-prev-context.md` (round-2+ addendum pointing
+at prior review/response files) is live in Phase 1 but is scheduled for
+retirement by Phase 2's conveyance boundary.
 
 ## Phase 2 — design findings, deadlocks, gate
 
