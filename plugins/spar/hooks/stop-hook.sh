@@ -9,6 +9,7 @@ STATE_FILE=".claude/spar.local.md"
 RUNNER=".claude/spar-run-reviewer.sh"
 PROMPT_FILE=".claude/spar-reviewer-prompt.txt"
 RETRY_FILE=".claude/spar-retries"
+LEDGER_FILE=".claude/spar-ledger.md"
 
 log() { mkdir -p "$(dirname "$LOG_FILE")"; echo "[$(date -u +%FT%TZ)] $*" >> "$LOG_FILE"; }
 approve() { printf '{"decision":"approve"}\n'; exit 0; }
@@ -59,17 +60,13 @@ prepare_round() { # $1=round number → writes PROMPT_FILE + RUNNER
   [ -f "$tpl_dir/reviewer.md" ] \
     || { log "template missing: $tpl_dir/reviewer.md"; cleanup; approve; }
 
-  local prompt prev_ctx=""
+  local prompt ledger=""
   prompt=$(cat "$tpl_dir/reviewer.md")
-  if [ "$n" -gt 1 ]; then
-    prev_ctx=$(cat "$tpl_dir/reviewer-prev-context.md")
-    prev_ctx=${prev_ctx//\{\{PREV_REVIEW\}\}/$(review_file $((n-1)))}
-    prev_ctx=${prev_ctx//\{\{PREV_RESPONSE\}\}/$(response_file $((n-1)))}
-  fi
+  [ -f "$LEDGER_FILE" ] && ledger=$(cat "$LEDGER_FILE")
   prompt=${prompt//\{\{TASK\}\}/$TASK}
   prompt=${prompt//\{\{ROUND\}\}/$n}
   prompt=${prompt//\{\{DIFF_BASE\}\}/$BASE}
-  prompt=${prompt//\{\{PREV_CONTEXT\}\}/$prev_ctx}
+  prompt=${prompt//\{\{LEDGER\}\}/$ledger}
 
   mkdir -p reviews .claude
   printf '%s' "$prompt" > "$PROMPT_FILE"

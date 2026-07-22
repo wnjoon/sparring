@@ -77,6 +77,14 @@ sed -i '' '/^base_sha:/d' .claude/spar.local.md 2>/dev/null \
 run_hook >/dev/null
 chk "no base_sha → HEAD fallback" 'git diff HEAD' "$(cat .claude/spar-reviewer-prompt.txt)"
 
+# ── 4c. conveyance boundary: no {{LEDGER}} placeholder leaks; prev-context template deleted ──
+fresh_dir; write_state task 0
+run_hook >/dev/null
+chk "prompt resolves ledger slot (no {{LEDGER}})" "absent" \
+  "$(grep -qF '{{LEDGER}}' .claude/spar-reviewer-prompt.txt && echo present || echo absent)"
+chk "prev-context template deleted from plugin" "absent" \
+  "$([ -f "$CLAUDE_PLUGIN_ROOT/shared/prompts/reviewer-prev-context.md" ] && echo present || echo absent)"
+
 # helper: enter review phase for round $1
 in_review() { fresh_dir; write_state review "$1"; mkdir -p reviews; }
 RF1="reviews/spar-20260721-120000-abc123-r1.md"
@@ -108,8 +116,12 @@ printf '### F1-1: FIXED — added guard\n' > "$RP1"
 OUT=$(run_hook)
 chk "responded → block for round 2" '"decision":"block"' "$OUT"
 chk "state advanced to round 2" 'round: 2' "$(cat .claude/spar.local.md)"
-chk "r2 prompt references r1 review" "$RF1" "$(cat .claude/spar-reviewer-prompt.txt)"
-chk "r2 prompt references r1 response" "$RP1" "$(cat .claude/spar-reviewer-prompt.txt)"
+chk "r2 prompt does NOT reference r1 review" "absent" \
+  "$(grep -qF "$RF1" .claude/spar-reviewer-prompt.txt && echo present || echo absent)"
+chk "r2 prompt does NOT reference r1 response" "absent" \
+  "$(grep -qF "$RP1" .claude/spar-reviewer-prompt.txt && echo present || echo absent)"
+chk "r2 prompt has no Previous-round section" "absent" \
+  "$(grep -qi 'Previous round' .claude/spar-reviewer-prompt.txt && echo present || echo absent)"
 chk "r2 prompt: no leftover placeholder" 'CLEAN' "$(grep -q '{{' .claude/spar-reviewer-prompt.txt && echo DIRTY || echo CLEAN)"
 chk "runner targets r2" 'r2.md' "$(cat .claude/spar-run-reviewer.sh)"
 
