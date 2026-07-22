@@ -6,8 +6,11 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
 
 - **Author** — the model the user is working with. Sole writer of code.
   Never declares convergence.
-- **Reviewer** — the opposite model, invoked read-only, stateless per round.
-  Sole authority on `STATUS: CONVERGED`.
+- **Reviewer** — the resolved reviewer family (`codex` or `claude`), invoked
+  read-only, stateless per round. Judge and matcher use the same resolved
+  family. Sole authority on `STATUS: CONVERGED`.
+- Single-agent mode (Phase 3): same-family review is a first-class mode;
+  cross-model is the recommended default.
 
 ## Protocol
 
@@ -26,25 +29,27 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
 5. Exit is released only by reviewer convergence, the round cap (default 5,
    exits with an honest "unconverged" summary), or explicit cancel.
 6. Stalemate — a finding raised AND rejected for 2 consecutive rounds. A
-   [MECHANICAL] stalemate goes to a blind `codex exec --sandbox read-only`
-   judge (author only runs it; ruling `RULING: UPHELD`/`RULING: DISMISSED` is
-   binding). A [DESIGN] stalemate is PARKED: the loop continues on everything
-   else. When the loop is stuck on nothing but parked findings, the hook fires
-   one batched gate — the author presents all parked questions to the user and
-   records each ruling in the decision ledger (`.claude/spar-ledger.md`). The
-   hook verifies a ledger entry per parked finding, marks them settled, and
-   injects the ledger into later reviewer prompts as design intent so the
-   settled choice is no longer re-flagged. An undecided parked question holds
-   the loop at the gate — it is not released by the round cap; the only way
-   out is to record the decision or `/spar-cancel`.
+   [MECHANICAL] stalemate goes to a blind judge, invoked read-only in the same
+   resolved family as the reviewer (author only runs it; ruling
+   `RULING: UPHELD`/`RULING: DISMISSED` is binding). A [DESIGN] stalemate is
+   PARKED: the loop continues on everything else. When the loop is stuck on
+   nothing but parked findings, the hook fires one batched gate — the author
+   presents all parked questions to the user and records each ruling in the
+   decision ledger (`.claude/spar-ledger.md`). The hook verifies a ledger
+   entry per parked finding, marks them settled, and injects the ledger into
+   later reviewer prompts as design intent so the settled choice is no longer
+   re-flagged. An undecided parked question holds the loop at the gate — it
+   is not released by the round cap; the only way out is to record the
+   decision or `/spar-cancel`.
 7. Finding identity across rounds is a deterministic fingerprint
    (file + normalized title). When a round raises a finding whose fingerprint
-   is new but an already-tracked open or parked finding shares its file, a blind
-   `codex exec --sandbox read-only` matcher (once per round, author only runs
-   it) decides which are the same defect re-worded; matches become aliases so
-   the re-wording accumulates the stalemate streak on the canonical finding. A
-   wrong or absent match never breaks an invariant — it only delays stalemate
-   detection (the reviewer keeps raising it, bounded by the round cap).
+   is new but an already-tracked open or parked finding shares its file, a
+   blind matcher, invoked read-only in the same resolved family as the
+   reviewer (once per round, author only runs it), decides which are the same
+   defect re-worded; matches become aliases so the re-wording accumulates the
+   stalemate streak on the canonical finding. A wrong or absent match never
+   breaks an invariant — it only delays stalemate detection (the reviewer
+   keeps raising it, bounded by the round cap).
 
 ## Invariants
 

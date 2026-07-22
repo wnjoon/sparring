@@ -477,6 +477,11 @@ printf '### F1-1: FIXED — y\n' > "$RP1"
 set_reviewer bogus
 chk "garbage reviewer → approve" '"decision":"approve"' "$(run_hook)"
 
+# ── 38. same-family loop surfaces the reduced-coverage notice ──
+fresh_dir; write_state task 0; set_reviewer claude
+OUT=$(run_hook)
+chk "same-family → coverage notice" 'reduced cross-vendor' "$OUT"
+
 # ── 39. claude family diff-surface: real diff is captured into spar-diff.txt ──
 fresh_dir                                   # git init'd scratch dir (cwd = repo)
 printf 'line one\n' > tracked.txt

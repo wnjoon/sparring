@@ -487,6 +487,9 @@ case "$PHASE" in
     prepare_round 1
     set_state review 1
     rm -f "$RETRY_FILE"
+    NOTE=""
+    [ "$REVIEWER" = "claude" ] && NOTE="
+NOTE: same-model review — reduced cross-vendor blind-spot coverage. Install the Codex CLI for cross-model review."
     block "Implementation phase done. Round 1 independent review is required.
 
 Run (use a 600000ms timeout — reviews take minutes):
@@ -499,7 +502,7 @@ Then read $(review_file 1):
 - STATUS: FINDINGS → fix every [MECHANICAL] finding; decide each [DESIGN]
   finding on the merits; then write $(response_file 1) with one section per
   finding ID: 'FIXED — <what you did>' or 'REJECTED — <reason grounded in
-  code/requirements>'. Then stop again." \
+  code/requirements>'. Then stop again.${NOTE}" \
       "sparring [${REVIEW_ID}] round 1: run reviewer"
     ;;
   review)
