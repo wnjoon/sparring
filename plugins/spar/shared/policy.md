@@ -25,15 +25,18 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
    reason>` per finding) before the hook prepares the next round.
 5. Exit is released only by reviewer convergence, the round cap (default 5,
    exits with an honest "unconverged" summary), or explicit cancel.
-6. Stalemate — a finding the reviewer raises AND the author rejects for 2
-   consecutive rounds. Routing is by tag. A [MECHANICAL] stalemate goes to a
-   blind judge: the hook generates a `codex exec --sandbox read-only` judge
-   runner that sees only the finding, the code, and the task (never the
-   debate); its first-line ruling `RULING: UPHELD` (author must fix, may no
-   longer reject) or `RULING: DISMISSED` (finding dropped) is binding. The
-   author only runs the judge — it cannot author the ruling. A [DESIGN]
-   stalemate escalates once to the user for a decision. (The batched
-   end-of-loop design gate and the decision ledger are Phase 2c.)
+6. Stalemate — a finding raised AND rejected for 2 consecutive rounds. A
+   [MECHANICAL] stalemate goes to a blind `codex exec --sandbox read-only`
+   judge (author only runs it; ruling `RULING: UPHELD`/`RULING: DISMISSED` is
+   binding). A [DESIGN] stalemate is PARKED: the loop continues on everything
+   else. When the loop is stuck on nothing but parked findings, the hook fires
+   one batched gate — the author presents all parked questions to the user and
+   records each ruling in the decision ledger (`.claude/spar-ledger.md`). The
+   hook verifies a ledger entry per parked finding, marks them settled, and
+   injects the ledger into later reviewer prompts as design intent so the
+   settled choice is no longer re-flagged. An undecided parked question simply
+   keeps the loop unconverged (bounded by the round cap); the escape is
+   explicit cancel.
 
 ## Invariants
 
