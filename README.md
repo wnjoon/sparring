@@ -1,5 +1,9 @@
 # sparring
 
+<p align="center">
+  <img src="image/main.png" alt="sparring — a cross-model code-review loop" width="640">
+</p>
+
 > A cross-model review sparring loop — the author never grades its own work.
 
 **Status: v0.1.0 — the Claude-hosted loop is complete.**
