@@ -197,10 +197,13 @@ emit_runner() { # $1=prompt_file  $2=out_file
     cat > "$RUNNER" <<EOF
 #!/usr/bin/env bash
 # sparring reviewer runner — claude family (generated; do not edit)
+# Command form verified in Task 19 (docs/superpowers/notes/claude-runner-spike.md):
+# prompt via STDIN (variadic --tools eats a positional arg), --tools as separate
+# args, --safe-mode for isolation. No Bash → the diff is fed in via the prompt.
 set -uo pipefail
 mkdir -p reviews
-claude -p --safe-mode --tools "Read Grep Glob" --disallowedTools "Edit Write" \\
-  "\$(cat "${pf}"; echo; echo '--- Changes under review ---'; cat "${surface}")" > "${out}"
+{ cat "${pf}"; echo; echo '--- Changes under review ---'; cat "${surface}"; } | \\
+  claude -p --safe-mode --tools Read Grep Glob > "${out}"
 EOF
   else
     cat > "$RUNNER" <<EOF
