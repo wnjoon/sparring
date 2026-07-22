@@ -328,5 +328,44 @@ OUT=$(CLAUDE_PLUGIN_ROOT="$(mktemp -d)" run_hook)   # judge.md absent → prepar
 chk "template missing → user escalation" 'user decision' "$OUT"
 chk "template missing → status escalated" 'escalated' "$(cat .claude/spar-registry.tsv)"
 
+# ── 26. multi-gate: second gate uses a fresh P-tag, not settled by stale ledger ──
+fresh_dir; write_state review 1; mkdir -p reviews
+# rounds 1-2: DESIGN finding A stalemates → gate 1 (P1)
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] finding A\n- file: a.py:1\n- problem: pa\n- suggestion: sa\n' > "$RFa"
+printf '### F1-1: REJECTED — A rationale\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] finding A\n- file: a.py:1\n- problem: pa\n- suggestion: sa\n' > "$RFb"
+printf '### F2-1: REJECTED — A rationale\n' > "$RPb"
+run_hook >/dev/null            # gate 1 fires (P1 -> a.py | finding a)
+chk "gate 1 manifest P1" "$(printf 'P1\ta.py | finding a')" "$(cat .claude/spar-gate-manifest.tsv)"
+printf '### P1: decided A — keep as is.\n' > .claude/spar-ledger.md
+run_hook >/dev/null            # settle A, advance to round 3
+chk "A settled" 'a.py | finding a	DESIGN	2	2	settled' "$(cat .claude/spar-registry.tsv)"
+# rounds 3-4: DESIGN finding B stalemates → gate 2 must use P2, NOT reuse P1
+RF3="reviews/spar-20260721-120000-abc123-r3.md"; RP3="reviews/spar-20260721-120000-abc123-r3-response.md"
+RF4="reviews/spar-20260721-120000-abc123-r4.md"; RP4="reviews/spar-20260721-120000-abc123-r4-response.md"
+printf 'STATUS: FINDINGS\n\n### F3-1 [DESIGN] finding B\n- file: b.py:2\n- problem: pb\n- suggestion: sb\n' > "$RF3"
+printf '### F3-1: REJECTED — B rationale\n' > "$RP3"
+run_hook >/dev/null            # fold r3 (B streak 1), advance r4
+printf 'STATUS: FINDINGS\n\n### F4-1 [DESIGN] finding B\n- file: b.py:2\n- problem: pb\n- suggestion: sb\n' > "$RF4"
+printf '### F4-1: REJECTED — B rationale\n' > "$RP4"
+OUT=$(run_hook)                # fold r4 (B streak 2) → park B → gate 2
+chk "gate 2 uses fresh tag P2" "$(printf 'P2\tb.py | finding b')" "$(cat .claude/spar-gate-manifest.tsv)"
+chk "gate 2 blocks (B not auto-settled by stale P1)" 'gate' "$OUT"
+run_hook >/dev/null            # no P2 in ledger yet → B must stay parked, gate incomplete
+chk "B NOT falsely settled" 'b.py | finding b	DESIGN	4	2	parked' "$(cat .claude/spar-registry.tsv)"
+
+# ── 27. mixed round (parked + new open finding) → no gate ──
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] finding A\n- file: a.py:1\n- problem: pa\n- suggestion: sa\n' > "$RFa"
+printf '### F1-1: REJECTED — A rationale\n' > "$RPa"
+run_hook >/dev/null
+# round 2: A again (→ parked) PLUS a brand-new mechanical finding the author is still fixing
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] finding A\n- file: a.py:1\n- problem: pa\n- suggestion: sa\n### F2-2 [MECHANICAL] new bug\n- file: c.py:9\n- problem: pc\n- suggestion: sc\n' > "$RFb"
+printf '### F2-1: REJECTED — A rationale\n### F2-2: FIXED — patched\n' > "$RPb"
+OUT=$(run_hook)
+chk "mixed round → A parked" 'a.py | finding a	DESIGN	2	2	parked' "$(cat .claude/spar-registry.tsv)"
+chk "mixed round → no gate fired" "absent" "$([ -f .claude/spar-gate-manifest.tsv ] && echo present || echo absent)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

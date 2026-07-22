@@ -155,8 +155,7 @@ ledger into a durable home (issue/PR/docs) *(EP)*.
 **Gate trigger (2c).** The gate is deterministic, not a vibe. It fires when a
 round makes no forward progress on anything but parked findings — i.e. after
 folding a round, every open finding the reviewer raised is already `parked`
-(nothing new, no `[MECHANICAL]` to judge, no fresh stalemate), OR the round cap
-is about to end the loop with parked findings outstanding. At that point the
+(nothing new, no `[MECHANICAL]` to judge, no fresh stalemate). At that point the
 hook blocks once, instructing the author to run the batched gate for ALL
 parked findings; the loop cannot converge while a parked finding keeps being
 raised, so the ledger entry the gate produces is what unblocks the next
