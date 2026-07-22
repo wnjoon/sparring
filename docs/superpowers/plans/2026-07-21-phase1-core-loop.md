@@ -58,7 +58,7 @@ sparring/
 - Create: `plugins/spar/.claude-plugin/plugin.json`
 - Create: `plugins/spar/hooks/hooks.json`
 - Create: `.gitignore`
-- Create: `README.md`
+- (README.md and LICENSE already exist on `dev` — update README's install section only if it changes)
 
 **Interfaces:**
 - Produces: `${CLAUDE_PLUGIN_ROOT}` will point at `plugins/spar` when installed; `hooks.json` wires `Stop` → `hooks/stop-hook.sh` (Task 3 creates it).
@@ -71,7 +71,7 @@ sparring/
 {
   "name": "sparring",
   "owner": {
-    "name": "xonxoon"
+    "name": "wnjoon"
   },
   "metadata": {
     "description": "Cross-model review sparring loop: author implements, an independent reviewer iterates findings until it declares convergence"
@@ -96,7 +96,7 @@ sparring/
   "version": "0.1.0",
   "description": "Sparring loop: Claude implements, Codex reviews read-only, Stop hook forces rounds until the reviewer declares CONVERGED",
   "author": {
-    "name": "xonxoon"
+    "name": "wnjoon"
   },
   "license": "MIT",
   "keywords": ["code-review", "codex", "convergence", "quality"]
@@ -130,32 +130,6 @@ sparring/
 ```
 .DS_Store
 *.log
-```
-
-`README.md`:
-
-```markdown
-# sparring
-
-Cross-model review sparring loop for Claude Code (and later Codex CLI).
-
-The author model implements; an independent reviewer model reviews read-only;
-a deterministic Stop hook forces fix→re-review rounds until the **reviewer**
-declares `STATUS: CONVERGED`. The author never grades its own work.
-
-## Install
-
-    claude plugin marketplace add ~/Workspace/sparring
-    claude plugin install spar@sparring
-
-Requires the Codex CLI (`npm install -g @openai/codex`) and `jq`.
-
-## Use
-
-    /spar <task description>
-    /spar-cancel
-
-Policy source of truth: `plugins/spar/shared/policy.md`.
 ```
 
 - [ ] **Step 2: Validate JSON**

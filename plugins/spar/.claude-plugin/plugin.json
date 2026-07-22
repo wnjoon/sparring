@@ -1,0 +1,11 @@
+{
+  "name": "spar",
+  "version": "0.1.0",
+  "description": "Sparring loop: Claude implements, Codex reviews read-only, Stop hook forces rounds until the reviewer declares CONVERGED",
+  "author": {
+    "name": "wnjoon"
+  },
+  "repository": "https://github.com/wnjoon/sparring",
+  "license": "MIT",
+  "keywords": ["code-review", "codex", "convergence", "quality"]
+}
