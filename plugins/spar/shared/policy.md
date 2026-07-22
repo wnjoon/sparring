@@ -37,6 +37,14 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
    settled choice is no longer re-flagged. An undecided parked question holds
    the loop at the gate — it is not released by the round cap; the only way
    out is to record the decision or `/spar-cancel`.
+7. Finding identity across rounds is a deterministic fingerprint
+   (file + normalized title). When a round raises a finding whose fingerprint
+   is new but an already-tracked finding shares its file, a blind
+   `codex exec --sandbox read-only` matcher (once per round, author only runs
+   it) decides which are the same defect re-worded; matches become aliases so
+   the re-wording accumulates the stalemate streak on the canonical finding. A
+   wrong or absent match never breaks an invariant — it only delays stalemate
+   detection (the reviewer keeps raising it, bounded by the round cap).
 
 ## Invariants
 
