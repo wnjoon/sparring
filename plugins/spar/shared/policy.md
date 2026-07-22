@@ -25,6 +25,12 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
    reason>` per finding) before the hook prepares the next round.
 5. Exit is released only by reviewer convergence, the round cap (default 5,
    exits with an honest "unconverged" summary), or explicit cancel.
+6. Stalemate — a finding the reviewer raises AND the author rejects for 2
+   consecutive rounds. The orchestrator detects it deterministically (a
+   file+title fingerprint) and escalates ONCE to the user, then continues the
+   loop on everything else. (Phase 2b routes factual stalemates to a blind
+   judge and design stalemates to a batched end-of-loop gate; Phase 2a does
+   the single user escalation for both.)
 
 ## Invariants
 

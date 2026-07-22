@@ -57,6 +57,9 @@ sparring Stop hook takes over from there.
    `### F<N>-<n>: REJECTED — <grounded reason>`.
 4. Stop again. The hook verifies your response file and prepares the next
    round automatically.
+5. If the hook reports a **stalemate**, do not keep re-deciding the finding
+   yourself. Present the reviewer's problem and your rejection reason to the
+   user, apply their ruling, and stop again — the loop continues on the rest.
 
 ## Hard rules
 
