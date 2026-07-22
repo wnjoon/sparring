@@ -66,6 +66,10 @@ sparring Stop hook takes over from there.
    the same outcome), then record each ruling in `.claude/spar-ledger.md` as
    `### P<k>: <decision + basis>` and stop again. Never invent a ruling — the
    ledger records the user's decision.
+6. If the hook dispatches a **finding matcher**, run
+   `bash .claude/spar-run-matcher.sh` (600000ms timeout), then stop again. It
+   is an independent pass that decides whether re-worded findings are the same
+   defect — you only run it, you do not author its result.
 
 ## Hard rules
 
