@@ -21,7 +21,7 @@ Loop baseline: `{{DIFF_BASE}}`
 
 Review ONLY the changed or new code and the files it directly touches.
 
-{{PREV_CONTEXT}}
+{{LEDGER}}
 
 ## Review criteria (in priority order)
 
