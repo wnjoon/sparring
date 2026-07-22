@@ -477,5 +477,23 @@ printf '### F1-1: FIXED — y\n' > "$RP1"
 set_reviewer bogus
 chk "garbage reviewer → approve" '"decision":"approve"' "$(run_hook)"
 
+# ── 39. claude family diff-surface: real diff is captured into spar-diff.txt ──
+fresh_dir                                   # git init'd scratch dir (cwd = repo)
+printf 'line one\n' > tracked.txt
+git add -A && git commit -q -m base
+BASE_REAL=$(git rev-parse HEAD)
+printf 'line one\nline two added\n' > tracked.txt   # a real tracked change vs BASE_REAL
+# state: review round 1, reviewer claude, base_sha = the real commit
+write_state review 1
+set_reviewer claude
+sed -i '' "s/^base_sha: .*/base_sha: ${BASE_REAL}/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: ${BASE_REAL}/" .claude/spar.local.md
+mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] x\n- file: tracked.txt:1\n' > "$RF1"
+printf '### F1-1: FIXED — y\n' > "$RP1"
+run_hook >/dev/null                          # prepares round 2 → emit_runner claude → writes .claude/spar-diff.txt
+chk "claude diff-surface captures the real change" 'line two added' "$(cat .claude/spar-diff.txt 2>/dev/null)"
+chk "claude diff-surface has git-diff header" 'diff --git' "$(cat .claude/spar-diff.txt 2>/dev/null)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
