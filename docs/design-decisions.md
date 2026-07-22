@@ -172,6 +172,25 @@ path, not one drop:
    refinement).
 Each stage ships with tests before the next begins.
 
+**Semantic matcher mechanism (stage 5 / Phase 2d).** The deterministic
+fingerprint (`file | normalized-title`) misses a defect the reviewer re-words
+across rounds — a false negative that keeps a real stalemate from being
+detected (it degrades to the round cap, never to false convergence). Phase 2d
+adds a blind matcher, same runner pattern as reviewer/judge: when a round
+raises a finding whose fingerprint is new AND an already-tracked open/parked
+finding shares its file (a cheap deterministic prefilter — a re-wording is
+always on the same code surface), the hook generates a `codex exec --sandbox
+read-only` matcher runner. It runs at most once per round and only on that
+prefiltered ambiguous set (never every pair — too costly). The matcher is
+shown the new findings' full text and the existing tracked findings (by short
+tags), and outputs `SAME N<i> E<j>` pairs; the hook records each as an alias
+(`variant-fp → canonical-fp`) that `fold_registry` resolves, so the re-worded
+occurrence accumulates the streak on the canonical finding. The author only
+runs the matcher — it cannot merge its own findings. Safety: a wrong match
+never breaks an invariant — it only shifts WHEN a stalemate is detected, since
+a missed match just means the reviewer keeps raising the finding until the
+cap.
+
 **Gate mechanics** (for the single end-of-loop gate) *(EP)*:
 - Cluster parked questions by shared disposition — one question per cluster,
   not per finding.
