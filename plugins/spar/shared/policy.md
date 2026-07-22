@@ -36,4 +36,7 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
 
 Phase 1 (this): core loop. Phase 2: Gate + deadlock judge. Phase 3: sweep +
 skip conditions. Phase 4: unattended mode + final report. Phase 5: Codex-side
-adapter (git pre-commit enforcement). Phase 6: same-model fallback + config.
+adapter (git pre-commit enforcement). Phase 6: model economics — reviewer
+model/effort config, same-model fallback, tiered writers (judgment never
+delegates; edit execution may go to a cheaper tier, verified by the next
+round's full re-review; escalates back on fix-induced findings).

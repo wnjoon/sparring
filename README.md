@@ -14,7 +14,7 @@ Coding agents are good at writing code and bad at noticing what they got wrong. 
 2. **Only the reviewer can declare the work done.** The loop ends when the reviewer outputs `STATUS: CONVERGED` — the author has no way to grade its own work as finished. Self-assessment bias is removed structurally, not by exhortation.
 3. **Debate, with guardrails against persuasion.** Findings are split into `[MECHANICAL]` (fixed immediately, no questions asked) and `[DESIGN]` (escalated to the human). When author and reviewer stalemate on a finding, a *blind judge* — a fresh agent that sees the code and the finding but **never the debate** — rules once. Convergence must come from evidence, not from whoever argues more confidently.
 
-sparring is inspired by [hamelsmu/claude-review-loop](https://github.com/hamelsmu/claude-review-loop), which pioneered the Stop-hook-enforced Codex review. sparring keeps that skeleton and extends it where a single-pass review falls short:
+sparring is inspired by [hamelsmu/claude-review-loop](https://github.com/hamelsmu/claude-review-loop), which pioneered the Stop-hook-enforced Codex review. Several loop-hardening ideas — the fixed review baseline, the conveyance boundary (never tell the reviewer what was "fixed"), the decision ledger, design-intent harvesting, and tiered fix writers — are adapted from the review-loop protocol in [jongwony/epistemic-protocols](https://github.com/jongwony/epistemic-protocols). sparring keeps hamelsmu's skeleton and extends it where a single-pass review falls short:
 
 | | review-loop (origin) | sparring |
 |---|---|---|
@@ -84,7 +84,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 3 | Final sweep + skip conditions (docs-only, tiny diff) | planned |
 | 4 | Unattended mode + final report | planned |
 | 5 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
-| 6 | Same-model fallback + reviewer model config | planned |
+| 6 | Model economics: reviewer model + effort config, same-model fallback, tiered writers (judgment stays on the session model; a cheaper tier types the fixes from a brief; escalates when fixes cause new findings) | planned |
 
 ## Install (once released)
 
