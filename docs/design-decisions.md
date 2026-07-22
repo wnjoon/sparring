@@ -106,6 +106,17 @@ retirement by Phase 2's conveyance boundary.
 3. Stalemate on a factual question (is this a real bug?) → **blind judge**:
    a fresh subagent that receives the finding + the code + the task
    requirements and NEVER the debate transcript. One ruling, binding.
+   Mechanism (Claude-hosted): the hook generates a `codex exec --sandbox
+   read-only` judge runner (same pattern as the reviewer runner); the author
+   only executes it, so the author cannot produce the ruling — the "author
+   never grades its own work" invariant extends to adjudication. Judge and
+   reviewer are the same vendor but the judge is a fresh instance that never
+   saw the debate (blindness, not vendor, is the guardrail). Routing is by
+   tag: a `[MECHANICAL]` stalemate is a factual question → judge; a
+   `[DESIGN]` stalemate is a choice → gate (point 4). Ruling file first line
+   `RULING: UPHELD` (finding stands, author must fix — may no longer reject)
+   or `RULING: DISMISSED` (finding dropped; recorded as an adjudicated
+   decision in the ledger).
 4. Stalemate on a genuine design choice → it leaves the loop into one of two
    states, depending on whether the choice is required to finish the task:
    - **Parked** (not required for completion): leave that surface unmodified,
