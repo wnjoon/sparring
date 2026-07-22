@@ -321,6 +321,17 @@ spending findings refuting documented intentional choices.
 - **Out of roadmap (candidate Phase 7):** PR-scope review (review a PR by
   number, stale-checkout reconciliation) — jongwony's remaining structural
   advantage, deliberately deferred.
-- **Release**: merge `dev` → `main` + tag + GitHub release; verify remote
-  install (`claude plugin marketplace add wnjoon/sparring`) as the release
-  gate. Phase 1 may ship as v0.1.0 before later phases (decision pending).
+- **Release strategy (decided)**: no incremental release. Each phase merges to
+  `dev` as it completes; `main` is untouched until a single `dev` → `main`
+  merge at the chosen release milestone. `main` is not touched without an
+  explicit "release now".
+- **Release checklist** (run at the `dev` → `main` merge, before tagging):
+  1. Sync `README.md` to what `dev` actually ships — roadmap, feature table,
+     and the "How it works" diagram must mark implemented vs planned against
+     dev's real state (README updates were deferred during development, so
+     this reconciliation is mandatory at release, not optional).
+  2. Confirm `policy.md` (implemented-behavior SoT) matches the shipped hook.
+  3. `bash tests/test_stop_hook.sh` green.
+  4. Merge `dev` → `main`, tag, GitHub release.
+  5. Verify remote install (`claude plugin marketplace add wnjoon/sparring`)
+     as the release gate.
