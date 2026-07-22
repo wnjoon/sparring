@@ -2,7 +2,16 @@
 
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: v0.1.0 — the Claude-hosted loop is complete.** Phases 1 and 2 are implemented and verified end-to-end against a real Codex reviewer (a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED). Today the loop enforces review, iterates to reviewer-declared convergence, adjudicates factual stalemates with a blind judge, batches design decisions to a user gate with a decision ledger, and matches re-worded findings across rounds. Phases 3–6 (final sweep, unattended mode, the Codex-hosted mirror, model economics) are design only; the [Roadmap](#roadmap) marks what exists today.
+**Status: v0.1.0 — the Claude-hosted loop is complete.**
+
+Phases 1 and 2 are implemented and verified end-to-end against a real Codex reviewer — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar` gives you:
+
+- an **enforced** review loop that iterates until the *reviewer* declares convergence;
+- a **blind Codex judge** that rules factual (`[MECHANICAL]`) stalemates;
+- a **batched user gate + decision ledger** for genuine design choices;
+- **cross-round matching** of re-worded findings.
+
+Phases 3–6 (final sweep, unattended mode, the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today.
 
 ## Direction
 
