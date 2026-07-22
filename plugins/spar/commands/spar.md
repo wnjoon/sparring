@@ -57,13 +57,15 @@ sparring Stop hook takes over from there.
    `### F<N>-<n>: REJECTED — <grounded reason>`.
 4. Stop again. The hook verifies your response file and prepares the next
    round automatically.
-5. If the hook dispatches a **blind judge** (factual stalemate on a
-   `[MECHANICAL]` finding), run `bash .claude/spar-run-judge.sh` with a
-   600000ms timeout, then stop again. The judge's ruling is binding: on
-   `UPHELD` you must fix the finding (you may not reject it again); on
-   `DISMISSED` it is dropped. If the hook reports a **design stalemate**
-   (`[DESIGN]`), present the reviewer's problem and your rejection reason to
-   the user, apply their ruling, and stop again.
+5. If the hook dispatches a **blind judge** (factual `[MECHANICAL]`
+   stalemate), run `bash .claude/spar-run-judge.sh` (600000ms timeout), then
+   stop; the ruling is binding (`UPHELD` = you must fix, `DISMISSED` = dropped).
+   If the hook fires a **design gate**, read `.claude/spar-gate.md`, present
+   the batched parked questions to the user (cluster by shared disposition;
+   give the analysis before the question; skip any whose options all lead to
+   the same outcome), then record each ruling in `.claude/spar-ledger.md` as
+   `### P<k>: <decision + basis>` and stop again. Never invent a ruling — the
+   ledger records the user's decision.
 
 ## Hard rules
 
