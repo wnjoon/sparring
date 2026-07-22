@@ -301,5 +301,11 @@ chk "design stalemate → user escalation, not judge" "$([ -f .claude/spar-run-j
 chk "design stalemate → escalated status" 'escalated' "$(cat .claude/spar-registry.tsv)"
 chk "design stalemate → block mentions stalemate" 'stalemate' "$OUT"
 
+# ── 24. judge template missing → fail open to user escalation (no trap) ──
+mech_stalemate
+OUT=$(CLAUDE_PLUGIN_ROOT="$(mktemp -d)" run_hook)   # judge.md absent → prepare_judge fails
+chk "template missing → user escalation" 'user decision' "$OUT"
+chk "template missing → status escalated" 'escalated' "$(cat .claude/spar-registry.tsv)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
