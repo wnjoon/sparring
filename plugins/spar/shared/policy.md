@@ -34,9 +34,9 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
    records each ruling in the decision ledger (`.claude/spar-ledger.md`). The
    hook verifies a ledger entry per parked finding, marks them settled, and
    injects the ledger into later reviewer prompts as design intent so the
-   settled choice is no longer re-flagged. An undecided parked question simply
-   keeps the loop unconverged (bounded by the round cap); the escape is
-   explicit cancel.
+   settled choice is no longer re-flagged. An undecided parked question holds
+   the loop at the gate — it is not released by the round cap; the only way
+   out is to record the decision or `/spar-cancel`.
 
 ## Invariants
 

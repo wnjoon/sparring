@@ -19,6 +19,7 @@ JUDGE_SEQ=".claude/spar-judge-seq"
 JUDGE_RETRY=".claude/spar-judge-retries"
 GATE_MANIFEST=".claude/spar-gate-manifest.tsv"
 GATE_FILE=".claude/spar-gate.md"
+GATE_SEQ=".claude/spar-gate-seq"
 
 log() { mkdir -p "$(dirname "$LOG_FILE")"; echo "[$(date -u +%FT%TZ)] $*" >> "$LOG_FILE"; }
 approve() { printf '{"decision":"approve"}\n'; exit 0; }
@@ -31,7 +32,7 @@ block() { # $1=reason $2=statusMessage
 cleanup() { rm -f "$STATE_FILE" "$RUNNER" "$PROMPT_FILE" "$RETRY_FILE" \
   "$LEDGER_FILE" "$REGISTRY_FILE" "$REG_MARKER" \
   "$JUDGE_RUNNER" "$JUDGE_PROMPT_FILE" "$JUDGE_PENDING" "$JUDGE_SEQ" "$JUDGE_RETRY" \
-  "$GATE_MANIFEST" "$GATE_FILE"; }
+  "$GATE_MANIFEST" "$GATE_FILE" "$GATE_SEQ"; }
 
 trap 'log "ERR trap line $LINENO"; cleanup; printf "{\"decision\":\"approve\"}\n"; exit 0' ERR
 
@@ -195,8 +196,6 @@ only_parked_this_round() { # $1=round
   [ "$any" = 1 ] && [ "$nonparked" = 0 ]
 }
 
-# Mark a fingerprint escalated so it never re-fires.
-mark_escalated() { set_registry_status "$1" escalated; }
 
 set_state() { # $1=phase $2=round
   local tmp="${STATE_FILE}.tmp.$$"
@@ -500,10 +499,12 @@ again. (To abandon the loop instead: /spar-cancel.)" \
         echo "${LEDGER_FILE}: '### P<k>: <decision + basis>'."
         echo
       } > "$GATE_FILE"
-      k=0
+      k=$(cat "$GATE_SEQ" 2>/dev/null || echo 0)
+      case "$k" in ''|*[!0-9]*) k=0;; esac
       while IFS= read -r pfp; do
         [ -n "$pfp" ] || continue
         k=$((k+1))
+        echo "$k" > "$GATE_SEQ"
         printf 'P%s\t%s\n' "$k" "$pfp" >> "$GATE_MANIFEST"
         {
           echo "## P${k}  (${pfp})"
