@@ -117,17 +117,15 @@ retirement by Phase 2's conveyance boundary.
    `RULING: UPHELD` (finding stands, author must fix — may no longer reject)
    or `RULING: DISMISSED` (finding dropped; recorded as an adjudicated
    decision in the ledger).
-4. Stalemate on a genuine design choice → it leaves the loop into one of two
-   states, depending on whether the choice is required to finish the task:
-   - **Parked** (not required for completion): leave that surface unmodified,
-     continue the loop on everything else, batch the question for the single
-     end-of-loop gate.
-   - **Blocked-pending-user** (the task cannot be called done without the
-     decision): the loop must not silently continue-and-finish around it. It
-     is a hard gate — the work is not complete until the user rules.
-   The split matters because parking assumes the rest of the work still forms
-   a finishable deliverable; when it does not, "park and move on" would report
-   false completion.
+4. Stalemate on a genuine design choice → **parked** (status `parked`): leave
+   that surface unmodified and continue the loop on everything else; the
+   question is batched for the single end-of-loop gate. There is no separate
+   author-declared "essential" state (decided: a single gate, no essentiality
+   flag the author could game). "Blocked-pending-user" is not a distinct state
+   — it is simply a parked question the user **defers** at the gate: that
+   finding stays unsettled and the loop may not report the work "done". This
+   preserves the no-false-completion property (an unresolved essential choice
+   keeps the deliverable honestly incomplete) without a second code path.
 5. Model-settled design decisions are listed prominently in the final report
    for after-the-fact user review — settled silently is not acceptable,
    because model agreement can be persuasion (sycophancy), not truth.
@@ -142,13 +140,27 @@ retired when this lands. And because the reviewer is blind to its own history,
 tracking a finding across rounds is the orchestrator's job, not the
 reviewer's (see point 2).
 
-**Decision ledger.** Design decisions constituted at a gate or settled by
-models accumulate in the state file, are injected into every subsequent
-reviewer prompt as design intent ("this is a deliberate choice: <basis>"),
-and at loop exit the user is offered — never required — to record them in a
-durable home (issue/PR/docs) *(EP)*. Conveying a decision never includes an
-instruction about what the reviewer must not flag; the reviewer stays free
-to flag a defect the decision itself causes *(EP)*.
+**Decision ledger.** Lives in `.claude/spar-ledger.md` (the `{{LEDGER}}` slot
+wired in Phase 2a injects it into every subsequent reviewer prompt). A gate
+ruling produces one ledger entry: the author transcribes the user's decision
+(the author runs the gate and writes the entry; it does not invent the
+ruling), and the hook verifies an entry exists for each parked finding before
+marking it `settled` and preparing the next round. The injected ledger is
+framed as design intent ("these are deliberate choices — do not re-flag them
+as defects"), but conveying a decision never tells the reviewer what it may
+not flag: the reviewer stays free to flag a genuine defect the decision itself
+causes *(EP)*. At loop exit the user is offered — never required — to copy the
+ledger into a durable home (issue/PR/docs) *(EP)*.
+
+**Gate trigger (2c).** The gate is deterministic, not a vibe. It fires when a
+round makes no forward progress on anything but parked findings — i.e. after
+folding a round, every open finding the reviewer raised is already `parked`
+(nothing new, no `[MECHANICAL]` to judge, no fresh stalemate), OR the round cap
+is about to end the loop with parked findings outstanding. At that point the
+hook blocks once, instructing the author to run the batched gate for ALL
+parked findings; the loop cannot converge while a parked finding keeps being
+raised, so the ledger entry the gate produces is what unblocks the next
+round's reviewer.
 
 **Implementation order** — Phase 2 is the biggest complexity fork (canonical
 matching, judge, parking, ledger at once), so build it as a staged minimal
