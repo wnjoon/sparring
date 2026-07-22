@@ -109,6 +109,7 @@ tests/                   pure-bash hook tests
 
 - `main` — releases only. `dev` — integration. `task/<n>-<name>` — one branch per plan task, merged into `dev`.
 - The plan is the spec: [docs/superpowers/plans/](docs/superpowers/plans/). This README is updated in the same change whenever implementation diverges from it.
+- Decisions agreed for phases not yet implemented live in [docs/design-decisions.md](docs/design-decisions.md) — each phase's plan document starts from its section there.
 
 ## License
 
