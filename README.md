@@ -12,52 +12,54 @@ Coding agents are good at writing code and bad at noticing what they got wrong. 
 
 1. **Review is enforced, not requested.** A deterministic Stop hook blocks the author's exit until the loop completes. Prompt discipline is never trusted — if the harness can't guarantee it, it didn't happen.
 2. **Only the reviewer can declare the work done.** The loop ends when the reviewer outputs `STATUS: CONVERGED` — the author has no way to grade its own work as finished. Self-assessment bias is removed structurally, not by exhortation.
-3. **Debate, with guardrails against persuasion.** Findings are split into `[MECHANICAL]` (fixed immediately, no questions asked) and `[DESIGN]` (escalated to the human). When author and reviewer stalemate on a finding, a *blind judge* — a fresh agent that sees the code and the finding but **never the debate** — rules once. Convergence must come from evidence, not from whoever argues more confidently.
+3. **Debate, with guardrails against persuasion.** Findings are split into `[MECHANICAL]` (fixed immediately, no questions asked) and `[DESIGN]` (a choice among valid alternatives). Design findings don't interrupt the loop: the author states a position, the reviewer accepts or contests it next round, and only a genuine stalemate escalates — a *blind judge* (a fresh agent that sees the code and the finding but **never the debate**) for factual disputes, or a single batched question to the human at loop end for real design choices. Convergence must come from evidence, not from whoever argues more confidently. *(Today (Phase 1): `[MECHANICAL]` findings are auto-fixed and `[DESIGN]` findings are decided by the author on the merits; the debate ledger, blind judge, and end-of-loop gate arrive in Phase 2.)*
 
 sparring is inspired by [hamelsmu/claude-review-loop](https://github.com/hamelsmu/claude-review-loop), which pioneered the Stop-hook-enforced Codex review. Several loop-hardening ideas — the fixed review baseline, the conveyance boundary (never tell the reviewer what was "fixed"), the decision ledger, design-intent harvesting, and tiered fix writers — are adapted from the review-loop protocol in [jongwony/epistemic-protocols](https://github.com/jongwony/epistemic-protocols). sparring keeps hamelsmu's skeleton and extends it where a single-pass review falls short:
 
-| | review-loop (origin) | sparring |
-|---|---|---|
-| Review rounds | one | until the reviewer converges (capped) |
-| Reviewer input | diff only | diff **+ the task requirements** |
-| Fix verification | none (fixes are never re-reviewed) | every round re-reviews the previous round's fixes |
-| Author accountability | "use your own judgment" | per-finding response file (`FIXED` / `REJECTED` + grounded reason), enforced by the hook |
-| Finding triage | severity only | `[MECHANICAL]` auto-fix / `[DESIGN]` user gate |
-| Disagreement | author decides | 2-round stalemate → blind judge or user gate |
-| Reviewer sandbox | full bypass | `--sandbox read-only` |
+| | review-loop (origin) | sparring | Status |
+|---|---|---|---|
+| Review rounds | one | until the reviewer converges (capped) | ✅ Phase 1 |
+| Reviewer input | diff only | diff **+ the task requirements** | ✅ Phase 1 |
+| Fix verification | none (fixes are never re-reviewed) | every round re-reviews the previous round's fixes | ✅ Phase 1 |
+| Author accountability | "use your own judgment" | per-finding response file (`FIXED` / `REJECTED` + grounded reason), enforced by the hook | ✅ Phase 1 |
+| Finding triage | severity only | `[MECHANICAL]` auto-fix / `[DESIGN]` debate-first | tags ✅ · gate planned (P2) |
+| Disagreement | author decides | 2-round stalemate → blind judge or batched user gate | planned (P2) |
+| Reviewer sandbox | full bypass | `--sandbox read-only` | ✅ Phase 1 |
 
 ## How it works
+
+The diagram below is the **full target design**. `✅` marks what runs today
+(Phase 1); `(planned Pn)` marks steps that are designed but not yet built.
 
 ```
 /spar <task description>
       │
       ▼
-[Implement]   the author writes the code, then tries to stop
+[Implement]   the author writes the code, then tries to stop            ✅
       │
       ▼
- Stop hook ─── skip conditions (docs-only, tiny diff)? ──yes──▶ exit, no loop
+ Stop hook ─── skip conditions (docs-only, tiny diff)? ──yes──▶ exit    (planned P3)
       │ no
       ▼
-[Round N]     reviewer (read-only sandbox) reviews diff + requirements
+[Round N]     reviewer (read-only sandbox) reviews diff + requirements  ✅
       │
       ├─ STATUS: FINDINGS
-      │    ├─ [MECHANICAL] ──▶ author fixes immediately, no questions asked
-      │    ├─ [DESIGN]     ──▶ attended: user gate / unattended: parked in report
-      │    └─ stalemate (2 rounds on the same finding)
-      │         ├─ factual → blind judge: fresh agent, sees code + finding,
-      │         │            never the debate transcript
-      │         └─ design  → user gate
-      │    then: author writes a per-finding response → round N+1 (cap: 5)
+      │    ├─ [MECHANICAL] ──▶ author fixes immediately, no questions asked   ✅
+      │    ├─ [DESIGN]     ──▶ ✅ author decides on the merits
+      │    │                   (planned P2: debate-first; park or gate at loop end)
+      │    ├─ stalemate (2 rounds on the same finding)                        (planned P2)
+      │    │    ├─ factual → blind judge: fresh agent, sees code + finding,
+      │    │    │            never the debate transcript
+      │    │    └─ design  → batched user gate at loop end
+      │    └─ author writes a per-finding response → round N+1 (cap: 5)        ✅
       │
       └─ STATUS: CONVERGED
-           ├─ low-stakes ─────────────▶ exit + final report
-           └─ high-stakes or uncertain
-              (risky repo · 3+ rounds · design findings occurred)
+           ├─ exit (state cleaned up)                                         ✅
+           │        └─ final report                                          (planned P4)
+           └─ high-stakes? (risky repo · 3+ rounds · design findings)         (planned P3)
                  ▼
            [Final sweep]  fresh author-model subagent, blind to loop history,
-                          verifies diff + requirements only
-                 ├─ clean    ──▶ exit + final report
-                 └─ findings ──▶ back to round N+1
+                          verifies diff + requirements → clean ? exit : loop
 ```
 
 The same structure runs in both directions. The seats swap; the invariants don't:
@@ -66,7 +68,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 |---|---|---|
 | Author (sole writer) | Claude Code session | Codex CLI session |
 | Reviewer (declares `CONVERGED`) | `codex exec --sandbox read-only` | `claude -p` (read-only tools) |
-| Enforcement | Stop hook blocks exit | git pre-commit hook blocks commit |
+| Enforcement | Stop hook blocks exit | git pre-commit hook blocks commit (gates landing, not session exit) |
 
 ## Invariants
 
@@ -80,7 +82,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Core loop: `/spar`, Stop hook, round machinery, per-finding response enforcement, round cap, read-only reviewer | ✅ done |
-| 2 | `[DESIGN]` user gate + stalemate blind judge | planned |
+| 2 | `[DESIGN]` debate-first (conveyance boundary + decision ledger) · stalemate blind judge · batched end-of-loop gate | planned |
 | 3 | Final sweep + skip conditions (docs-only, tiny diff) | planned |
 | 4 | Unattended mode + final report | planned |
 | 5 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
