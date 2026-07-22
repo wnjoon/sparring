@@ -192,9 +192,9 @@ run_hook >/dev/null   # folds round 1 (streak 1), advances to round 2
 printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: still big\n- suggestion: split\n' > "$RFb2"
 printf '### F2-1: REJECTED — still cohesive\n' > "$RPb2"
 run_hook >/dev/null   # folds round 2 (streak 2)
-chk "consecutive rejection → streak 2" "$(printf 'mod.py | split the module\tDESIGN\t2\t2\tescalated')" "$(cat .claude/spar-registry.tsv)"
+chk "consecutive rejection → streak 2, parked" "$(printf 'mod.py | split the module\tDESIGN\t2\t2\tparked')" "$(cat .claude/spar-registry.tsv)"
 
-# ── 15. stalemate: same finding rejected two consecutive rounds → escalation block ──
+# ── 15. DESIGN stalemate → parked + batched gate fires ──
 fresh_dir; write_state review 1; mkdir -p reviews
 RFa="reviews/spar-20260721-120000-abc123-r1.md"
 RPa="reviews/spar-20260721-120000-abc123-r1-response.md"
@@ -202,18 +202,26 @@ RFb="reviews/spar-20260721-120000-abc123-r2.md"
 RPb="reviews/spar-20260721-120000-abc123-r2-response.md"
 printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFa"
 printf '### F1-1: REJECTED — cohesive on purpose\n' > "$RPa"
-run_hook >/dev/null            # fold r1 (streak 1), advance to r2
-printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: still big\n- suggestion: split\n' > "$RFb"
+run_hook >/dev/null   # fold r1 (streak 1), advance to r2
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFb"
 printf '### F2-1: REJECTED — still cohesive\n' > "$RPb"
-OUT=$(run_hook)                # fold r2 (streak 2) → stalemate
-chk "stalemate → block" '"decision":"block"' "$OUT"
-chk "stalemate → message says stalemate" 'stalemate' "$OUT"
-chk "stalemate → fingerprint marked escalated" 'escalated' "$(cat .claude/spar-registry.tsv)"
+OUT=$(run_hook)       # fold r2 (streak 2) → parked → gate (round raised only the parked finding)
+chk "design stalemate → parked status" "$(printf 'mod.py | split the module\tDESIGN\t2\t2\tparked')" "$(cat .claude/spar-registry.tsv)"
+chk "stuck on parked → gate block" 'gate' "$OUT"
+chk "no judge runner for design" "absent" "$([ -f .claude/spar-run-judge.sh ] && echo present || echo absent)"
+chk_file "gate manifest written" .claude/spar-gate-manifest.tsv
+chk "manifest maps P1 to fingerprint" "$(printf 'P1\tmod.py | split the module')" "$(cat .claude/spar-gate-manifest.tsv)"
+chk_file "gate worksheet written" .claude/spar-gate.md
+chk "worksheet shows the finding" 'split the module' "$(cat .claude/spar-gate.md)"
 
-# ── 16. stalemate fires once: next stop resumes the loop (round 3 prepared) ──
-OUT2=$(run_hook)
-chk "stalemate one-shot → advances to round 3" 'round: 3' "$(cat .claude/spar.local.md)"
-chk "stalemate one-shot → block runs reviewer" 'run-reviewer' "$OUT2"
+# ── 16. gate: ledger entry recorded → settled → round advances, ledger injected ──
+printf '### P1: keep it cohesive — the module owner owns this boundary.\n' > .claude/spar-ledger.md
+run_hook >/dev/null   # verify ledger → settle → advance to r3
+chk "ledger present → status settled" "$(printf 'mod.py | split the module\tDESIGN\t2\t2\tsettled')" "$(cat .claude/spar-registry.tsv)"
+chk "gate cleared → advanced to round 3" 'round: 3' "$(cat .claude/spar.local.md)"
+chk "gate manifest removed" "gone" "$([ -f .claude/spar-gate-manifest.tsv ] && echo present || echo gone)"
+chk "r3 prompt injects the ledger decision" 'keep it cohesive' "$(cat .claude/spar-reviewer-prompt.txt)"
+chk "r3 prompt frames ledger as design intent" 'design decision' "$(cat .claude/spar-reviewer-prompt.txt)"
 
 # ── 17. no stalemate when the streak is broken by a FIXED round ──
 fresh_dir; write_state review 1; mkdir -p reviews
@@ -289,17 +297,30 @@ OUT=$(run_hook)                                              # invalid 3 → fai
 chk "invalid ruling 3× → user escalation" 'user decision' "$OUT"
 chk "invalid ruling 3× → status escalated" 'escalated' "$(cat .claude/spar-registry.tsv)"
 
-# ── 23. DESIGN stalemate still uses Phase 2a user escalation (unchanged) ──
+# ── 23. DESIGN stalemate routes to gate (parked), never the judge ──
 fresh_dir; write_state review 1; mkdir -p reviews
-printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFa"
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] rename thing\n- file: x.py:2\n- problem: unclear\n- suggestion: rename\n' > "$RFa"
+printf '### F1-1: REJECTED — name matches the spec\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] rename thing\n- file: x.py:2\n- problem: unclear\n- suggestion: rename\n' > "$RFb"
+printf '### F2-1: REJECTED — name matches the spec\n' > "$RPb"
+OUT=$(run_hook)
+chk "design → gate, not judge" "absent" "$([ -f .claude/spar-run-judge.sh ] && echo present || echo absent)"
+chk "design → parked" 'parked' "$(cat .claude/spar-registry.tsv)"
+chk "design → gate block" 'gate' "$OUT"
+
+# ── 25. gate incomplete: no ledger entry → re-block, still pending ──
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFa"
 printf '### F1-1: REJECTED — cohesive\n' > "$RPa"
 run_hook >/dev/null
-printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFb"
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFb"
 printf '### F2-1: REJECTED — cohesive\n' > "$RPb"
-OUT=$(run_hook)
-chk "design stalemate → user escalation, not judge" "$([ -f .claude/spar-run-judge.sh ] && echo judge || echo escalation)" "escalation"
-chk "design stalemate → escalated status" 'escalated' "$(cat .claude/spar-registry.tsv)"
-chk "design stalemate → block mentions stalemate" 'stalemate' "$OUT"
+run_hook >/dev/null   # gate fires, manifest written, no ledger yet
+OUT=$(run_hook)       # still no ledger → gate incomplete
+chk "gate incomplete → re-block" 'gate' "$OUT"
+chk "gate incomplete → manifest kept" "kept" "$([ -f .claude/spar-gate-manifest.tsv ] && echo kept || echo gone)"
+chk "gate incomplete → not settled" 'parked' "$(cat .claude/spar-registry.tsv)"
 
 # ── 24. judge template missing → fail open to user escalation (no trap) ──
 mech_stalemate

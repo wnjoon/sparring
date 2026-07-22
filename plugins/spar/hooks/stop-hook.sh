@@ -17,6 +17,8 @@ JUDGE_PROMPT_FILE=".claude/spar-judge-prompt.txt"
 JUDGE_PENDING=".claude/spar-judge-pending"
 JUDGE_SEQ=".claude/spar-judge-seq"
 JUDGE_RETRY=".claude/spar-judge-retries"
+GATE_MANIFEST=".claude/spar-gate-manifest.tsv"
+GATE_FILE=".claude/spar-gate.md"
 
 log() { mkdir -p "$(dirname "$LOG_FILE")"; echo "[$(date -u +%FT%TZ)] $*" >> "$LOG_FILE"; }
 approve() { printf '{"decision":"approve"}\n'; exit 0; }
@@ -28,7 +30,8 @@ block() { # $1=reason $2=statusMessage
 }
 cleanup() { rm -f "$STATE_FILE" "$RUNNER" "$PROMPT_FILE" "$RETRY_FILE" \
   "$LEDGER_FILE" "$REGISTRY_FILE" "$REG_MARKER" \
-  "$JUDGE_RUNNER" "$JUDGE_PROMPT_FILE" "$JUDGE_PENDING" "$JUDGE_SEQ" "$JUDGE_RETRY"; }
+  "$JUDGE_RUNNER" "$JUDGE_PROMPT_FILE" "$JUDGE_PENDING" "$JUDGE_SEQ" "$JUDGE_RETRY" \
+  "$GATE_MANIFEST" "$GATE_FILE"; }
 
 trap 'log "ERR trap line $LINENO"; cleanup; printf "{\"decision\":\"approve\"}\n"; exit 0' ERR
 
@@ -168,6 +171,30 @@ registry_tag() { # $1=fp
   awk -F'\t' -v fp="$1" '$1==fp{print $2; exit}' "$REGISTRY_FILE" 2>/dev/null
 }
 
+# Status of a fingerprint (column 5).
+registry_status() { # $1=fp
+  [ -f "$REGISTRY_FILE" ] || return 0
+  awk -F'\t' -v fp="$1" '$1==fp{print $5; exit}' "$REGISTRY_FILE" 2>/dev/null
+}
+
+# All fingerprints currently parked.
+parked_fingerprints() {
+  [ -f "$REGISTRY_FILE" ] || return 0
+  awk -F'\t' '$5=="parked"{print $1}' "$REGISTRY_FILE" 2>/dev/null
+}
+
+# True if the round's review raised ≥1 finding and EVERY raised finding is parked.
+only_parked_this_round() { # $1=round
+  local rf; rf=$(review_file "$1"); [ -f "$rf" ] || return 1
+  local any=0 nonparked=0 id tag file nt fp
+  while IFS=$'\t' read -r id tag file nt; do
+    [ -n "$id" ] || continue
+    any=1; fp="${file} | ${nt}"
+    [ "$(registry_status "$fp")" = "parked" ] || nonparked=1
+  done < <(parse_findings "$rf")
+  [ "$any" = 1 ] && [ "$nonparked" = 0 ]
+}
+
 # Mark a fingerprint escalated so it never re-fires.
 mark_escalated() { set_registry_status "$1" escalated; }
 
@@ -187,7 +214,12 @@ prepare_round() { # $1=round number → writes PROMPT_FILE + RUNNER
 
   local prompt ledger=""
   prompt=$(cat "$tpl_dir/reviewer.md")
-  [ -f "$LEDGER_FILE" ] && ledger=$(cat "$LEDGER_FILE")
+  if [ -s "$LEDGER_FILE" ]; then
+    ledger="## Settled design decisions (deliberate choices — do NOT re-flag these
+as defects; you MAY still flag a genuine defect that a decision itself causes)
+
+$(cat "$LEDGER_FILE")"
+  fi
   prompt=${prompt//\{\{TASK\}\}/$TASK}
   prompt=${prompt//\{\{ROUND\}\}/$n}
   prompt=${prompt//\{\{DIFF_BASE\}\}/$BASE}
@@ -403,22 +435,20 @@ Then stop again." "sparring [${REVIEW_ID}]: judge invalid — rerun"
       fi
     fi
 
-    # (B) Route new stalemates: [MECHANICAL] → blind judge, [DESIGN] → user escalation.
+    # (B) Route new stalemates: [MECHANICAL] → blind judge, [DESIGN] → parked.
     STALE=$(new_stalemates)
     if [ -n "$STALE" ]; then
-      mech_fp=""; design_fps=""
+      mech_fp=""
       while IFS= read -r fp; do
         [ -n "$fp" ] || continue
         if [ "$(registry_tag "$fp")" = "MECHANICAL" ]; then
           [ -z "$mech_fp" ] && mech_fp="$fp"
         else
-          design_fps="${design_fps}${fp}
-"
+          set_registry_status "$fp" parked
         fi
       done <<STALE_EOF
 $STALE
 STALE_EOF
-
       if [ -n "$mech_fp" ]; then
         if prepare_judge "$mech_fp"; then
           rm -f "$JUDGE_RETRY"
@@ -430,25 +460,62 @@ bash ${JUDGE_RUNNER}
 Then stop again." "sparring [${REVIEW_ID}] round ${ROUND}: judge dispatched"
         else
           set_registry_status "$mech_fp" escalated
-          design_fps="${design_fps}${mech_fp}
-"
+          block "The blind judge is unavailable. Surface finding '${mech_fp}' to
+the user for a decision, apply it, then stop." \
+            "sparring [${REVIEW_ID}]: judge unavailable — user decision needed"
         fi
       fi
+    fi
 
-      if [ -n "$design_fps" ]; then
-        while IFS= read -r fp; do [ -n "$fp" ] && mark_escalated "$fp"; done <<D_EOF
-$design_fps
-D_EOF
-        block "Stalemate: the following design finding(s) were raised AND
-rejected for 2 consecutive rounds:
-
-${design_fps}
-Automated design adjudication (batched user gate) lands in Phase 2c. For now,
-surface each to the user — give the reviewer's problem and your rejection
-reason — let them rule, apply it, and stop again. The loop continues on
-everything else (these will not be raised again)." \
-          "sparring [${REVIEW_ID}] round ${ROUND}: design stalemate — user decision needed"
+    # (C1) A gate is pending → verify ledger decisions, settle, or re-block.
+    if [ -f "$GATE_MANIFEST" ]; then
+      missing=""
+      while IFS=$'\t' read -r ptag pfp; do
+        [ -n "$ptag" ] || continue
+        if grep -q "^### ${ptag}:" "$LEDGER_FILE" 2>/dev/null; then
+          set_registry_status "$pfp" settled
+        else
+          missing="${missing}${ptag} "
+        fi
+      done < "$GATE_MANIFEST"
+      if [ -n "$missing" ]; then
+        block "Design gate incomplete. Still need a recorded decision for: ${missing}
+Present each to the user (see ${GATE_FILE}), then append to ${LEDGER_FILE} a
+section per tag: '### P<k>: <the user's decision and its basis>'. Then stop
+again. (To abandon the loop instead: /spar-cancel.)" \
+          "sparring [${REVIEW_ID}]: design gate incomplete"
       fi
+      rm -f "$GATE_MANIFEST" "$GATE_FILE"
+    fi
+
+    # (C2) Stuck on parked findings → fire the single batched gate.
+    if only_parked_this_round "$ROUND"; then
+      : > "$GATE_MANIFEST"
+      {
+        echo "# sparring design gate — batched parked decisions"
+        echo
+        echo "Present these to the user together. Cluster by shared disposition;"
+        echo "put analysis before the question; skip any where all options lead to"
+        echo "the same outcome (resolve it and note that). For each P<k>, append to"
+        echo "${LEDGER_FILE}: '### P<k>: <decision + basis>'."
+        echo
+      } > "$GATE_FILE"
+      k=0
+      while IFS= read -r pfp; do
+        [ -n "$pfp" ] || continue
+        k=$((k+1))
+        printf 'P%s\t%s\n' "$k" "$pfp" >> "$GATE_MANIFEST"
+        {
+          echo "## P${k}  (${pfp})"
+          extract_finding "$(review_file "$ROUND")" "$pfp"
+          echo
+        } >> "$GATE_FILE"
+      done < <(parked_fingerprints)
+      block "The loop is stuck on parked design finding(s): only decisions you
+have deferred remain. Run the batched design gate — read ${GATE_FILE},
+present the questions to the user, and record each ruling in ${LEDGER_FILE}
+as '### P<k>: <decision + basis>'. Then stop again." \
+        "sparring [${REVIEW_ID}] round ${ROUND}: design gate"
     fi
 
     if [ "$ROUND" -ge "$MAX_ROUNDS" ]; then
