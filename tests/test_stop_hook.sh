@@ -426,5 +426,26 @@ OUT=$(run_hook)                # miss 3 → skip matching this round, fold proce
 chk "matcher gone after 3 misses" "gone" "$([ -f .claude/spar-matcher-pending ] && echo present || echo gone)"
 chk "loop proceeded without alias" "empty" "$([ -s .claude/spar-aliases.tsv ] && echo nonempty || echo empty)"
 
+# ── 33. suffix-fp collision: new finding not wrongly dropped from matcher candidacy ──
+fresh_dir; write_state review 1; mkdir -p reviews
+# round 1: two DESIGN findings — one on xmod.py titled "frob", one on mod.py titled "other"
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] frob\n- file: xmod.py:1\n- problem: p\n- suggestion: s\n### F1-2 [DESIGN] other\n- file: mod.py:1\n- problem: p\n- suggestion: s\n' > "$RFa"
+printf '### F1-1: REJECTED — a\n### F1-2: REJECTED — b\n' > "$RPa"
+run_hook >/dev/null   # fold r1: registry has "xmod.py | frob" and "mod.py | other" (both open)
+# round 2: a NEW finding "mod.py | frob" — shares file mod.py with an existing open finding → should be a matcher candidate.
+# Its fp "mod.py | frob" is a tab-suffix of registry row "xmod.py | frob\t..." → the old unanchored grep wrongly skipped it.
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] frob\n- file: mod.py:1\n- problem: p\n- suggestion: s\n' > "$RFb"
+printf '### F2-1: REJECTED — c\n' > "$RPb"
+OUT=$(run_hook)
+chk "suffix-fp finding still offered to matcher" 'run-matcher' "$OUT"
+
+# ── 34. gate worksheet shows the variant text for an alias-reached canonical ──
+reworded_setup                    # helper from the 2d tests (round 1 canonical, round 2 reworded)
+run_hook >/dev/null               # matcher dispatched
+MOUT=$(cat .claude/spar-matcher-pending)
+printf 'SAME N1 E1\n' > "$MOUT"
+run_hook >/dev/null               # alias applied, canonical parked, gate fires → worksheet written
+chk "worksheet body shows variant finding text" 'break up mod.py into parts' "$(cat .claude/spar-gate.md)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

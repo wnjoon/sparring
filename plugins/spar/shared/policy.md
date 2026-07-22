@@ -39,7 +39,7 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
    out is to record the decision or `/spar-cancel`.
 7. Finding identity across rounds is a deterministic fingerprint
    (file + normalized title). When a round raises a finding whose fingerprint
-   is new but an already-tracked finding shares its file, a blind
+   is new but an already-tracked open or parked finding shares its file, a blind
    `codex exec --sandbox read-only` matcher (once per round, author only runs
    it) decides which are the same defect re-worded; matches become aliases so
    the re-wording accumulates the stalemate streak on the canonical finding. A
