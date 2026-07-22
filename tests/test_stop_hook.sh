@@ -367,5 +367,64 @@ OUT=$(run_hook)
 chk "mixed round → A parked" 'a.py | finding a	DESIGN	2	2	parked' "$(cat .claude/spar-registry.tsv)"
 chk "mixed round → no gate fired" "absent" "$([ -f .claude/spar-gate-manifest.tsv ] && echo present || echo absent)"
 
+# helper: round-1 DESIGN finding, then a re-worded round-2 version (same file, different title)
+reworded_setup() {
+  fresh_dir; write_state review 1; mkdir -p reviews
+  printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: too big\n- suggestion: split\n' > "$RFa"
+  printf '### F1-1: REJECTED — cohesive on purpose\n' > "$RPa"
+  run_hook >/dev/null   # matcher_phase(1): registry empty → skip; fold r1 (streak 1); advance r2
+  printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] break up mod.py into parts\n- file: mod.py:10\n- problem: too large\n- suggestion: modularize\n' > "$RFb"
+  printf '### F2-1: REJECTED — cohesive on purpose\n' > "$RPb"
+}
+
+# ── 28. re-worded finding on same file → matcher dispatched ──
+reworded_setup
+OUT=$(run_hook)   # matcher_phase(2): new fp not tracked, existing same-file open → dispatch
+chk "matcher dispatched" 'run-matcher' "$OUT"
+chk_file "matcher runner generated" .claude/spar-run-matcher.sh
+chk "matcher runner read-only" 'sandbox read-only' "$(cat .claude/spar-run-matcher.sh)"
+chk "manifest maps N1 to new fp" "$(printf 'N1\tmod.py | break up mod py into parts')" "$(cat .claude/spar-matcher-manifest.tsv)"
+chk "manifest maps E1 to canonical fp" "$(printf 'E1\tmod.py | split the module')" "$(cat .claude/spar-matcher-manifest.tsv)"
+chk "matcher prompt has the new finding text" 'break up mod.py into parts' "$(cat .claude/spar-matcher-prompt.txt)"
+chk "matcher prompt is blind (no response text)" "absent" "$(grep -qi 'cohesive on purpose' .claude/spar-matcher-prompt.txt && echo present || echo absent)"
+
+# ── 29. matcher SAME → alias recorded, re-word folds onto canonical (streak 2 → parked → gate) ──
+MOUT=$(cat .claude/spar-matcher-pending)
+printf 'SAME N1 E1\n' > "$MOUT"
+OUT=$(run_hook)   # apply alias; fold(2) resolves variant→canonical → canonical streak 2 → DESIGN parked → gate
+chk "alias recorded" "$(printf 'mod.py | break up mod py into parts\tmod.py | split the module')" "$(cat .claude/spar-aliases.tsv)"
+chk "reword folded onto canonical (streak 2, parked)" "$(printf 'mod.py | split the module\tDESIGN\t2\t2\tparked')" "$(cat .claude/spar-registry.tsv)"
+chk "aliased parked finding still fires the gate" 'gate' "$OUT"
+
+# ── 30. matcher NO MATCHES → no alias, findings stay distinct (each streak 1) ──
+reworded_setup
+run_hook >/dev/null            # dispatch matcher
+MOUT=$(cat .claude/spar-matcher-pending)
+printf 'NO MATCHES\n' > "$MOUT"
+run_hook >/dev/null            # apply (none); fold(2) → two distinct fps, each streak 1
+chk "no alias file entries" "empty" "$([ -s .claude/spar-aliases.tsv ] && echo nonempty || echo empty)"
+chk "canonical stays streak 1" "$(printf 'mod.py | split the module\tDESIGN\t1\t1\topen')" "$(cat .claude/spar-registry.tsv)"
+chk "reword tracked separately streak 1" 'mod.py | break up mod py into parts	DESIGN	2	1	open' "$(cat .claude/spar-registry.tsv)"
+
+# ── 31. new finding on a DIFFERENT file → no matcher (prefilter skips) ──
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFa"
+printf '### F1-1: REJECTED — cohesive\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] npe in other\n- file: other.py:3\n- problem: npe\n- suggestion: guard\n' > "$RFb"
+printf '### F2-1: FIXED — guarded\n' > "$RPb"
+run_hook >/dev/null
+chk "different file → no matcher dispatched" "absent" "$([ -f .claude/spar-run-matcher.sh ] && echo present || echo absent)"
+chk "matcher round marked (won't re-dispatch)" 'kept' "$([ -f .claude/spar-matcher-round ] && echo kept || echo lost)"
+
+# ── 32. matcher output missing 3× → skip matching, loop proceeds (fail-open) ──
+reworded_setup
+run_hook >/dev/null            # dispatch (no output written)
+run_hook >/dev/null            # miss 1
+run_hook >/dev/null            # miss 2
+OUT=$(run_hook)                # miss 3 → skip matching this round, fold proceeds
+chk "matcher gone after 3 misses" "gone" "$([ -f .claude/spar-matcher-pending ] && echo present || echo gone)"
+chk "loop proceeded without alias" "empty" "$([ -s .claude/spar-aliases.tsv ] && echo nonempty || echo empty)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

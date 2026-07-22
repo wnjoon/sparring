@@ -20,6 +20,13 @@ JUDGE_RETRY=".claude/spar-judge-retries"
 GATE_MANIFEST=".claude/spar-gate-manifest.tsv"
 GATE_FILE=".claude/spar-gate.md"
 GATE_SEQ=".claude/spar-gate-seq"
+MATCHER_RUNNER=".claude/spar-run-matcher.sh"
+MATCHER_PROMPT_FILE=".claude/spar-matcher-prompt.txt"
+MATCHER_PENDING=".claude/spar-matcher-pending"
+MATCHER_MANIFEST=".claude/spar-matcher-manifest.tsv"
+MATCHER_ROUND=".claude/spar-matcher-round"
+MATCHER_RETRY=".claude/spar-matcher-retries"
+ALIASES_FILE=".claude/spar-aliases.tsv"
 
 log() { mkdir -p "$(dirname "$LOG_FILE")"; echo "[$(date -u +%FT%TZ)] $*" >> "$LOG_FILE"; }
 approve() { printf '{"decision":"approve"}\n'; exit 0; }
@@ -32,7 +39,9 @@ block() { # $1=reason $2=statusMessage
 cleanup() { rm -f "$STATE_FILE" "$RUNNER" "$PROMPT_FILE" "$RETRY_FILE" \
   "$LEDGER_FILE" "$REGISTRY_FILE" "$REG_MARKER" \
   "$JUDGE_RUNNER" "$JUDGE_PROMPT_FILE" "$JUDGE_PENDING" "$JUDGE_SEQ" "$JUDGE_RETRY" \
-  "$GATE_MANIFEST" "$GATE_FILE" "$GATE_SEQ"; }
+  "$GATE_MANIFEST" "$GATE_FILE" "$GATE_SEQ" \
+  "$MATCHER_RUNNER" "$MATCHER_PROMPT_FILE" "$MATCHER_PENDING" "$MATCHER_MANIFEST" \
+  "$MATCHER_ROUND" "$MATCHER_RETRY" "$ALIASES_FILE"; }
 
 trap 'log "ERR trap line $LINENO"; cleanup; printf "{\"decision\":\"approve\"}\n"; exit 0' ERR
 
@@ -145,7 +154,7 @@ fold_registry() { # $1 = round
     [ -n "$id" ] || continue
     disp=$(awk -F'\t' -v i="$id" '$1==i{print $2; exit}' "$dmap")
     [ -n "$disp" ] || disp="UNKNOWN"
-    fp="${file} | ${nt}"
+    fp=$(resolve_alias "${file} | ${nt}")
     update_registry "$fp" "$tag" "$n" "$disp"
   done < <(parse_findings "$rf")
   rm -f "$dmap"
@@ -178,6 +187,13 @@ registry_status() { # $1=fp
   awk -F'\t' -v fp="$1" '$1==fp{print $5; exit}' "$REGISTRY_FILE" 2>/dev/null
 }
 
+# Map a variant fingerprint to its canonical one (or return it unchanged).
+resolve_alias() { # $1=fp
+  [ -f "$ALIASES_FILE" ] || { printf '%s' "$1"; return 0; }
+  local c; c=$(awk -F'\t' -v v="$1" '$1==v{print $2; exit}' "$ALIASES_FILE" 2>/dev/null)
+  [ -n "$c" ] && printf '%s' "$c" || printf '%s' "$1"
+}
+
 # All fingerprints currently parked.
 parked_fingerprints() {
   [ -f "$REGISTRY_FILE" ] || return 0
@@ -190,7 +206,7 @@ only_parked_this_round() { # $1=round
   local any=0 nonparked=0 id tag file nt fp
   while IFS=$'\t' read -r id tag file nt; do
     [ -n "$id" ] || continue
-    any=1; fp="${file} | ${nt}"
+    any=1; fp=$(resolve_alias "${file} | ${nt}")
     [ "$(registry_status "$fp")" = "parked" ] || nonparked=1
   done < <(parse_findings "$rf")
   [ "$any" = 1 ] && [ "$nonparked" = 0 ]
@@ -298,6 +314,136 @@ EOF
   return 0
 }
 
+# Build a matcher runner if this round has re-worded-candidate findings.
+# Returns 0 if a matcher was prepared (runner/prompt/manifest/pending written),
+# 1 if there are no ambiguous candidates (caller marks the round matched).
+build_matcher() { # $1=round
+  local n="$1" rf; rf=$(review_file "$n")
+  local tpl_dir="${CLAUDE_PLUGIN_ROOT:-}/shared/prompts"
+  [ -f "$tpl_dir/matcher.md" ] || return 1
+  [ -f "$REGISTRY_FILE" ] || return 1
+  local existing; existing=$(awk -F'\t' '$5=="open"||$5=="parked"{print $1}' "$REGISTRY_FILE" 2>/dev/null)
+  [ -n "$existing" ] || return 1
+
+  local new_fps="" id tag file nt fp
+  while IFS=$'\t' read -r id tag file nt; do
+    [ -n "$id" ] || continue
+    fp=$(resolve_alias "${file} | ${nt}")
+    grep -qF -- "${fp}"$'\t' "$REGISTRY_FILE" 2>/dev/null && continue
+    new_fps="${new_fps}${fp}
+"
+  done < <(parse_findings "$rf")
+  [ -n "$new_fps" ] || return 1
+
+  local exist_files new_files overlap
+  exist_files=$(printf '%s\n' "$existing" | sed 's/ | .*$//' | sort -u)
+  new_files=$(printf '%s\n' "$new_fps" | grep -v '^$' | sed 's/ | .*$//' | sort -u)
+  overlap=$(comm -12 <(printf '%s\n' "$exist_files") <(printf '%s\n' "$new_files") 2>/dev/null)
+  [ -n "$overlap" ] || return 1
+
+  : > "$MATCHER_MANIFEST"
+  local nlist="" elist="" i=0 j=0 f
+  while IFS= read -r fp; do
+    [ -n "$fp" ] || continue
+    f=${fp%% | *}
+    printf '%s\n' "$overlap" | grep -qxF "$f" || continue
+    i=$((i+1)); printf 'N%s\t%s\n' "$i" "$fp" >> "$MATCHER_MANIFEST"
+    nlist="${nlist}### N${i}
+$(extract_finding "$rf" "$fp")
+"
+  done <<NEW_EOF
+$new_fps
+NEW_EOF
+  while IFS= read -r fp; do
+    [ -n "$fp" ] || continue
+    f=${fp%% | *}
+    printf '%s\n' "$overlap" | grep -qxF "$f" || continue
+    j=$((j+1)); printf 'E%s\t%s\n' "$j" "$fp" >> "$MATCHER_MANIFEST"
+    elist="${elist}- E${j}: ${fp}
+"
+  done <<EXIST_EOF
+$existing
+EXIST_EOF
+  { [ "$i" -gt 0 ] && [ "$j" -gt 0 ]; } || { rm -f "$MATCHER_MANIFEST"; return 1; }
+
+  local prompt; prompt=$(cat "$tpl_dir/matcher.md")
+  prompt=${prompt//\{\{TASK\}\}/$TASK}
+  prompt=${prompt//\{\{NEW_FINDINGS\}\}/$nlist}
+  prompt=${prompt//\{\{EXISTING\}\}/$elist}
+  mkdir -p reviews .claude
+  printf '%s' "$prompt" > "$MATCHER_PROMPT_FILE"
+  local out="reviews/spar-${REVIEW_ID}-matcher-r${n}.md"
+  cat > "$MATCHER_RUNNER" <<RUNEOF
+#!/usr/bin/env bash
+# sparring finding-matcher runner — round ${n} (generated; do not edit)
+set -uo pipefail
+mkdir -p reviews
+codex exec --sandbox read-only --skip-git-repo-check \\
+  --output-last-message "${out}" < "${MATCHER_PROMPT_FILE}"
+RUNEOF
+  chmod +x "$MATCHER_RUNNER"
+  printf '%s' "$out" > "$MATCHER_PENDING"
+  return 0
+}
+
+# Turn a matcher output's SAME lines into aliases.
+apply_matches() { # $1=matcher output file
+  [ -f "$1" ] || return 0
+  touch "$ALIASES_FILE"
+  local kw ntag etag rest vfp cfp
+  while read -r kw ntag etag rest; do
+    [ "$kw" = "SAME" ] && [ -n "$ntag" ] && [ -n "$etag" ] || continue
+    vfp=$(awk -F'\t' -v t="$ntag" '$1==t{print $2; exit}' "$MATCHER_MANIFEST" 2>/dev/null)
+    cfp=$(awk -F'\t' -v t="$etag" '$1==t{print $2; exit}' "$MATCHER_MANIFEST" 2>/dev/null)
+    [ -n "$vfp" ] && [ -n "$cfp" ] && [ "$vfp" != "$cfp" ] || continue
+    printf '%s\t%s\n' "$vfp" "$cfp" >> "$ALIASES_FILE"
+  done < <(grep '^SAME ' "$1" 2>/dev/null)
+  rm -f "$MATCHER_MANIFEST"
+}
+
+# Semantic-matching phase — runs once per round, BEFORE fold_registry. May block.
+matcher_phase() { # $1=round
+  local n="$1"
+  local m; m=$(cat "$MATCHER_ROUND" 2>/dev/null || echo 0)
+  case "$m" in ''|*[!0-9]*) m=0;; esac
+  [ "$n" -le "$m" ] && return 0
+  local rf; rf=$(review_file "$n"); [ -f "$rf" ] || return 0
+
+  if [ -f "$MATCHER_PENDING" ]; then
+    local out; out=$(cat "$MATCHER_PENDING")
+    if [ ! -f "$out" ]; then
+      local r; r=$(cat "$MATCHER_RETRY" 2>/dev/null || echo 0); r=$((r+1))
+      if [ "$r" -ge 3 ]; then
+        log "matcher produced no output — skip matching round $n"
+        rm -f "$MATCHER_PENDING" "$MATCHER_RUNNER" "$MATCHER_MANIFEST" "$MATCHER_RETRY"
+        echo "$n" > "$MATCHER_ROUND"; return 0
+      fi
+      echo "$r" > "$MATCHER_RETRY"
+      block "A finding-matching pass is pending. Run:
+\`\`\`
+bash ${MATCHER_RUNNER}
+\`\`\`
+Then stop again." "sparring [${REVIEW_ID}] round ${n}: finding-matcher pending"
+    fi
+    rm -f "$MATCHER_RETRY"
+    apply_matches "$out"
+    rm -f "$MATCHER_PENDING" "$MATCHER_RUNNER"
+    echo "$n" > "$MATCHER_ROUND"
+    return 0
+  fi
+
+  if build_matcher "$n"; then
+    block "Some of this round's findings may be re-worded repeats of tracked
+findings. An independent matcher must decide (you cannot merge your own
+findings). Run:
+\`\`\`
+bash ${MATCHER_RUNNER}
+\`\`\`
+Then stop again." "sparring [${REVIEW_ID}] round ${n}: finding-matcher"
+  fi
+  echo "$n" > "$MATCHER_ROUND"
+}
+
 command -v codex >/dev/null 2>&1 || {
   log "codex CLI not found"; cleanup
   block "ERROR: Codex CLI not found. Install it (npm install -g @openai/codex), then run /spar again." \
@@ -370,6 +516,7 @@ requirements>'. Then stop again." \
         "sparring [${REVIEW_ID}] round ${ROUND}: respond to findings"
     fi
 
+    matcher_phase "$ROUND"
     fold_registry "$ROUND"
 
     # (A) A judge ruling is pending → resolve it before routing anything new.
