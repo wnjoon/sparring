@@ -15,4 +15,5 @@ chk "override claude (codex present)" "claude	fix bug" "$(PATH="$BOTH:$PATH" bas
 chk "override codex, codex absent → error" "error" "$(PATH="$ONLYCLAUDE:/usr/bin:/bin" bash "$R" --reviewer codex -- x 2>&1; echo)"
 chk "task after -- preserved incl leading dashes" "claude	--do --not --strip" "$(PATH="$ONLYCLAUDE:/usr/bin:/bin" bash "$R" -- --do --not --strip)"
 chk "neither CLI → error" "error" "$(PATH="$NEITHER:/usr/bin:/bin" bash "$R" x 2>&1; echo)"
+chk "invalid --reviewer value → error" "error" "$(PATH="$BOTH:$PATH" bash "$R" --reviewer bogus -- do it 2>&1; echo)"
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

@@ -15,7 +15,9 @@ First, activate the loop by running this setup command:
 ```bash
 set -e
 if [ -f .claude/spar.local.md ]; then echo "Error: a sparring loop is already active. Use /spar-cancel first."; exit 1; fi
-RESOLVED="$("${CLAUDE_PLUGIN_ROOT}/commands/spar-resolve-family.sh" $ARGUMENTS)" || exit 1
+set -f
+RESOLVED="$("${CLAUDE_PLUGIN_ROOT}/commands/spar-resolve-family.sh" $ARGUMENTS)" || { printf '%s\n' "$RESOLVED"; exit 1; }
+set +f
 SPAR_REVIEWER="${RESOLVED%%$'\t'*}"
 SPAR_TASK="${RESOLVED#*$'\t'}"
 mkdir -p .claude reviews
