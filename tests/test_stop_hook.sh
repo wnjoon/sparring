@@ -182,5 +182,17 @@ run_hook >/dev/null                       # marker already 1 → must NOT double
 LINES2=$(wc -l < .claude/spar-registry.tsv)
 chk "fold idempotent (no duplicate rows)" "same" "$([ "$LINES1" = "$LINES2" ] && echo same || echo grew)"
 
+# ── 14b. same fingerprint rejected two consecutive rounds → streak reaches 2 ──
+in_review 1
+RFb2="reviews/spar-20260721-120000-abc123-r2.md"
+RPb2="reviews/spar-20260721-120000-abc123-r2-response.md"
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RF1"
+printf '### F1-1: REJECTED — cohesive on purpose\n' > "$RP1"
+run_hook >/dev/null   # folds round 1 (streak 1), advances to round 2
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: still big\n- suggestion: split\n' > "$RFb2"
+printf '### F2-1: REJECTED — still cohesive\n' > "$RPb2"
+run_hook >/dev/null   # folds round 2 (streak 2)
+chk "consecutive rejection → streak 2" "$(printf 'mod.py | split the module\tDESIGN\t2\t2\topen')" "$(cat .claude/spar-registry.tsv)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
