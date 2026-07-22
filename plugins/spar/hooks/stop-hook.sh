@@ -10,6 +10,8 @@ RUNNER=".claude/spar-run-reviewer.sh"
 PROMPT_FILE=".claude/spar-reviewer-prompt.txt"
 RETRY_FILE=".claude/spar-retries"
 LEDGER_FILE=".claude/spar-ledger.md"
+REGISTRY_FILE=".claude/spar-registry.tsv"
+REG_MARKER=".claude/spar-registry-round"
 
 log() { mkdir -p "$(dirname "$LOG_FILE")"; echo "[$(date -u +%FT%TZ)] $*" >> "$LOG_FILE"; }
 approve() { printf '{"decision":"approve"}\n'; exit 0; }
@@ -19,7 +21,8 @@ block() { # $1=reason $2=statusMessage
     || printf '{"decision":"block","reason":"sparring: %s"}\n' "$(echo "$1" | head -1)"
   exit 0
 }
-cleanup() { rm -f "$STATE_FILE" "$RUNNER" "$PROMPT_FILE" "$RETRY_FILE"; }
+cleanup() { rm -f "$STATE_FILE" "$RUNNER" "$PROMPT_FILE" "$RETRY_FILE" \
+  "$LEDGER_FILE" "$REGISTRY_FILE" "$REG_MARKER"; }
 
 trap 'log "ERR trap line $LINENO"; cleanup; printf "{\"decision\":\"approve\"}\n"; exit 0' ERR
 
@@ -45,6 +48,113 @@ TASK=$(awk '/^---$/{c++; next} c>=2{print}' "$STATE_FILE")
 
 review_file() { echo "reviews/spar-${REVIEW_ID}-r${1}.md"; }
 response_file() { echo "reviews/spar-${REVIEW_ID}-r${1}-response.md"; }
+
+# ── finding registry (Phase 2a: deterministic fingerprint) ──────────────────
+# Parse reviewer findings → "id<TAB>tag<TAB>file<TAB>normalized-title" per line.
+parse_findings() { # $1 = review file
+  awk '
+    function flush() {
+      if (id != "") {
+        t = tolower(title); gsub(/[^a-z0-9]+/, " ", t); gsub(/^ +| +$/, "", t)
+        printf "%s\t%s\t%s\t%s\n", id, tag, file, t
+      }
+      id=""; tag=""; file=""; title=""
+    }
+    /^### F[0-9]+-[0-9]+/ {
+      flush()
+      id=$2
+      tag="UNKNOWN"
+      if (match($0, /\[MECHANICAL\]/)) tag="MECHANICAL"
+      else if (match($0, /\[DESIGN\]/)) tag="DESIGN"
+      title=$0
+      sub(/^### F[0-9]+-[0-9]+[ ]*(\[[A-Z]+\][ ]*)?/, "", title)
+      next
+    }
+    /^-[ ]*file:/ {
+      if (id != "" && file == "") {
+        file=$0
+        sub(/^-[ ]*file:[ ]*/, "", file)
+        sub(/:[0-9]+.*$/, "", file)
+        gsub(/^[ ]+|[ ]+$/, "", file)
+      }
+      next
+    }
+    END { flush() }
+  ' "$1" 2>/dev/null
+}
+
+# Parse author response → "id<TAB>FIXED|REJECTED|UNKNOWN" per finding.
+parse_responses() { # $1 = response file
+  awk '
+    /^### F[0-9]+-[0-9]+:/ {
+      id=$2; sub(/:$/, "", id)
+      disp="UNKNOWN"
+      if (match($0, /:[ ]*FIXED/)) disp="FIXED"
+      else if (match($0, /:[ ]*REJECTED/)) disp="REJECTED"
+      print id "\t" disp
+      next
+    }
+  ' "$1" 2>/dev/null
+}
+
+# Upsert one finding into the registry.
+update_registry() { # $1=fp $2=tag $3=round $4=disposition
+  local fp="$1" tag="$2" n="$3" disp="$4"
+  local tmp="${REGISTRY_FILE}.tmp.$$"
+  touch "$REGISTRY_FILE"
+  awk -F'\t' -v OFS='\t' -v fp="$fp" -v tag="$tag" -v n="$n" -v disp="$disp" '
+    $1==fp {
+      found=1; lastrej=$3; streak=$4; status=$5
+      if (disp=="REJECTED") { if (lastrej==n-1) streak=streak+1; else streak=1; lastrej=n }
+      else { streak=0 }
+      print $1, tag, lastrej, streak, status
+      next
+    }
+    { print }
+    END {
+      if (!found) {
+        if (disp=="REJECTED") print fp, tag, n, 1, "open"
+        else print fp, tag, 0, 0, "open"
+      }
+    }
+  ' "$REGISTRY_FILE" > "$tmp" && mv "$tmp" "$REGISTRY_FILE"
+}
+
+# Fold one round's findings+responses into the registry (idempotent per round).
+fold_registry() { # $1 = round
+  local n="$1"
+  local marker; marker=$(cat "$REG_MARKER" 2>/dev/null || echo 0)
+  case "$marker" in ''|*[!0-9]*) marker=0;; esac
+  [ "$n" -le "$marker" ] && return 0
+  local rf resp; rf=$(review_file "$n"); resp=$(response_file "$n")
+  [ -f "$rf" ] && [ -f "$resp" ] || return 0
+  local dmap; dmap=$(mktemp) || return 0
+  parse_responses "$resp" > "$dmap"
+  local id tag file nt disp fp
+  while IFS=$'\t' read -r id tag file nt; do
+    [ -n "$id" ] || continue
+    disp=$(awk -F'\t' -v i="$id" '$1==i{print $2; exit}' "$dmap")
+    [ -n "$disp" ] || disp="UNKNOWN"
+    fp="${file} | ${nt}"
+    update_registry "$fp" "$tag" "$n" "$disp"
+  done < <(parse_findings "$rf")
+  rm -f "$dmap"
+  echo "$n" > "$REG_MARKER"
+}
+
+# Fingerprints at a 2-round stalemate and not yet escalated.
+new_stalemates() {
+  [ -f "$REGISTRY_FILE" ] || return 0
+  awk -F'\t' '$4>=2 && $5=="open" {print $1}' "$REGISTRY_FILE" 2>/dev/null
+}
+
+# Mark a fingerprint escalated so it never re-fires.
+mark_escalated() { # $1=fp
+  local fp="$1" tmp="${REGISTRY_FILE}.tmp.$$"
+  [ -f "$REGISTRY_FILE" ] || return 0
+  awk -F'\t' -v OFS='\t' -v fp="$fp" '$1==fp{$5="escalated"} {print}' \
+    "$REGISTRY_FILE" > "$tmp" && mv "$tmp" "$REGISTRY_FILE"
+}
 
 set_state() { # $1=phase $2=round
   local tmp="${STATE_FILE}.tmp.$$"
@@ -154,6 +264,8 @@ the merits. Then write ${RESP} with one section per finding ID:
 requirements>'. Then stop again." \
         "sparring [${REVIEW_ID}] round ${ROUND}: respond to findings"
     fi
+
+    fold_registry "$ROUND"
 
     if [ "$ROUND" -ge "$MAX_ROUNDS" ]; then
       log "round cap ${MAX_ROUNDS} reached — unconverged exit"

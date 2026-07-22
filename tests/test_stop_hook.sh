@@ -153,5 +153,46 @@ run_hook >/dev/null
 printf 'still broken\n' > "$RF1"
 chk "invalid 3rd → fail open" '"decision":"approve"' "$(run_hook)"
 
+# ── 12. registry: DESIGN finding rejected once → recorded, streak 1, open ──
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: too big\n- suggestion: split\n' > "$RF1"
+printf '### F1-1: REJECTED — cohesive on purpose\n' > "$RP1"
+run_hook >/dev/null   # folds round 1, advances to round 2
+chk "registry file created" 'kept' "$([ -f .claude/spar-registry.tsv ] && echo kept || echo lost)"
+chk "registry recorded fingerprint" 'mod.py | split the module' "$(cat .claude/spar-registry.tsv)"
+chk "registry streak 1 open" "$(printf 'DESIGN\t1\t1\topen')" "$(cat .claude/spar-registry.tsv)"
+
+# ── 13. registry: FIXED disposition breaks the contest streak ──
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] missing guard\n- file: a.py:3\n- problem: npe\n- suggestion: guard\n' > "$RF1"
+printf '### F1-1: FIXED — added guard\n' > "$RP1"
+run_hook >/dev/null
+chk "fixed finding → streak 0" "$(printf 'a.py | missing guard\tMECHANICAL\t0\t0\topen')" "$(cat .claude/spar-registry.tsv)"
+
+# ── 14. registry: fold is idempotent per round ──
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] rename thing\n- file: x.py:1\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf '### F1-1: REJECTED — name is fine\n' > "$RP1"
+run_hook >/dev/null                       # folds round 1 → row present, marker=1
+LINES1=$(wc -l < .claude/spar-registry.tsv)
+# force a second run at the SAME round by rewinding state to round 1
+sed -i '' 's/^round: .*/round: 1/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^round: .*/round: 1/' .claude/spar.local.md
+run_hook >/dev/null                       # marker already 1 → must NOT double-fold
+LINES2=$(wc -l < .claude/spar-registry.tsv)
+chk "fold idempotent (no duplicate rows)" "same" "$([ "$LINES1" = "$LINES2" ] && echo same || echo grew)"
+
+# ── 14b. same fingerprint rejected two consecutive rounds → streak reaches 2 ──
+in_review 1
+RFb2="reviews/spar-20260721-120000-abc123-r2.md"
+RPb2="reviews/spar-20260721-120000-abc123-r2-response.md"
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RF1"
+printf '### F1-1: REJECTED — cohesive on purpose\n' > "$RP1"
+run_hook >/dev/null   # folds round 1 (streak 1), advances to round 2
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: still big\n- suggestion: split\n' > "$RFb2"
+printf '### F2-1: REJECTED — still cohesive\n' > "$RPb2"
+run_hook >/dev/null   # folds round 2 (streak 2)
+chk "consecutive rejection → streak 2" "$(printf 'mod.py | split the module\tDESIGN\t2\t2\topen')" "$(cat .claude/spar-registry.tsv)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
