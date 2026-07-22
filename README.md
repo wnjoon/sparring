@@ -38,37 +38,34 @@ sparring is inspired by [hamelsmu/claude-review-loop](https://github.com/hamelsm
 
 ## How it works
 
-The diagram below is the **full target design**. `✅` marks what runs today
-(Phases 1–2); `(planned Pn)` marks steps that are designed but not yet built.
+Everything below runs today, except the steps tagged `(planned Pn)`.
 
 ```
 /spar <task description>
       │
       ▼
-[Implement]   the author writes the code, then tries to stop            ✅
+[Implement]   the author writes the code, then tries to stop
       │
       ▼
- Stop hook ─── skip conditions (docs-only, tiny diff)? ──yes──▶ exit    (planned P3)
-      │ no
+ Stop hook ─── skip conditions (docs-only, tiny diff)? ──▶ exit   (planned P3)
+      │
       ▼
-[Round N]     reviewer (read-only sandbox) reviews diff + requirements  ✅
-      │        (re-worded repeats matched to the canonical finding)      ✅
+[Round N]     reviewer (read-only sandbox) reviews diff + requirements
+      │        re-worded repeats are matched to the canonical finding
       ├─ STATUS: FINDINGS
-      │    ├─ [MECHANICAL] ──▶ author fixes immediately, no questions asked   ✅
-      │    ├─ [DESIGN]     ──▶ debate-first; parked, batched at the gate       ✅
-      │    ├─ stalemate (2 rounds on the same finding)                        ✅
-      │    │    ├─ factual → blind Codex judge: sees code + finding,
-      │    │    │            never the debate; UPHELD/DISMISSED is binding    ✅
-      │    │    └─ design  → batched user gate + decision ledger at loop end  ✅
-      │    └─ author writes a per-finding response → round N+1 (cap: 5)        ✅
+      │    ├─ [MECHANICAL] → author fixes immediately, no questions asked
+      │    ├─ [DESIGN]     → debate-first; parked, then batched at the gate
+      │    ├─ stalemate (2 rounds on the same finding)
+      │    │    ├─ factual → blind Codex judge (code + finding, never the
+      │    │    │            debate); UPHELD / DISMISSED is binding
+      │    │    └─ design  → batched user gate + decision ledger at loop end
+      │    └─ author writes a per-finding response → round N+1 (cap: 5)
       │
-      └─ STATUS: CONVERGED
-           ├─ exit (state cleaned up)                                         ✅
-           │        └─ final report                                          (planned P4)
-           └─ high-stakes? (risky repo · 3+ rounds · design findings)         (planned P3)
-                 ▼
-           [Final sweep]  fresh author-model subagent, blind to loop history,
-                          verifies diff + requirements → clean ? exit : loop
+      └─ STATUS: CONVERGED → exit (state cleaned up)
+              ├─ final report                                     (planned P4)
+              └─ high-stakes? risky repo · 3+ rounds · design     (planned P3)
+                   → final sweep: a fresh blind author-model subagent
+                     re-verifies diff + requirements → clean ? exit : loop
 ```
 
 The same structure runs in both directions. The seats swap; the invariants don't:
