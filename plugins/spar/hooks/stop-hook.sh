@@ -36,12 +36,14 @@ block() { # $1=reason $2=statusMessage
     || printf '{"decision":"block","reason":"sparring: %s"}\n' "$(echo "$1" | head -1)"
   exit 0
 }
+DIFF_SURFACE_FILE=".claude/spar-diff.txt"
+
 cleanup() { rm -f "$STATE_FILE" "$RUNNER" "$PROMPT_FILE" "$RETRY_FILE" \
   "$LEDGER_FILE" "$REGISTRY_FILE" "$REG_MARKER" \
   "$JUDGE_RUNNER" "$JUDGE_PROMPT_FILE" "$JUDGE_PENDING" "$JUDGE_SEQ" "$JUDGE_RETRY" \
   "$GATE_MANIFEST" "$GATE_FILE" "$GATE_SEQ" \
   "$MATCHER_RUNNER" "$MATCHER_PROMPT_FILE" "$MATCHER_PENDING" "$MATCHER_MANIFEST" \
-  "$MATCHER_ROUND" "$MATCHER_RETRY" "$ALIASES_FILE"; }
+  "$MATCHER_ROUND" "$MATCHER_RETRY" "$ALIASES_FILE" "$DIFF_SURFACE_FILE"; }
 
 trap 'log "ERR trap line $LINENO"; cleanup; printf "{\"decision\":\"approve\"}\n"; exit 0' ERR
 
@@ -59,6 +61,12 @@ echo "$REVIEW_ID" | grep -qE '^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$' \
   || { log "invalid review_id: $REVIEW_ID"; cleanup; approve; }
 case "$ROUND" in ''|*[!0-9]*) log "invalid round: $ROUND"; cleanup; approve;; esac
 case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=5;; esac
+
+REVIEWER=$(field reviewer)
+case "$REVIEWER" in
+  codex|claude) ;;
+  *) log "invalid reviewer: $REVIEWER"; cleanup; approve;;
+esac
 
 BASE=$(field base_sha)
 echo "$BASE" | grep -qE '^([0-9a-f]{7,40}|none)$' || BASE="HEAD"
@@ -221,6 +229,39 @@ set_state() { # $1=phase $2=round
     { print }' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
 }
 
+# Emit a reviewer/judge/matcher runner for the resolved family.
+# codex: runs read-only in its own sandbox and inspects the diff itself.
+# claude: read-only tools + --safe-mode (isolated), so the hook provides the diff.
+emit_runner() { # $1=runner_path  $2=prompt_file  $3=out_file
+  local runner="$1" pf="$2" out="$3"
+  if [ "$REVIEWER" = "claude" ]; then
+    # provide the change surface (claude has no shell): diff against the frozen baseline
+    { echo "# Changes under review (git diff ${BASE}):"; git diff "${BASE}" 2>/dev/null;
+      echo; echo "# Untracked files:"; git status --porcelain --untracked-files=all 2>/dev/null; } > "$DIFF_SURFACE_FILE"
+    cat > "$runner" <<EOF
+#!/usr/bin/env bash
+# sparring reviewer runner — claude family (generated; do not edit)
+# Command form verified in Task 19 (docs/superpowers/notes/claude-runner-spike.md):
+# prompt via STDIN (variadic --tools eats a positional arg), --tools as separate
+# args, --safe-mode for isolation. No Bash → the diff is fed in via the prompt.
+set -uo pipefail
+mkdir -p reviews
+{ cat "${pf}"; echo; echo '--- Changes under review ---'; cat "${DIFF_SURFACE_FILE}"; } | \\
+  claude -p --safe-mode --tools Read Grep Glob > "${out}"
+EOF
+  else
+    cat > "$runner" <<EOF
+#!/usr/bin/env bash
+# sparring reviewer runner — codex family (generated; do not edit)
+set -uo pipefail
+mkdir -p reviews
+codex exec --sandbox read-only --skip-git-repo-check \\
+  --output-last-message "${out}" < "${pf}"
+EOF
+  fi
+  chmod +x "$runner"
+}
+
 prepare_round() { # $1=round number → writes PROMPT_FILE + RUNNER
   local n="$1"
   local tpl_dir="${CLAUDE_PLUGIN_ROOT:-}/shared/prompts"
@@ -244,15 +285,7 @@ $(cat "$LEDGER_FILE")"
   printf '%s' "$prompt" > "$PROMPT_FILE"
 
   local out; out=$(review_file "$n")
-  cat > "$RUNNER" <<EOF
-#!/usr/bin/env bash
-# sparring reviewer runner — round ${n} (generated; do not edit)
-set -uo pipefail
-mkdir -p reviews
-codex exec --sandbox read-only --skip-git-repo-check \\
-  --output-last-message "${out}" < "${PROMPT_FILE}"
-EOF
-  chmod +x "$RUNNER"
+  emit_runner "$RUNNER" "$PROMPT_FILE" "$out"
 }
 
 # Extract the markdown block of the finding whose fingerprint matches $2.
@@ -315,15 +348,7 @@ prepare_judge() { # $1=fingerprint
   local k; k=$(cat "$JUDGE_SEQ" 2>/dev/null || echo 0)
   case "$k" in ''|*[!0-9]*) k=0;; esac; k=$((k+1)); echo "$k" > "$JUDGE_SEQ"
   local out="reviews/spar-${REVIEW_ID}-judge-${k}.md"
-  cat > "$JUDGE_RUNNER" <<EOF
-#!/usr/bin/env bash
-# sparring judge runner (generated; do not edit)
-set -uo pipefail
-mkdir -p reviews
-codex exec --sandbox read-only --skip-git-repo-check \\
-  --output-last-message "${out}" < "${JUDGE_PROMPT_FILE}"
-EOF
-  chmod +x "$JUDGE_RUNNER"
+  emit_runner "$JUDGE_RUNNER" "$JUDGE_PROMPT_FILE" "$out"
   printf '%s\t%s\n' "$fp" "$out" > "$JUDGE_PENDING"
   set_registry_status "$fp" judging
   return 0
@@ -388,15 +413,7 @@ EXIST_EOF
   mkdir -p reviews .claude
   printf '%s' "$prompt" > "$MATCHER_PROMPT_FILE"
   local out="reviews/spar-${REVIEW_ID}-matcher-r${n}.md"
-  cat > "$MATCHER_RUNNER" <<RUNEOF
-#!/usr/bin/env bash
-# sparring finding-matcher runner — round ${n} (generated; do not edit)
-set -uo pipefail
-mkdir -p reviews
-codex exec --sandbox read-only --skip-git-repo-check \\
-  --output-last-message "${out}" < "${MATCHER_PROMPT_FILE}"
-RUNEOF
-  chmod +x "$MATCHER_RUNNER"
+  emit_runner "$MATCHER_RUNNER" "$MATCHER_PROMPT_FILE" "$out"
   printf '%s' "$out" > "$MATCHER_PENDING"
   return 0
 }
@@ -459,10 +476,10 @@ Then stop again." "sparring [${REVIEW_ID}] round ${n}: finding-matcher"
   echo "$n" > "$MATCHER_ROUND"
 }
 
-command -v codex >/dev/null 2>&1 || {
-  log "codex CLI not found"; cleanup
-  block "ERROR: Codex CLI not found. Install it (npm install -g @openai/codex), then run /spar again." \
-        "sparring: codex missing"
+command -v "$REVIEWER" >/dev/null 2>&1 || {
+  log "reviewer CLI not found: $REVIEWER"; cleanup
+  block "ERROR: the '$REVIEWER' CLI is not on PATH. Install it, then run /spar again." \
+        "sparring: $REVIEWER missing"
 }
 
 case "$PHASE" in
@@ -470,6 +487,9 @@ case "$PHASE" in
     prepare_round 1
     set_state review 1
     rm -f "$RETRY_FILE"
+    NOTE=""
+    [ "$REVIEWER" = "claude" ] && NOTE="
+NOTE: same-model review — reduced cross-vendor blind-spot coverage. Install the Codex CLI for cross-model review."
     block "Implementation phase done. Round 1 independent review is required.
 
 Run (use a 600000ms timeout — reviews take minutes):
@@ -482,7 +502,7 @@ Then read $(review_file 1):
 - STATUS: FINDINGS → fix every [MECHANICAL] finding; decide each [DESIGN]
   finding on the merits; then write $(response_file 1) with one section per
   finding ID: 'FIXED — <what you did>' or 'REJECTED — <reason grounded in
-  code/requirements>'. Then stop again." \
+  code/requirements>'. Then stop again.${NOTE}" \
       "sparring [${REVIEW_ID}] round 1: run reviewer"
     ;;
   review)

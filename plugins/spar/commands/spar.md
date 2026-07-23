@@ -14,25 +14,43 @@ First, activate the loop by running this setup command:
 
 ```bash
 set -e
-command -v codex >/dev/null 2>&1 || { echo "Error: Codex CLI not installed. Run: npm install -g @openai/codex"; exit 1; }
 if [ -f .claude/spar.local.md ]; then echo "Error: a sparring loop is already active. Use /spar-cancel first."; exit 1; fi
+SPAR_RAW="$(cat <<'SPAR_ARGS_EOF'
+$ARGUMENTS
+SPAR_ARGS_EOF
+)"
+RESOLVED="$("${CLAUDE_PLUGIN_ROOT}/commands/spar-resolve-family.sh" "$SPAR_RAW")" || { printf '%s\n' "$RESOLVED" >&2; exit 1; }
+SPAR_REVIEWER="${RESOLVED%%$'\t'*}"
+SPAR_TASK="${RESOLVED#*$'\t'}"
 mkdir -p .claude reviews
+# Keep the review surface to real code: hide sparring's own loop artifacts from
+# git's untracked listing (both reviewer families inspect that listing, and the
+# author's response files are debate content — reviewers must stay blind to them).
+# Local-only via .git/info/exclude; never touches the user's tracked .gitignore.
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  SPAR_EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
+  for pat in 'reviews/spar-*' '.claude/spar*'; do
+    grep -qxF "$pat" "$SPAR_EXCLUDE" 2>/dev/null || printf '%s\n' "$pat" >> "$SPAR_EXCLUDE"
+  done
+fi
 SPAR_ID="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 SPAR_BASE="$(git rev-parse HEAD 2>/dev/null || echo none)"
-cat > .claude/spar.local.md << STATE_EOF
+{
+  cat << STATE_EOF
 ---
 active: true
 phase: task
 round: 0
 review_id: ${SPAR_ID}
 base_sha: ${SPAR_BASE}
-reviewer: codex
+reviewer: ${SPAR_REVIEWER}
 max_rounds: 5
 ---
 
-$ARGUMENTS
 STATE_EOF
-echo "Sparring loop activated (${SPAR_ID})"
+  printf '%s\n' "$SPAR_TASK"
+} > .claude/spar.local.md
+echo "Sparring loop activated (${SPAR_ID}, reviewer=${SPAR_REVIEWER})"
 ```
 
 Then implement the task described in the arguments — completely and cleanly,

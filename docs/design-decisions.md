@@ -199,7 +199,39 @@ cap.
 - Collapse test: if every option leads to materially the same outcome, do
   not ask — resolve automatically and note it in the report.
 
-## Phase 3 — sweep + skip + intent harvest
+## Phase 3 — single-agent mode (same-family sparring)
+
+Spec: [superpowers/specs/2026-07-22-single-agent-mode-design.md](superpowers/specs/2026-07-22-single-agent-mode-design.md).
+
+Adds a Claude reviewer/judge/matcher so `/spar` works with Claude alone — the
+Codex CLI is no longer a hard requirement. Cross-model (Claude author ↔ Codex
+reviewer) stays the recommended default; same-family keeps the enforced loop +
+fresh blind review + judge/gate/matcher and drops only cross-vendor blind-spot
+diversity. **This promotes the old "same-model fallback" from a CLI-missing
+degradation to a first-class mode.**
+
+- **Reviewer family** (`codex` | `claude`) resolved once at setup and stored
+  in the state file's `reviewer:` field (unused today). All three
+  model-invoking runners (reviewer, judge, matcher) are generated from that
+  family instead of hardcoding `codex exec`; the three prompts are
+  model-agnostic and reused unchanged.
+- **Activation**: an explicit leading `--reviewer <codex|claude>` token on
+  `/spar` overrides; else auto-detect (`codex` on PATH → codex, else claude).
+  Codex-missing stops being a hard block — it resolves to `claude`. An
+  explicit override to an absent CLI errors (no silent swap).
+- **Read-only blind Claude reviewer**: `claude -p` with a tool allowlist
+  limited to inspection (Read/Grep/Glob + read-only git), excluding
+  Edit/Write/general Bash. Permission-level enforcement (vs codex's OS
+  sandbox); single-writer still holds. Blind by construction (fresh `-p`
+  instance, no session history).
+- **Honest notice** when same-family: "reduced cross-vendor blind-spot
+  coverage; install Codex for cross-model review."
+- Judge + matcher inherit the resolved family — no mixing within a loop.
+- Out of scope here: Codex-Codex same-family (rides with the Codex-hosted
+  adapter, Phase 6, reusing this family abstraction); per-round lens rotation
+  (future, empirical); persistent config (Phase 7).
+
+## Phase 4 — sweep + skip + intent harvest
 
 **Final sweep** (existing roadmap): after convergence, when risk signals are
 present — risky repo (smart contracts, DDL, auth), 3+ rounds, or any design
@@ -227,7 +259,7 @@ reviewer **as file pointers, not copied content**, bounded to the changed
 files (never the whole rules directory). Purpose: stop the reviewer from
 spending findings refuting documented intentional choices.
 
-## Phase 4 — unattended + final report
+## Phase 5 — unattended + final report
 
 - Unattended mode: `[MECHANICAL]` fixes proceed; design questions split by the
   Phase 2 rule. **Parked** (non-essential) questions are batched and surfaced
@@ -243,7 +275,7 @@ spending findings refuting documented intentional choices.
   blocked-pending-user decisions, sweep result, reviewer pairing used (cross-
   or same-model).
 
-## Phase 5 — Codex-hosted adapter
+## Phase 6 — Codex-hosted adapter
 
 - Seats mirror; policy identical. Enforcement moves from the Stop hook to a
   **git pre-commit hook**: an active unconverged loop blocks commits. This is
@@ -254,12 +286,15 @@ spending findings refuting documented intentional choices.
   work", NOT "you cannot stop". Closing the walk-away gap, if needed, is a
   separate mechanism — never assumed from the pre-commit hook alone.
 - Reviewer = `claude -p` restricted to read-only tools; declares CONVERGED.
+  Reuses the read-only blind Claude reviewer built in Phase 3, and Codex-Codex
+  same-family sparring falls out of this direction for free (Phase 3's family
+  abstraction, mirrored).
 - The sweep in this direction uses a fresh `codex exec` (read-only) so the
   "different model + no context" axis symmetry is preserved.
 - Entry point: `~/.codex/prompts/` custom prompt; shares
   `plugins/spar/shared/` policy and templates.
 
-## Phase 6 — model economics
+## Phase 7 — model economics
 
 **Tiering contract** *(EP)*: judgment never delegates; typing may.
 
@@ -280,10 +315,11 @@ spending findings refuting documented intentional choices.
   family, reviewer reasoning effort scaled to diff size (symmetric principle
   — codex: `model_reasoning_effort`; claude adapter's equivalent to be
   confirmed at implementation).
-- Same-model fallback (existing roadmap): reviewer CLI missing → fresh
-  same-family reviewer with an explicit "reduced cross-model coverage"
-  notice, per-round lens rotation (correctness / security / requirement
-  fit), and a cross-family sweep when the other CLI exists.
+- Same-family sparring graduated to **Phase 3** (single-agent mode). What
+  remains here as *optional refinements* on top of that mode, if dogfooding
+  shows same-family misses too much: per-round lens rotation (correctness /
+  security / requirement fit) and a cross-family sweep when the other CLI
+  exists.
 
 ## Cross-cutting stances
 
@@ -339,7 +375,7 @@ spending findings refuting documented intentional choices.
   address **input steering** (injection); structured output (e.g. JSON) only
   hardens **output parsing** and does not prevent injection. JSON is a
   candidate for parsing robustness, weighed against the deliberately simple
-  first-line protocol and deferred to config (Phase 6) — never offered as an
+  first-line protocol and deferred to config (Phase 7) — never offered as an
   injection defense.
 - **Test strategy.** Beyond the current per-case bash tests: as state
   combinations grow (Phase 2+), add state-transition coverage (phase × round
