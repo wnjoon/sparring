@@ -17,6 +17,7 @@
 - State/artifact hygiene: reuse `spar`'s existing git-exclude patterns `.claude/spar*` and `reviews/spar-*` (they already match weighin's `.claude/spar-weighin*` files) so `git add -A` in weighin's per-task commit never stages loop artifacts.
 - Command surface: `/spar-weighin [--whole] [--reviewer codex|claude] [--] <spec path or description>`. Default is per-task execution.
 - Non-converged default: if a task's `spar` ends non-converged (`cap`, `sweep-findings-at-cap`, `cancelled`, `error-bypass`), weighin **stops and reports honestly** — it does not advance to the next task.
+- Executable bit: every new `.sh` that is run directly (the command's resolver invoked via shebang, and the `stop-weighin.sh` hook run by Claude Code) MUST be committed with `chmod +x`, matching the repo's `rwxr-xr-x` convention for `plugins/spar/commands/*.sh` and `hooks/*.sh`. The only exception is `spar-weighin-lib.sh`, which is sourced, not executed. For consistency, `chmod +x` the `bash`-invoked helpers (`ingest`, `check`, `launch`) too.
 
 ---
 
@@ -787,6 +788,7 @@ Expected: `PASS=14 FAIL=0`
 - [ ] **Step 5: Commit**
 
 ```bash
+chmod +x plugins/spar/hooks/stop-weighin.sh
 git add plugins/spar/hooks/stop-weighin.sh tests/test_stop_weighin.sh
 git commit -m "feat: weighin Stop-hook dispatcher — advance/finish/stop per task"
 ```
