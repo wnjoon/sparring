@@ -5,16 +5,17 @@
 
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: v0.1.0 — the Claude-hosted loop is complete.**
+**Status: v0.2.0 — the Claude-hosted loop is complete, and now runs with Claude alone (Codex optional).**
 
-Phases 1 and 2 are implemented and verified end-to-end against a real Codex reviewer — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar` gives you:
+Phases 1–3 are implemented and verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar` gives you:
 
 - an **enforced** review loop that iterates until the *reviewer* declares convergence;
-- a **blind Codex judge** that rules factual (`[MECHANICAL]`) stalemates;
+- a **blind judge** that rules factual (`[MECHANICAL]`) stalemates;
 - a **batched user gate + decision ledger** for genuine design choices;
-- **cross-round matching** of re-worded findings.
+- **cross-round matching** of re-worded findings;
+- **single-agent mode** — auto-detects the reviewer (Codex if installed → cross-model, the recommended default; otherwise Claude), so `/spar` works with no second vendor. `--reviewer codex|claude` overrides.
 
-Phases 3–6 (final sweep, unattended mode, the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today.
+Phases 4–7 (final sweep, unattended mode, the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 
 ## Direction
 
@@ -59,7 +60,7 @@ Everything below runs today, except the steps tagged `(planned Pn)`.
       │    ├─ [MECHANICAL] → author fixes immediately, no questions asked
       │    ├─ [DESIGN]     → debate-first; parked, then batched at the gate
       │    ├─ stalemate (2 rounds on the same finding)
-      │    │    ├─ factual → blind Codex judge (code + finding, never the
+      │    │    ├─ factual → blind judge (code + finding, never the
       │    │    │            debate); UPHELD / DISMISSED is binding
       │    │    └─ design  → batched user gate + decision ledger at loop end
       │    └─ author writes a per-finding response → round N+1 (cap: 5)
@@ -71,12 +72,14 @@ Everything below runs today, except the steps tagged `(planned Pn)`.
                      re-verifies diff + requirements → clean ? exit : loop
 ```
 
+The reviewer / judge / matcher run as **Codex** (`codex exec --sandbox read-only`, the default cross-model setup) or **Claude** (`claude -p`, read-only + isolated — single-agent mode); the protocol and invariants are identical either way.
+
 The same structure runs in both directions. The seats swap; the invariants don't:
 
 | Seat | Claude-hosted (`/spar`) | Codex-hosted (planned) |
 |---|---|---|
 | Author (sole writer) | Claude Code session | Codex CLI session |
-| Reviewer (declares `CONVERGED`) | `codex exec --sandbox read-only` | `claude -p` (read-only tools) |
+| Reviewer (declares `CONVERGED`) | `codex exec --sandbox read-only` (default) or `claude -p` (single-agent) | `claude -p` (read-only tools) |
 | Enforcement | Stop hook blocks exit | git pre-commit hook blocks commit (gates landing, not session exit) |
 
 ## Invariants
@@ -92,7 +95,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 |---|---|---|
 | 1 | Core loop: `/spar`, Stop hook, round machinery, per-finding response enforcement, round cap, read-only reviewer | ✅ done |
 | 2 | `[DESIGN]` debate-first (conveyance boundary + decision ledger) · stalemate blind judge · batched end-of-loop gate · cross-round semantic finding matcher | ✅ done |
-| 3 | Single-agent mode: same-family sparring (Claude reviewer/judge/matcher) so `/spar` works without Codex — auto-detect + explicit override; cross-model stays the default | planned (next) |
+| 3 | Single-agent mode: same-family sparring (Claude reviewer/judge/matcher) so `/spar` works without Codex — auto-detect + explicit override; cross-model stays the default | ✅ done |
 | 4 | Final sweep + skip conditions (docs-only, tiny diff) | planned |
 | 5 | Unattended mode + final report | planned |
 | 6 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
@@ -105,16 +108,18 @@ claude plugin marketplace add wnjoon/sparring
 claude plugin install spar@sparring
 ```
 
-Requires the [Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`) and `jq`.
+Requires `jq`. The [Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`) is **recommended** — with it, `/spar` runs cross-model (Claude author ↔ Codex reviewer). Without it, single-agent mode reviews with Claude alone. Force a family with `/spar --reviewer codex|claude -- <task>`.
 
 ## Repository layout
 
 ```
 plugins/spar/            Claude Code plugin (commands, Stop hook)
+  commands/              /spar, /spar-cancel, spar-resolve-family.sh (activation)
   shared/policy.md       loop policy — source of truth for both adapters
   shared/prompts/        reviewer / judge / matcher prompt templates
-docs/superpowers/plans/  phase implementation plans
-tests/                   pure-bash hook tests
+docs/superpowers/        specs, plans, and design-decisions per phase
+tests/                   pure-bash hook + resolver tests
+bench/                   effect benchmark (living report + tasks/oracles)
 ```
 
 ## Development
