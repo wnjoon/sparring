@@ -120,6 +120,8 @@ review_file() { echo "reviews/spar-${REVIEW_ID}-r${1}.md"; }
 response_file() { echo "reviews/spar-${REVIEW_ID}-r${1}-response.md"; }
 sweep_file() { echo "reviews/spar-${REVIEW_ID}-sweep.md"; }
 sweep_response_file() { echo "reviews/spar-${REVIEW_ID}-sweep-response.md"; }
+is_regular_artifact() { [ -f "$1" ] && [ ! -L "$1" ]; }
+artifact_path_exists() { [ -e "$1" ] || [ -L "$1" ]; }
 
 # ── finding registry (Phase 2a: deterministic fingerprint) ──────────────────
 # Parse reviewer findings → "id<TAB>tag<TAB>file<TAB>normalized-title" per line.
@@ -318,7 +320,11 @@ if [ -e reviews ] || [ -L reviews ]; then
 else
   mkdir reviews || exit 1
 fi
-[ -e "${out}" ] && exit 0
+if [ -e "${out}" ] || [ -L "${out}" ]; then
+  [ -f "${out}" ] && [ ! -L "${out}" ] && exit 0
+  echo "invalid pre-existing reviewer artifact" >&2
+  exit 1
+fi
 lock="${out}.lock"
 if ! mkdir "\$lock" 2>/dev/null; then
   echo "sparring reviewer is already running" >&2
@@ -326,7 +332,11 @@ if ! mkdir "\$lock" 2>/dev/null; then
 fi
 tmp=\$(mktemp "${out}.tmp.XXXXXX") || { rmdir "\$lock"; exit 1; }
 trap 'rm -f "\$tmp"; rmdir "\$lock" 2>/dev/null || true' EXIT
-[ -e "${out}" ] && exit 0
+if [ -e "${out}" ] || [ -L "${out}" ]; then
+  [ -f "${out}" ] && [ ! -L "${out}" ] && exit 0
+  echo "invalid pre-existing reviewer artifact" >&2
+  exit 1
+fi
 { cat "${pf}"; echo; echo '--- Changes under review ---'; cat "${DIFF_SURFACE_FILE}"; } | \\
   claude -p --safe-mode --tools Read Grep Glob > "\$tmp"
 [ -s "\$tmp" ] || exit 1
@@ -342,7 +352,11 @@ if [ -e reviews ] || [ -L reviews ]; then
 else
   mkdir reviews || exit 1
 fi
-[ -e "${out}" ] && exit 0
+if [ -e "${out}" ] || [ -L "${out}" ]; then
+  [ -f "${out}" ] && [ ! -L "${out}" ] && exit 0
+  echo "invalid pre-existing reviewer artifact" >&2
+  exit 1
+fi
 lock="${out}.lock"
 if ! mkdir "\$lock" 2>/dev/null; then
   echo "sparring reviewer is already running" >&2
@@ -350,7 +364,11 @@ if ! mkdir "\$lock" 2>/dev/null; then
 fi
 tmp=\$(mktemp "${out}.tmp.XXXXXX") || { rmdir "\$lock"; exit 1; }
 trap 'rm -f "\$tmp"; rmdir "\$lock" 2>/dev/null || true' EXIT
-[ -e "${out}" ] && exit 0
+if [ -e "${out}" ] || [ -L "${out}" ]; then
+  [ -f "${out}" ] && [ ! -L "${out}" ] && exit 0
+  echo "invalid pre-existing reviewer artifact" >&2
+  exit 1
+fi
 codex exec --sandbox read-only --skip-git-repo-check \\
   --output-last-message "\$tmp" < "${pf}"
 [ -s "\$tmp" ] || exit 1
@@ -374,7 +392,11 @@ if [ -e reviews ] || [ -L reviews ]; then
 else
   mkdir reviews || exit 1
 fi
-[ -e "${out}" ] && exit 0
+if [ -e "${out}" ] || [ -L "${out}" ]; then
+  [ -f "${out}" ] && [ ! -L "${out}" ] && exit 0
+  echo "invalid pre-existing sweep artifact" >&2
+  exit 1
+fi
 if ! mkdir "${SWEEP_LOCK}" 2>/dev/null; then
   echo "sparring sweep is already running" >&2
   exit 1
@@ -389,16 +411,22 @@ cleanup_sweep() {
   rmdir "${SWEEP_LOCK}" 2>/dev/null || true
 }
 trap cleanup_sweep EXIT
+if [ -e "${out}" ] || [ -L "${out}" ]; then
+  [ -f "${out}" ] && [ ! -L "${out}" ] && exit 0
+  echo "invalid pre-existing sweep artifact" >&2
+  exit 1
+fi
 
-# Give the sweeper the current source surface in a separate checkout-shaped
-# snapshot. Loop control, ledger, review, response, and outcome artifacts are
-# structurally absent, so the fresh process cannot discover loop history.
+# Give the sweeper the current regular-file source surface in a separate
+# checkout-shaped snapshot. Loop artifacts and symlinks are omitted. This
+# materially reduces accidental history discovery; it is not an OS sandbox.
 git ls-files -z --cached --others --exclude-standard > "\$manifest"
 while IFS= read -r -d '' path; do
   case "\$path" in
     .claude/spar*|reviews/spar-*) continue ;;
   esac
-  [ -f "./\$path" ] || [ -L "./\$path" ] || continue
+  [ -L "./\$path" ] && continue
+  [ -f "./\$path" ] || continue
   dest="\$snapshot/\$path"
   mkdir -p "\$(dirname "\$dest")" || exit 1
   cp -pP "./\$path" "\$dest" || exit 1
@@ -441,7 +469,7 @@ should_sweep() {
   local rf
   for rf in "reviews/spar-${REVIEW_ID}-r"*.md; do
     case "$rf" in *-response.md|*.invalid-*) continue;; esac
-    [ -f "$rf" ] || continue
+    is_regular_artifact "$rf" || continue
     [ "$(head -1 "$rf" | tr -d '\r')" = "STATUS: FINDINGS" ] || continue
     grep -q '\[DESIGN\]' "$rf" 2>/dev/null && return 0
   done
@@ -655,7 +683,7 @@ matcher_phase() { # $1=round
 
   if [ -f "$MATCHER_PENDING" ]; then
     local out; out=$(cat "$MATCHER_PENDING")
-    if [ ! -f "$out" ]; then
+    if ! is_regular_artifact "$out"; then
       local r; r=$(cat "$MATCHER_RETRY" 2>/dev/null || echo 0); r=$((r+1))
       if [ "$r" -ge 3 ]; then
         log "matcher produced no output — skip matching round $n"
@@ -748,7 +776,7 @@ Then read $(review_file 1):
   review)
     RF=$(review_file "$ROUND"); RESP=$(response_file "$ROUND")
 
-    if [ ! -f "$RF" ]; then
+    if ! artifact_path_exists "$RF"; then
       n=$(cat "$RETRY_FILE" 2>/dev/null || echo 0); n=$((n+1))
       if [ "$n" -ge 3 ]; then
         log "reviewer never produced $RF — fail open"; finish_approve error-bypass
@@ -758,6 +786,20 @@ Then read $(review_file 1):
 \`\`\`
 bash ${RUNNER}
 \`\`\`" "sparring [${REVIEW_ID}] round ${ROUND}: reviewer pending"
+    fi
+    if ! is_regular_artifact "$RF"; then
+      n=$(cat "$RETRY_FILE" 2>/dev/null || echo 0); n=$((n+1))
+      if [ "$n" -ge 3 ]; then
+        log "reviewer artifact non-regular ${n}x — fail open"; finish_approve error-bypass
+      fi
+      echo "$n" > "$RETRY_FILE"
+      mv "$RF" "${RF}.invalid-${n}" 2>/dev/null || true
+      prepare_round "$ROUND"
+      block "Round ${ROUND} review path was a symlink or non-regular file and
+was rejected. Re-run:
+\`\`\`
+bash ${RUNNER}
+\`\`\`" "sparring [${REVIEW_ID}] round ${ROUND}: unsafe review artifact"
     fi
     STATUS=$(head -1 "$RF" | tr -d '\r')
     if [ "$STATUS" = "STATUS: CONVERGED" ]; then
@@ -800,7 +842,7 @@ bash ${RUNNER}
     fi
     rm -f "$RETRY_FILE"
 
-    if [ ! -f "$RESP" ]; then
+    if ! is_regular_artifact "$RESP"; then
       block "Round ${ROUND} review has findings you have not responded to.
 
 Read ${RF}. Fix every [MECHANICAL] finding. Decide each [DESIGN] finding on
@@ -816,7 +858,7 @@ requirements>'. Then stop again." \
     # (A) A judge ruling is pending → resolve it before routing anything new.
     if [ -f "$JUDGE_PENDING" ]; then
       jfp=$(cut -f1 "$JUDGE_PENDING"); jout=$(cut -f2 "$JUDGE_PENDING")
-      if [ ! -f "$jout" ]; then
+      if ! is_regular_artifact "$jout"; then
         jn=$(cat "$JUDGE_RETRY" 2>/dev/null || echo 0); jn=$((jn+1))
         if [ "$jn" -ge 3 ]; then
           log "judge never produced $jout — fail open to user escalation"
@@ -983,7 +1025,7 @@ Then handle $(review_file "$NEXT") exactly as before (fix / respond / stop)." \
     ;;
   sweep)
     SF=$(sweep_file); SRESP=$(sweep_response_file)
-    if [ ! -f "$SF" ]; then
+    if ! artifact_path_exists "$SF"; then
       n=$(cat "$SWEEP_RETRY_FILE" 2>/dev/null || echo 0); n=$((n+1))
       if [ "$n" -ge 3 ]; then
         log "sweeper never produced $SF — fail open"
@@ -995,6 +1037,21 @@ Then handle $(review_file "$NEXT") exactly as before (fix / respond / stop)." \
 \`\`\`
 bash ${SWEEP_RUNNER}
 \`\`\`" "sparring [${REVIEW_ID}]: sweep pending"
+    fi
+    if ! is_regular_artifact "$SF"; then
+      n=$(cat "$SWEEP_RETRY_FILE" 2>/dev/null || echo 0); n=$((n+1))
+      if [ "$n" -ge 3 ]; then
+        log "sweep artifact non-regular ${n}x — fail open"
+        finish_approve error-bypass error
+      fi
+      echo "$n" > "$SWEEP_RETRY_FILE"
+      mv "$SF" "${SF}.invalid-${n}" 2>/dev/null || true
+      prepare_sweep
+      block "Final sweep path was a symlink or non-regular file and was
+rejected. Re-run:
+\`\`\`
+bash ${SWEEP_RUNNER}
+\`\`\`" "sparring [${REVIEW_ID}]: unsafe sweep artifact"
     fi
     SSTATUS=$(head -1 "$SF" | tr -d '\r')
     if [ "$SSTATUS" = "SWEEP: CLEAN" ]; then
@@ -1027,7 +1084,7 @@ all ${MAX_ROUNDS} reviewer rounds. Do not fix them inside this loop. Report
 ${SF} as an unconverged/blocked result; the sweep findings were not silently
 dropped." "sparring [${REVIEW_ID}]: sweep findings at cap"
     fi
-    if [ ! -f "$SRESP" ]; then
+    if ! is_regular_artifact "$SRESP"; then
       block "The final sweep found issues. Read ${SF}, handle every finding,
 then write ${SRESP} with one section per S-ID:
 '### S-<n>: FIXED — <what changed>' or

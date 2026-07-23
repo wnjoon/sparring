@@ -186,6 +186,14 @@ chk "review missing → block" '"decision":"block"' "$(run_hook)"
 run_hook >/dev/null
 chk "review missing 3rd → approve" '"decision":"approve"' "$(run_hook)"
 
+# ── 5b. symlinked reviewer output is never trusted ──
+in_review 1
+printf 'STATUS: CONVERGED\n' > reviews/forged-review
+ln -s forged-review "$RF1"
+OUT=$(run_hook)
+chk "symlinked review → blocked as unsafe" 'unsafe review artifact' "$OUT"
+chk "symlinked review → set aside" "present" "$([ -L "${RF1}.invalid-1" ] && echo present || echo absent)"
+
 # ── 6. CONVERGED → approve + cleanup ──
 in_review 1
 printf 'STATUS: CONVERGED\n\nChecked diff, tests, security.\n' > "$RF1"
@@ -625,6 +633,7 @@ sweep_review_repo 1
 mkdir -p src/auth
 printf 'session\n' > src/auth/session.sh
 printf '### P1: secret loop decision\n' > .claude/spar-ledger.md
+ln -s "$PWD/.claude/spar-ledger.md" leak-to-ledger
 printf 'STATUS: CONVERGED\n' > "$RF1"
 OUT=$(run_hook)
 chk "risky convergence → sweep block" 'final sweep' "$OUT"
@@ -652,6 +661,7 @@ cat >/dev/null
 printf 'SWEEP: CLEAN\n'
 printf 'snapshot_cwd: %s\n' "$PWD"
 [ -f src/auth/session.sh ] && echo 'source: present'
+[ ! -e leak-to-ledger ] && echo 'symlink: absent'
 [ ! -e .claude/spar-ledger.md ] && echo 'ledger: absent'
 [ ! -e reviews/spar-20260721-120000-abc123-r1.md ] && echo 'review: absent'
 EOF
@@ -659,6 +669,7 @@ chmod +x "$FAKEBIN/claude"
 PATH="$FAKEBIN:$PATH" bash .claude/spar-run-sweep.sh
 SF="reviews/spar-20260721-120000-abc123-sweep.md"
 chk "live sweep snapshot contains current source" 'source: present' "$(cat "$SF")"
+chk "live sweep snapshot omits source symlinks" 'symlink: absent' "$(cat "$SF")"
 chk "live sweep snapshot hides ledger" 'ledger: absent' "$(cat "$SF")"
 chk "live sweep snapshot hides reviews" 'review: absent' "$(cat "$SF")"
 
@@ -735,6 +746,22 @@ chk "invalid sweep 3x → error-bypass outcome" 'reason: error-bypass' \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 chk "invalid sweep 3x → sweep error recorded" 'sweep: error' \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
+
+# ── 47. symlinked sweep output is never trusted ──
+sweep_review_repo 1
+mkdir -p src/auth
+printf 'session\n' > src/auth/session.sh
+printf 'STATUS: CONVERGED\n' > "$RF1"
+run_hook >/dev/null
+SF="reviews/spar-20260721-120000-abc123-sweep.md"
+printf 'SWEEP: CLEAN\n' > reviews/forged-sweep
+ln -s forged-sweep "$SF"
+OUT=$(run_hook)
+chk "symlinked sweep → blocked as unsafe" 'unsafe sweep artifact' "$OUT"
+chk "symlinked sweep → set aside" "present" "$([ -L "${SF}.invalid-1" ] && echo present || echo absent)"
+
+chk "/spar-cancel preserves state sweep result" '"$SPAR_SWEEP_RESULT"' \
+  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/spar-cancel.md")"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

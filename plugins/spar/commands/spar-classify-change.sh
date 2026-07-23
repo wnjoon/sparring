@@ -28,9 +28,9 @@ status_file="$tmp_dir/status"
 if [ "$base" = none ]; then
   : > "$numstat"; : > "$names"; : > "$raw"
 else
-  git diff --numstat -z "$base" > "$numstat" 2>/dev/null || exit 3
-  git diff --name-status -z "$base" > "$names" 2>/dev/null || exit 3
-  git diff --raw -z "$base" > "$raw" 2>/dev/null || exit 3
+  git diff -C --find-copies-harder --numstat -z "$base" > "$numstat" 2>/dev/null || exit 3
+  git diff -C --find-copies-harder --name-status -z "$base" > "$names" 2>/dev/null || exit 3
+  git diff -C --find-copies-harder --raw -z "$base" > "$raw" 2>/dev/null || exit 3
 fi
 git status --porcelain=v1 -z --untracked-files=all > "$status_file" 2>/dev/null || exit 3
 

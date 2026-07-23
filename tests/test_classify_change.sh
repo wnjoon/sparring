@@ -70,6 +70,12 @@ OUT=$(bash "$C" "$BASE")
 chk "rename unsafe" "unsafe_kind: true" "$OUT"
 
 fresh
+cp base.txt copied.txt
+git add copied.txt
+OUT=$(bash "$C" "$BASE")
+chk "copy detected as unsafe" "unsafe_kind: true" "$OUT"
+
+fresh
 git rm -q base.txt
 OUT=$(bash "$C" "$BASE")
 chk "delete unsafe" "unsafe_kind: true" "$OUT"

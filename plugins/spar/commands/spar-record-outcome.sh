@@ -12,7 +12,7 @@ case "$reason" in
   *) echo "error: invalid sparring outcome reason: $reason" >&2; exit 2 ;;
 esac
 case "$sweep_result" in
-  not-run|not-triggered|clean|findings|error) ;;
+  not-run|not-triggered|pending|clean|findings|error) ;;
   *) echo "error: invalid sweep result: $sweep_result" >&2; exit 2 ;;
 esac
 

@@ -68,6 +68,10 @@ bash "$WRITER" cancelled .claude/spar.local.md not-run
 chk "cancelled reason accepted" "reason: cancelled" "$(cat reviews/*-outcome.md)"
 
 fresh
+bash "$WRITER" cancelled .claude/spar.local.md pending
+chk "pending sweep state accepted for cancellation" "sweep: pending" "$(cat reviews/*-outcome.md)"
+
+fresh
 bash "$WRITER" bogus .claude/spar.local.md not-run >/dev/null 2>&1
 chk "invalid reason rejected" "nonzero" "$([ "$?" -ne 0 ] && echo nonzero || echo zero)"
 
