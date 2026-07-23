@@ -15,9 +15,11 @@ First, activate the loop by running this setup command:
 ```bash
 set -e
 if [ -f .claude/spar.local.md ]; then echo "Error: a sparring loop is already active. Use /spar-cancel first."; exit 1; fi
-set -f
-RESOLVED="$("${CLAUDE_PLUGIN_ROOT}/commands/spar-resolve-family.sh" $ARGUMENTS)" || { printf '%s\n' "$RESOLVED"; exit 1; }
-set +f
+SPAR_RAW="$(cat <<'SPAR_ARGS_EOF'
+$ARGUMENTS
+SPAR_ARGS_EOF
+)"
+RESOLVED="$("${CLAUDE_PLUGIN_ROOT}/commands/spar-resolve-family.sh" "$SPAR_RAW")" || { printf '%s\n' "$RESOLVED" >&2; exit 1; }
 SPAR_REVIEWER="${RESOLVED%%$'\t'*}"
 SPAR_TASK="${RESOLVED#*$'\t'}"
 mkdir -p .claude reviews
@@ -26,7 +28,7 @@ mkdir -p .claude reviews
 # author's response files are debate content — reviewers must stay blind to them).
 # Local-only via .git/info/exclude; never touches the user's tracked .gitignore.
 if git rev-parse --git-dir >/dev/null 2>&1; then
-  SPAR_EXCLUDE="$(git rev-parse --git-dir)/info/exclude"
+  SPAR_EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
   for pat in 'reviews/spar-*' '.claude/spar*'; do
     grep -qxF "$pat" "$SPAR_EXCLUDE" 2>/dev/null || printf '%s\n' "$pat" >> "$SPAR_EXCLUDE"
   done

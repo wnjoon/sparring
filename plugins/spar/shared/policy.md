@@ -16,11 +16,12 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
 
 1. Author implements the task, then tries to stop; a deterministic hook
    blocks exit and prepares round 1.
-2. Reviewer receives: task description + instruction to inspect the diff
-   itself. Conveyance boundary — the reviewer is NEVER told what was fixed
-   or rejected; every round is a full fresh re-review against the frozen
-   baseline. The only loop-generated context conveyed is the decision ledger
-   (empty until Phase 2c).
+2. Reviewer receives: task description + instruction to inspect the change
+   surface — the codex reviewer runs git itself in its sandbox; the claude
+   reviewer is given the diff inline. Conveyance boundary — the reviewer is
+   NEVER told what was fixed or rejected; every round is a full fresh
+   re-review against the frozen baseline. The only loop-generated context
+   conveyed is the decision ledger (empty until Phase 2c).
 3. Reviewer output: first line `STATUS: CONVERGED` or `STATUS: FINDINGS`;
    findings tagged `[MECHANICAL]` or `[DESIGN]` with file/problem/suggestion.
 4. Author must fix every MECHANICAL finding, decide DESIGN findings on the
