@@ -1,7 +1,7 @@
 {
   "name": "spar",
-  "version": "0.2.0",
-  "description": "Sparring loop: Claude implements, Codex reviews read-only, Stop hook forces rounds until the reviewer declares CONVERGED",
+  "version": "0.3.0",
+  "description": "Enforced review sparring with blind rounds, safe skips, intent pointers, and a risk-triggered final sweep",
   "author": {
     "name": "wnjoon"
   },

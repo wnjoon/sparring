@@ -4,13 +4,13 @@
     "name": "wnjoon"
   },
   "metadata": {
-    "description": "Cross-model review sparring loop: author implements, an independent reviewer iterates findings until it declares convergence"
+    "description": "Enforced review sparring with blind rounds, safe skips, intent pointers, and a risk-triggered final sweep"
   },
   "plugins": [
     {
       "name": "spar",
       "source": "./plugins/spar",
-      "description": "Sparring loop: Claude implements, Codex reviews read-only, Stop hook forces rounds until the reviewer declares CONVERGED",
+      "description": "Enforced review sparring with blind rounds, safe skips, intent pointers, and a risk-triggered final sweep",
       "license": "MIT",
       "keywords": ["code-review", "codex", "convergence", "quality"]
     }

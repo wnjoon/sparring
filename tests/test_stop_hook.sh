@@ -27,6 +27,8 @@ review_id: 20260721-120000-abc123
 base_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 reviewer: codex
 max_rounds: 5
+sweep_done: false
+sweep_result: not-run
 ---
 
 Add a fizzbuzz function with tests
@@ -85,6 +87,87 @@ chk "prompt resolves ledger slot (no {{LEDGER}})" "absent" \
 chk "prev-context template deleted from plugin" "absent" \
   "$([ -f "$CLAUDE_PLUGIN_ROOT/shared/prompts/reviewer-prev-context.md" ] && echo present || echo absent)"
 
+# ── 4d. Phase 4 skip: small + safe only, always reported and persisted ──
+skip_repo() {
+  fresh_dir
+  git config user.email sparring@example.invalid
+  git config user.name sparring-test
+  printf 'base\n' > tracked.txt
+  git add tracked.txt && git commit -q -m base
+  BASE_REAL=$(git rev-parse HEAD)
+  mkdir -p .git/info
+  printf '.claude/spar*\nreviews/spar-*\n' >> .git/info/exclude
+  write_state task 0
+  sed -i '' "s/^base_sha: .*/base_sha: ${BASE_REAL}/" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^base_sha: .*/base_sha: ${BASE_REAL}/" .claude/spar.local.md
+}
+
+skip_repo
+printf 'safe\n' >> tracked.txt
+OUT=$(run_hook)
+chk "small safe change → reported skip" 'skipped' "$OUT"
+chk "skip → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+chk "skip → durable outcome" 'reason: skipped' "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
+chk "skip → next stop approves" '"decision":"approve"' "$(run_hook)"
+
+skip_repo
+OUT=$(run_hook)
+chk "zero diff → review, never skip" 'round 1' "$OUT"
+
+skip_repo
+mkdir -p src/auth
+printf 'session\n' > src/auth/session.sh
+OUT=$(run_hook)
+chk "risky touched path → review" 'round 1' "$OUT"
+
+skip_repo
+mkdir -p auth
+printf 'base auth\n' > auth/session.sh
+git add auth/session.sh && git commit -q -m auth
+BASE_REAL=$(git rev-parse HEAD)
+sed -i '' "s/^base_sha: .*/base_sha: ${BASE_REAL}/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: ${BASE_REAL}/" .claude/spar.local.md
+printf 'docs\n' > README.md
+OUT=$(run_hook)
+chk "repo-risk only does not block skip" 'skipped' "$OUT"
+
+skip_repo
+sed -i '' '/^reviewer:/a\
+include_dirty: true' .claude/spar.local.md 2>/dev/null \
+  || sed -i '/^reviewer:/a include_dirty: true' .claude/spar.local.md
+printf 'safe\n' >> tracked.txt
+OUT=$(run_hook)
+chk "include-dirty disables skip" 'round 1' "$OUT"
+
+skip_repo
+i=1
+while [ "$i" -le 11 ]; do printf 'line %s\n' "$i" >> tracked.txt; i=$((i+1)); done
+OUT=$(run_hook)
+chk "11-line change → review" 'round 1' "$OUT"
+
+# ── 4e. intent pointers are harvested into each reviewer prompt ──
+skip_repo
+mkdir -p .claude/rules src/auth
+cat > .claude/rules/auth.md <<'EOF'
+---
+paths:
+  - "src/auth/**/*.sh"
+---
+# Auth design
+EOF
+git add .claude/rules/auth.md && git commit -q -m rule
+BASE_REAL=$(git rev-parse HEAD)
+sed -i '' "s/^base_sha: .*/base_sha: ${BASE_REAL}/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: ${BASE_REAL}/" .claude/spar.local.md
+printf '# Intentional because compatibility requires it.\necho auth\n' > src/auth/new.sh
+run_hook >/dev/null
+chk "round 1 prompt has matched intent rule pointer" '.claude/rules/auth.md:1' "$(cat .claude/spar-reviewer-prompt.txt)"
+chk "round 1 prompt has comment pointer" 'comment: src/auth/new.sh:1' "$(cat .claude/spar-reviewer-prompt.txt)"
+chk "intent content not copied into prompt" "absent" \
+  "$(grep -q 'compatibility requires it' .claude/spar-reviewer-prompt.txt && echo present || echo absent)"
+chk "prompt resolves intent slot" "absent" \
+  "$(grep -qF '{{INTENT}}' .claude/spar-reviewer-prompt.txt && echo present || echo absent)"
+
 # helper: enter review phase for round $1
 in_review() { fresh_dir; write_state review "$1"; mkdir -p reviews; }
 RF1="reviews/spar-20260721-120000-abc123-r1.md"
@@ -99,8 +182,11 @@ chk "review missing 3rd → approve" '"decision":"approve"' "$(run_hook)"
 # ── 6. CONVERGED → approve + cleanup ──
 in_review 1
 printf 'STATUS: CONVERGED\n\nChecked diff, tests, security.\n' > "$RF1"
+sed -i '' 's/^sweep_done: false/sweep_done: true/; s/^sweep_result: not-run/sweep_result: clean/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^sweep_done: false/sweep_done: true/; s/^sweep_result: not-run/sweep_result: clean/' .claude/spar.local.md
 chk "converged → approve" '"decision":"approve"' "$(run_hook)"
 chk "converged → state removed" "gone" "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
+chk "converged → durable outcome" "reason: converged" "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
 # ── 7. FINDINGS + no response → block asking for response file ──
 in_review 1
@@ -134,11 +220,14 @@ printf '### F5-1: REJECTED — out of scope for this task\n' > "$RP5"
 OUT=$(run_hook)
 chk "cap → block with unconverged notice" 'unconverged' "$OUT"
 chk "cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+chk "cap → durable outcome before cleanup" "reason: cap" "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 chk "cap → next stop approves" '"decision":"approve"' "$(run_hook)"
 
 # ── 10. CRLF status line tolerated ──
 in_review 1
 printf 'STATUS: CONVERGED\r\n' > "$RF1"
+sed -i '' 's/^sweep_done: false/sweep_done: true/; s/^sweep_result: not-run/sweep_result: clean/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^sweep_done: false/sweep_done: true/; s/^sweep_result: not-run/sweep_result: clean/' .claude/spar.local.md
 chk "CRLF converged → approve" '"decision":"approve"' "$(run_hook)"
 
 # ── 11. invalid reviewer output → set aside + retry, 3rd → fail-open ──
@@ -152,6 +241,7 @@ printf '\n' > "$RF1"
 run_hook >/dev/null
 printf 'still broken\n' > "$RF1"
 chk "invalid 3rd → fail open" '"decision":"approve"' "$(run_hook)"
+chk "invalid 3rd → error-bypass outcome" "reason: error-bypass" "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
 # ── 12. registry: DESIGN finding rejected once → recorded, streak 1, open ──
 in_review 1
@@ -499,6 +589,123 @@ printf '### F1-1: FIXED — y\n' > "$RP1"
 run_hook >/dev/null                          # prepares round 2 → emit_runner claude → writes .claude/spar-diff.txt
 chk "claude diff-surface captures the real change" 'line two added' "$(cat .claude/spar-diff.txt 2>/dev/null)"
 chk "claude diff-surface has git-diff header" 'diff --git' "$(cat .claude/spar-diff.txt 2>/dev/null)"
+
+# helpers for Phase 4 final-sweep scenarios
+sweep_review_repo() { # $1=round
+  fresh_dir
+  git config user.email sparring@example.invalid
+  git config user.name sparring-test
+  printf 'base\n' > tracked.txt
+  git add tracked.txt && git commit -q -m base
+  BASE_REAL=$(git rev-parse HEAD)
+  mkdir -p .git/info reviews
+  printf '.claude/spar*\nreviews/spar-*\n' >> .git/info/exclude
+  write_state review "$1"
+  sed -i '' "s/^base_sha: .*/base_sha: ${BASE_REAL}/" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^base_sha: .*/base_sha: ${BASE_REAL}/" .claude/spar.local.md
+}
+
+# ── 40. clean round-1 convergence with no risk → no sweep ──
+sweep_review_repo 1
+printf 'STATUS: CONVERGED\n' > "$RF1"
+OUT=$(run_hook)
+chk "no risk signal → convergence without sweep" '"decision":"approve"' "$OUT"
+chk "no risk signal → outcome says sweep not triggered" 'sweep: not-triggered' \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
+
+# ── 41. touched risk → fresh Claude author-family sweep, blind to ledger ──
+sweep_review_repo 1
+mkdir -p src/auth
+printf 'session\n' > src/auth/session.sh
+printf '### P1: secret loop decision\n' > .claude/spar-ledger.md
+printf 'STATUS: CONVERGED\n' > "$RF1"
+OUT=$(run_hook)
+chk "risky convergence → sweep block" 'final sweep' "$OUT"
+chk "sweep phase persisted" 'phase: sweep' "$(cat .claude/spar.local.md)"
+chk "sweep armed once" 'sweep_done: true' "$(cat .claude/spar.local.md)"
+chk_file "sweep runner generated" .claude/spar-run-sweep.sh
+chk "sweep runner always uses Claude author family" 'claude -p' "$(cat .claude/spar-run-sweep.sh)"
+chk "sweep runner never uses reviewer codex" "absent" \
+  "$(grep -q 'codex exec' .claude/spar-run-sweep.sh && echo present || echo absent)"
+chk "sweep prompt is blind to loop ledger" "absent" \
+  "$(grep -q 'secret loop decision' .claude/spar-sweep-prompt.txt && echo present || echo absent)"
+chk "sweep prompt forbids reviewer convergence signal" 'Never write `STATUS: CONVERGED`' \
+  "$(cat .claude/spar-sweep-prompt.txt)"
+
+# ── 42. clean sweep preserves reviewer convergence and records clean ──
+printf 'SWEEP: CLEAN\n\nChecked requirements and diff.\n' > "reviews/spar-20260721-120000-abc123-sweep.md"
+OUT=$(run_hook)
+chk "clean sweep → approve" '"decision":"approve"' "$OUT"
+chk "clean sweep → converged outcome" 'reason: converged' \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
+chk "clean sweep → outcome records clean" 'sweep: clean' \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
+
+# ── 43. sweep findings → response → next reviewer round; never re-arm ──
+sweep_review_repo 1
+mkdir -p src/auth
+printf 'session\n' > src/auth/session.sh
+printf 'STATUS: CONVERGED\n' > "$RF1"
+run_hook >/dev/null
+SF="reviews/spar-20260721-120000-abc123-sweep.md"
+SRESP="reviews/spar-20260721-120000-abc123-sweep-response.md"
+printf 'SWEEP: FINDINGS\n\n### S-1 [MECHANICAL] missing guard\n- file: src/auth/session.sh:1\n' > "$SF"
+OUT=$(run_hook)
+chk "sweep findings → response required" 'sweep-response.md' "$OUT"
+printf '### S-1: FIXED — added guard\n' > "$SRESP"
+OUT=$(run_hook)
+chk "sweep response → reviewer round 2" 'round 2' "$OUT"
+chk "post-sweep state round 2" 'round: 2' "$(cat .claude/spar.local.md)"
+chk "post-sweep result persisted" 'sweep_result: findings' "$(cat .claude/spar.local.md)"
+RF2="reviews/spar-20260721-120000-abc123-r2.md"
+printf 'STATUS: CONVERGED\n' > "$RF2"
+OUT=$(run_hook)
+chk "post-sweep reviewer convergence → approve" '"decision":"approve"' "$OUT"
+chk "post-sweep convergence keeps findings result" 'sweep: findings' \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
+
+# ── 44. sweep findings at cap → honest blocked outcome, no response/fix loop ──
+sweep_review_repo 5
+mkdir -p src/auth
+printf 'session\n' > src/auth/session.sh
+RF5="reviews/spar-20260721-120000-abc123-r5.md"
+printf 'STATUS: CONVERGED\n' > "$RF5"
+run_hook >/dev/null
+printf 'SWEEP: FINDINGS\n\n### S-1 [MECHANICAL] cap issue\n' > "$SF"
+OUT=$(run_hook)
+chk "sweep findings at cap → blocked report" 'at cap' "$OUT"
+chk "sweep findings at cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+chk "sweep findings at cap → durable reason" 'reason: sweep-findings-at-cap' \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
+
+# ── 45. history triggers: 3+ rounds and any prior design finding ──
+sweep_review_repo 3
+RF3="reviews/spar-20260721-120000-abc123-r3.md"
+printf 'STATUS: CONVERGED\n' > "$RF3"
+OUT=$(run_hook)
+chk "3+ rounds → sweep" 'final sweep' "$OUT"
+
+sweep_review_repo 2
+printf 'STATUS: FINDINGS\n### F1-1 [DESIGN] prior choice\n' > "$RF1"
+printf 'STATUS: CONVERGED\n' > "$RF2"
+OUT=$(run_hook)
+chk "prior design finding → sweep" 'final sweep' "$OUT"
+
+# ── 46. invalid sweep output retries finitely then records error-bypass ──
+sweep_review_repo 1
+mkdir -p src/auth
+printf 'session\n' > src/auth/session.sh
+printf 'STATUS: CONVERGED\n' > "$RF1"
+run_hook >/dev/null
+printf 'bad sweep\n' > "$SF"; run_hook >/dev/null
+printf 'still bad\n' > "$SF"; run_hook >/dev/null
+printf 'nope\n' > "$SF"
+OUT=$(run_hook)
+chk "invalid sweep 3x → fail-open approve" '"decision":"approve"' "$OUT"
+chk "invalid sweep 3x → error-bypass outcome" 'reason: error-bypass' \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
+chk "invalid sweep 3x → sweep error recorded" 'sweep: error' \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
