@@ -140,7 +140,13 @@ while IFS= read -r -d '' meta <&3; do
   oldmode="${meta%% *}"; rest="${meta#* }"; newmode="${rest%% *}"
   IFS= read -r -d '' _path <&3 || { unsafe_kind=true; break; }
   case "$meta" in *" R"*|*" C"*) IFS= read -r -d '' _path2 <&3 || true;; esac
-  [ "$oldmode" = "$newmode" ] || unsafe_kind=true
+  # A normal tracked add is 000000 -> 100644 and is not a mode change.
+  # Deletes are already unsafe via name-status. Compare modes only when both
+  # sides exist so staged adds behave like equivalent untracked adds.
+  if [ "$oldmode" != 000000 ] && [ "$newmode" != 000000 ] \
+    && [ "$oldmode" != "$newmode" ]; then
+    unsafe_kind=true
+  fi
   case "$oldmode:$newmode" in
     *120000*|*160000*) unsafe_kind=true ;;
   esac

@@ -68,6 +68,9 @@ chk "state → phase review" 'phase: review' "$(cat .claude/spar.local.md)"
 chk "state → round 1" 'round: 1' "$(cat .claude/spar.local.md)"
 chk "runner targets r1 review file" 'reviews/spar-20260721-120000-abc123-r1.md' "$(cat .claude/spar-run-reviewer.sh)"
 chk "runner is read-only sandbox" 'sandbox read-only' "$(cat .claude/spar-run-reviewer.sh)"
+chk "reviewer runner takes an atomic lock" '.lock' "$(cat .claude/spar-run-reviewer.sh)"
+chk "reviewer runner publishes from a unique temp file" 'mktemp' "$(cat .claude/spar-run-reviewer.sh)"
+chk "reviewer runner never overwrites an artifact" 'ln "$tmp"' "$(cat .claude/spar-run-reviewer.sh)"
 chk "prompt pins diff baseline" 'git diff aaaaaaaa' "$(cat .claude/spar-reviewer-prompt.txt)"
 chk "prompt covers untracked files" 'untracked-files' "$(cat .claude/spar-reviewer-prompt.txt)"
 chk "runner feeds prompt via stdin" '< ".claude/spar-reviewer-prompt.txt"' "$(cat .claude/spar-run-reviewer.sh)"
@@ -86,6 +89,10 @@ chk "prompt resolves ledger slot (no {{LEDGER}})" "absent" \
   "$(grep -qF '{{LEDGER}}' .claude/spar-reviewer-prompt.txt && echo present || echo absent)"
 chk "prev-context template deleted from plugin" "absent" \
   "$([ -f "$CLAUDE_PLUGIN_ROOT/shared/prompts/reviewer-prev-context.md" ] && echo present || echo absent)"
+chk "/spar creates initial state through mktemp" 'mktemp .claude/spar.local.md.tmp.XXXXXX' \
+  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/spar.md")"
+chk "/spar atomically publishes initial state" 'mv "$SPAR_STATE_TMP" .claude/spar.local.md' \
+  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/spar.md")"
 
 # ── 4d. Phase 4 skip: small + safe only, always reported and persisted ──
 skip_repo() {
@@ -627,13 +634,35 @@ chk_file "sweep runner generated" .claude/spar-run-sweep.sh
 chk "sweep runner always uses Claude author family" 'claude -p' "$(cat .claude/spar-run-sweep.sh)"
 chk "sweep runner never uses reviewer codex" "absent" \
   "$(grep -q 'codex exec' .claude/spar-run-sweep.sh && echo present || echo absent)"
+chk "sweep runner builds isolated source snapshot" 'git ls-files -z' \
+  "$(cat .claude/spar-run-sweep.sh)"
+chk "sweep snapshot excludes loop artifacts" '.claude/spar*|reviews/spar-*' \
+  "$(cat .claude/spar-run-sweep.sh)"
+chk "sweeper runs from isolated snapshot" 'cd "$snapshot"' \
+  "$(cat .claude/spar-run-sweep.sh)"
 chk "sweep prompt is blind to loop ledger" "absent" \
   "$(grep -q 'secret loop decision' .claude/spar-sweep-prompt.txt && echo present || echo absent)"
 chk "sweep prompt forbids reviewer convergence signal" 'Never write `STATUS: CONVERGED`' \
   "$(cat .claude/spar-sweep-prompt.txt)"
 
+FAKEBIN=$(mktemp -d)
+cat > "$FAKEBIN/claude" <<'EOF'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'SWEEP: CLEAN\n'
+printf 'snapshot_cwd: %s\n' "$PWD"
+[ -f src/auth/session.sh ] && echo 'source: present'
+[ ! -e .claude/spar-ledger.md ] && echo 'ledger: absent'
+[ ! -e reviews/spar-20260721-120000-abc123-r1.md ] && echo 'review: absent'
+EOF
+chmod +x "$FAKEBIN/claude"
+PATH="$FAKEBIN:$PATH" bash .claude/spar-run-sweep.sh
+SF="reviews/spar-20260721-120000-abc123-sweep.md"
+chk "live sweep snapshot contains current source" 'source: present' "$(cat "$SF")"
+chk "live sweep snapshot hides ledger" 'ledger: absent' "$(cat "$SF")"
+chk "live sweep snapshot hides reviews" 'review: absent' "$(cat "$SF")"
+
 # ── 42. clean sweep preserves reviewer convergence and records clean ──
-printf 'SWEEP: CLEAN\n\nChecked requirements and diff.\n' > "reviews/spar-20260721-120000-abc123-sweep.md"
 OUT=$(run_hook)
 chk "clean sweep → approve" '"decision":"approve"' "$OUT"
 chk "clean sweep → converged outcome" 'reason: converged' \

@@ -30,6 +30,18 @@ paths:
 ---
 # Web rationale
 EOF
+cat > .claude/rules/inline-scalar.md <<'EOF'
+---
+paths: "src/api/**/*.ts"
+---
+# Inline scalar rationale
+EOF
+cat > .claude/rules/inline-array.md <<'EOF'
+---
+paths: ["src/web/**/*.tsx", "lib/**/*.ts"]
+---
+# Inline array rationale
+EOF
 cat > AGENTS.md <<'EOF'
 # Commands
 Run tests.
@@ -48,6 +60,7 @@ EOF
 bash "$H" "$BASE" .claude/intent.txt
 OUT=$(cat .claude/intent.txt)
 chk "matching path-scoped rule included" "rule: .claude/rules/api.md:1" "$OUT"
+chk "inline scalar path rule included" "rule: .claude/rules/inline-scalar.md:1" "$OUT"
 chk "unrelated rule excluded" "absent" "$(grep -q 'web.md' .claude/intent.txt && echo present || echo absent)"
 chk "ancestor guide rationale pointer included" "guide: AGENTS.md:4" "$OUT"
 chk "intentional comment pointer included" "comment: src/api/new.ts:1" "$OUT"
@@ -57,6 +70,7 @@ mkdir -p src/web
 printf 'export const Web = 1;\n' > src/web/new.tsx
 bash "$H" "$BASE" .claude/intent.txt
 chk "re-harvest sees grown surface" "rule: .claude/rules/web.md:1" "$(cat .claude/intent.txt)"
+chk "inline array path rule included" "rule: .claude/rules/inline-array.md:1" "$(cat .claude/intent.txt)"
 
 printf 'odd\n' > $'src/api/control\nname.ts'
 bash "$H" "$BASE" .claude/intent.txt

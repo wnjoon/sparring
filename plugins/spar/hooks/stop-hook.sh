@@ -313,18 +313,48 @@ emit_runner() { # $1=runner_path  $2=prompt_file  $3=out_file
 # prompt via STDIN (variadic --tools eats a positional arg), --tools as separate
 # args, --safe-mode for isolation. No Bash → the diff is fed in via the prompt.
 set -uo pipefail
-mkdir -p reviews
+if [ -e reviews ] || [ -L reviews ]; then
+  [ -d reviews ] && [ ! -L reviews ] || exit 1
+else
+  mkdir reviews || exit 1
+fi
+[ -e "${out}" ] && exit 0
+lock="${out}.lock"
+if ! mkdir "\$lock" 2>/dev/null; then
+  echo "sparring reviewer is already running" >&2
+  exit 1
+fi
+tmp=\$(mktemp "${out}.tmp.XXXXXX") || { rmdir "\$lock"; exit 1; }
+trap 'rm -f "\$tmp"; rmdir "\$lock" 2>/dev/null || true' EXIT
+[ -e "${out}" ] && exit 0
 { cat "${pf}"; echo; echo '--- Changes under review ---'; cat "${DIFF_SURFACE_FILE}"; } | \\
-  claude -p --safe-mode --tools Read Grep Glob > "${out}"
+  claude -p --safe-mode --tools Read Grep Glob > "\$tmp"
+[ -s "\$tmp" ] || exit 1
+ln "\$tmp" "${out}" || exit 1
 EOF
   else
     cat > "$runner" <<EOF
 #!/usr/bin/env bash
 # sparring reviewer runner — codex family (generated; do not edit)
 set -uo pipefail
-mkdir -p reviews
+if [ -e reviews ] || [ -L reviews ]; then
+  [ -d reviews ] && [ ! -L reviews ] || exit 1
+else
+  mkdir reviews || exit 1
+fi
+[ -e "${out}" ] && exit 0
+lock="${out}.lock"
+if ! mkdir "\$lock" 2>/dev/null; then
+  echo "sparring reviewer is already running" >&2
+  exit 1
+fi
+tmp=\$(mktemp "${out}.tmp.XXXXXX") || { rmdir "\$lock"; exit 1; }
+trap 'rm -f "\$tmp"; rmdir "\$lock" 2>/dev/null || true' EXIT
+[ -e "${out}" ] && exit 0
 codex exec --sandbox read-only --skip-git-repo-check \\
-  --output-last-message "${out}" < "${pf}"
+  --output-last-message "\$tmp" < "${pf}"
+[ -s "\$tmp" ] || exit 1
+ln "\$tmp" "${out}" || exit 1
 EOF
   fi
   chmod +x "$runner"
@@ -339,18 +369,45 @@ emit_sweep_runner() { # fresh author-family Claude, always read-only
 #!/usr/bin/env bash
 # sparring final sweep — fresh Claude author-family instance (generated)
 set -uo pipefail
-mkdir -p reviews
+if [ -e reviews ] || [ -L reviews ]; then
+  [ -d reviews ] && [ ! -L reviews ] || exit 1
+else
+  mkdir reviews || exit 1
+fi
 [ -e "${out}" ] && exit 0
 if ! mkdir "${SWEEP_LOCK}" 2>/dev/null; then
   echo "sparring sweep is already running" >&2
   exit 1
 fi
-tmp="${out}.tmp.\$\$"
-trap 'rm -f "\$tmp"; rmdir "${SWEEP_LOCK}" 2>/dev/null || true' EXIT
-{ cat "${SWEEP_PROMPT_FILE}"; echo; echo '--- Changes under sweep ---'; cat "${DIFF_SURFACE_FILE}"; } | \\
-  claude -p --safe-mode --tools Read Grep Glob > "\$tmp"
+tmp=\$(mktemp "${out}.tmp.XXXXXX") || { rmdir "${SWEEP_LOCK}"; exit 1; }
+snapshot=\$(mktemp -d) || { rm -f "\$tmp"; rmdir "${SWEEP_LOCK}"; exit 1; }
+manifest=\$(mktemp) || { rm -f "\$tmp"; rm -rf "\$snapshot"; rmdir "${SWEEP_LOCK}"; exit 1; }
+source_root=\$(pwd -P)
+cleanup_sweep() {
+  rm -f "\$tmp" "\$manifest"
+  [ -n "\$snapshot" ] && [ -d "\$snapshot" ] && rm -rf "\$snapshot"
+  rmdir "${SWEEP_LOCK}" 2>/dev/null || true
+}
+trap cleanup_sweep EXIT
+
+# Give the sweeper the current source surface in a separate checkout-shaped
+# snapshot. Loop control, ledger, review, response, and outcome artifacts are
+# structurally absent, so the fresh process cannot discover loop history.
+git ls-files -z --cached --others --exclude-standard > "\$manifest"
+while IFS= read -r -d '' path; do
+  case "\$path" in
+    .claude/spar*|reviews/spar-*) continue ;;
+  esac
+  [ -f "./\$path" ] || [ -L "./\$path" ] || continue
+  dest="\$snapshot/\$path"
+  mkdir -p "\$(dirname "\$dest")" || exit 1
+  cp -pP "./\$path" "\$dest" || exit 1
+done < "\$manifest"
+
+{ cat "\$source_root/${SWEEP_PROMPT_FILE}"; echo; echo '--- Changes under sweep ---'; cat "\$source_root/${DIFF_SURFACE_FILE}"; } | \\
+  (cd "\$snapshot" && claude -p --safe-mode --tools Read Grep Glob) > "\$tmp"
 [ -s "\$tmp" ] || exit 1
-mv "\$tmp" "${out}"
+ln "\$tmp" "${out}" || exit 1
 EOF
   chmod +x "$SWEEP_RUNNER"
 }

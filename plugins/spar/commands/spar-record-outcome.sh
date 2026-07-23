@@ -30,11 +30,20 @@ fi
 case "$round" in ''|*[!0-9]*) round=0;; esac
 case "$reviewer" in codex|claude) ;; *) reviewer=unknown;; esac
 
-mkdir -p reviews || exit 3
+if [ -e reviews ] || [ -L reviews ]; then
+  [ -d reviews ] && [ ! -L reviews ] \
+    || { echo "error: reviews must be a real directory" >&2; exit 3; }
+else
+  mkdir reviews || exit 3
+fi
 out="reviews/spar-${safe_id}-outcome.md"
-[ -e "$out" ] && exit 0
+if [ -e "$out" ] || [ -L "$out" ]; then
+  [ -f "$out" ] && [ ! -L "$out" ] && exit 0
+  echo "error: outcome path is not a regular file" >&2
+  exit 3
+fi
 
-tmp="${out}.tmp.$$"
+tmp=$(mktemp "reviews/.spar-outcome-${safe_id}.XXXXXX") || exit 3
 trap 'rm -f "$tmp"' EXIT
 {
   echo "---"
@@ -47,6 +56,15 @@ trap 'rm -f "$tmp"' EXIT
   echo "---"
 } > "$tmp" || exit 3
 
-mv "$tmp" "$out" || exit 3
+# A hard-link publish is atomic and never replaces an existing path. If a
+# concurrent writer won the race, accept only its regular, non-symlink file.
+if ! ln "$tmp" "$out" 2>/dev/null; then
+  if [ -f "$out" ] && [ ! -L "$out" ]; then
+    exit 0
+  fi
+  echo "error: could not publish outcome immutably" >&2
+  exit 3
+fi
+rm -f "$tmp"
 trap - EXIT
 exit 0

@@ -15,6 +15,10 @@ are supplied inline below; use read-only tools to read every untracked file and
 any directly relevant current file. Verify requirement fit, correctness,
 tests, and security once, independently of the prior loop.
 
+You are running inside an isolated source snapshot that omits sparring control,
+ledger, review, response, and outcome artifacts. Do not attempt to access the
+original checkout or any absolute path outside this snapshot.
+
 {{INTENT}}
 
 ## Output format

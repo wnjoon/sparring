@@ -76,6 +76,19 @@ rule_patterns() { # $1=rule file
   awk '
     NR==1 && $0=="---" { fm=1; next }
     fm && $0=="---" { exit }
+    fm && /^paths:[[:space:]]*[^[:space:]]/ {
+      x=$0
+      sub(/^paths:[[:space:]]*/, "", x)
+      if (x ~ /^\[/) {
+        sub(/^\[[[:space:]]*/, "", x)
+        sub(/[[:space:]]*\][[:space:]]*$/, "", x)
+        n=split(x, a, /[[:space:]]*,[[:space:]]*/)
+        for (i=1; i<=n; i++) if (a[i] != "") print a[i]
+      } else {
+        print x
+      }
+      next
+    }
     fm && /^paths:[[:space:]]*$/ { paths=1; next }
     fm && paths && /^[[:space:]]*-[[:space:]]*/ {
       x=$0; sub(/^[[:space:]]*-[[:space:]]*/, "", x); print x; next

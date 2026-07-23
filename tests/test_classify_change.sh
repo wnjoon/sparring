@@ -33,6 +33,13 @@ chk "tracked path counted" "paths: 1" "$OUT"
 chk "small tracked change" "small: true" "$OUT"
 
 fresh
+printf 'new\n' > added.txt
+git add added.txt
+OUT=$(bash "$C" "$BASE")
+chk "staged regular add is not a mode change" "unsafe_kind: false" "$OUT"
+chk "staged regular add remains skip-size eligible" "small: true" "$OUT"
+
+fresh
 printf 'tracked\n' >> base.txt
 i=1; : > large.txt
 while [ "$i" -le 20 ]; do printf 'line %s\n' "$i" >> large.txt; i=$((i+1)); done

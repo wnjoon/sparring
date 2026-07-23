@@ -45,6 +45,18 @@ chk "existing outcome is not rewritten" "reason: converged" "$(cat "$OUT")"
 chk "existing outcome keeps first sweep result" "sweep: clean" "$(cat "$OUT")"
 
 fresh
+mkdir -p reviews/spar-20260723-120000-abc123-outcome.md
+if bash "$WRITER" converged .claude/spar.local.md clean >/dev/null 2>&1; then RC=zero; else RC=nonzero; fi
+chk "pre-created outcome directory is rejected" "nonzero" "$RC"
+
+fresh
+outside=$(mktemp -d)
+ln -s "$outside" reviews
+if bash "$WRITER" converged .claude/spar.local.md clean >/dev/null 2>&1; then RC=zero; else RC=nonzero; fi
+chk "symlinked reviews directory is rejected" "nonzero" "$RC"
+chk "symlink target receives no outcome" "0" "$(find "$outside" -type f | wc -l | tr -d ' ')"
+
+fresh
 sed -i '' 's/^review_id:.*/review_id: ..\/evil/' .claude/spar.local.md 2>/dev/null \
   || sed -i 's/^review_id:.*/review_id: ..\/evil/' .claude/spar.local.md
 bash "$WRITER" error-bypass .claude/spar.local.md error

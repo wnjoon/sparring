@@ -22,8 +22,9 @@ explicitly documented.
    After implementation, the Stop hook classifies the complete tracked,
    staged, and untracked surface. A non-zero change no larger than 10 lines
    across 2 paths may exit with the reported `skipped` reason only when no
-   risky touched path or unsafe kind (rename/delete/type/mode/binary/symlink/
-   submodule) is present. Zero-diff still goes to review for requirement fit.
+   risky touched path or unsafe kind (rename/copy/delete/type/mode/binary/
+   symlink/submodule) is present. Zero-diff still goes to review for
+   requirement fit.
    Repo-level risk does not by itself block a small unrelated-path skip.
 2. Reviewer receives: task description + instruction to inspect the change
    surface — the codex reviewer runs git itself in its sandbox; the claude

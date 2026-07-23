@@ -25,7 +25,15 @@ SPAR_REST="${RESOLVED#*$'\t'}"
 SPAR_INCLUDE_DIRTY="${SPAR_REST%%$'\t'*}"
 SPAR_TASK="${SPAR_REST#*$'\t'}"
 "${CLAUDE_PLUGIN_ROOT}/commands/spar-check-worktree.sh" "$SPAR_INCLUDE_DIRTY" || exit 1
-mkdir -p .claude reviews
+for SPAR_DIR in .claude reviews; do
+  if [ -e "$SPAR_DIR" ] || [ -L "$SPAR_DIR" ]; then
+    [ -d "$SPAR_DIR" ] && [ ! -L "$SPAR_DIR" ] || {
+      echo "Error: $SPAR_DIR must be a real directory."; exit 1;
+    }
+  else
+    mkdir "$SPAR_DIR"
+  fi
+done
 # Keep the review surface to real code: hide sparring's own loop artifacts from
 # git's untracked listing (both reviewer families inspect that listing, and the
 # author's response files are debate content — reviewers must stay blind to them).
@@ -38,6 +46,8 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 SPAR_ID="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 SPAR_BASE="$(git rev-parse HEAD 2>/dev/null || echo none)"
+SPAR_STATE_TMP="$(mktemp .claude/spar.local.md.tmp.XXXXXX)"
+trap 'rm -f "$SPAR_STATE_TMP"' EXIT
 {
   cat << STATE_EOF
 ---
@@ -55,7 +65,9 @@ sweep_result: not-run
 
 STATE_EOF
   printf '%s\n' "$SPAR_TASK"
-} > .claude/spar.local.md
+} > "$SPAR_STATE_TMP"
+mv "$SPAR_STATE_TMP" .claude/spar.local.md
+trap - EXIT
 echo "Sparring loop activated (${SPAR_ID}, reviewer=${SPAR_REVIEWER})"
 ```
 
