@@ -5,17 +5,20 @@
 
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: v0.2.0 — the Claude-hosted loop is complete, and now runs with Claude alone (Codex optional).**
+**Status: v0.3.0 — the Claude-hosted loop includes safe skips, design-intent pointers, and a risk-triggered final sweep.**
 
-Phases 1–3 are implemented and verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar` gives you:
+Phases 1–4 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar` gives you:
 
 - an **enforced** review loop that iterates until the *reviewer* declares convergence;
 - a **blind judge** that rules factual (`[MECHANICAL]`) stalemates;
 - a **batched user gate + decision ledger** for genuine design choices;
 - **cross-round matching** of re-worded findings;
-- **single-agent mode** — auto-detects the reviewer (Codex if installed → cross-model, the recommended default; otherwise Claude), so `/spar` works with no second vendor. `--reviewer codex|claude` overrides.
+- **single-agent mode** — auto-detects the reviewer (Codex if installed → cross-model, the recommended default; otherwise Claude), so `/spar` works with no second vendor. `--reviewer codex|claude` overrides;
+- a reported **safe skip** for changes no larger than 10 lines / 2 paths when no risky path or unsafe change kind is touched;
+- changed-surface **design-intent pointers** on every fresh review;
+- a once-only, fresh Claude **final sweep** after risky, long, or design-bearing loops.
 
-Phases 4–7 (final sweep, unattended mode, the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
+Phases 5–7 (unattended mode, the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 
 ## Direction
 
@@ -39,6 +42,9 @@ sparring is inspired by [hamelsmu/claude-review-loop](https://github.com/hamelsm
 | Disagreement | author decides | 2-round stalemate → blind judge (factual) or batched user gate (design) | ✅ Phase 2 |
 | Cross-round identity | (n/a) | re-worded findings matched to the canonical one | ✅ Phase 2 |
 | Reviewer sandbox | full bypass | `--sandbox read-only` | ✅ Phase 1 |
+| Trivial change handling | always review | reported size + kind safe skip | ✅ Phase 4 |
+| Project intent | reviewer rediscovers it | changed-surface rule / rationale / comment pointers | ✅ Phase 4 |
+| Closure check | none | risk-triggered fresh blind author-family sweep | ✅ Phase 4 |
 
 ## How it works
 
@@ -51,7 +57,7 @@ Everything below runs today, except the steps tagged `(planned Pn)`.
 [Implement]   the author writes the code, then tries to stop
       │
       ▼
- Stop hook ─── skip conditions (docs-only, tiny diff)? ──▶ exit   (planned P3)
+ Stop hook ─── small AND safe kind? ──▶ reported skipped exit
       │
       ▼
 [Round N]     reviewer (read-only sandbox) reviews diff + requirements
@@ -65,11 +71,12 @@ Everything below runs today, except the steps tagged `(planned Pn)`.
       │    │    └─ design  → batched user gate + decision ledger at loop end
       │    └─ author writes a per-finding response → round N+1 (cap: 5)
       │
-      └─ STATUS: CONVERGED → exit (state cleaned up)
-              ├─ final report                                     (planned P4)
-              └─ high-stakes? risky repo · 3+ rounds · design     (planned P3)
-                   → final sweep: a fresh blind author-model subagent
-                     re-verifies diff + requirements → clean ? exit : loop
+      └─ STATUS: CONVERGED
+              ├─ risky repo/path · 3+ rounds · design finding?
+              │    → final sweep: fresh blind Claude subagent
+              │      re-verifies diff + requirements → clean ? exit : round N+1
+              ├─ otherwise → exit
+              └─ detailed final report                            (planned P5)
 ```
 
 The reviewer / judge / matcher run as **Codex** (`codex exec --sandbox read-only`, the default cross-model setup) or **Claude** (`claude -p`, read-only + isolated — single-agent mode); the protocol and invariants are identical either way.
@@ -96,7 +103,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 1 | Core loop: `/spar`, Stop hook, round machinery, per-finding response enforcement, round cap, read-only reviewer | ✅ done |
 | 2 | `[DESIGN]` debate-first (conveyance boundary + decision ledger) · stalemate blind judge · batched end-of-loop gate · cross-round semantic finding matcher | ✅ done |
 | 3 | Single-agent mode: same-family sparring (Claude reviewer/judge/matcher) so `/spar` works without Codex — auto-detect + explicit override; cross-model stays the default | ✅ done |
-| 4 | Final sweep + skip conditions (docs-only, tiny diff) | planned |
+| 4 | Safe skip + changed-surface intent harvest + risk-triggered final sweep + durable exit reason | ✅ done |
 | 5 | Unattended mode + final report | planned |
 | 6 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
 | 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
@@ -110,13 +117,17 @@ claude plugin install spar@sparring
 
 Requires `jq`. The [Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`) is **recommended** — with it, `/spar` runs cross-model (Claude author ↔ Codex reviewer). Without it, single-agent mode reviews with Claude alone. Force a family with `/spar --reviewer codex|claude -- <task>`.
 
+`/spar` starts only from a clean worktree by default. `--include-dirty`
+explicitly adopts the entire pre-existing dirty surface and disables automatic
+skip.
+
 ## Repository layout
 
 ```
 plugins/spar/            Claude Code plugin (commands, Stop hook)
-  commands/              /spar, /spar-cancel, spar-resolve-family.sh (activation)
+  commands/              /spar, /spar-cancel, setup guards + surface helpers
   shared/policy.md       loop policy — source of truth for both adapters
-  shared/prompts/        reviewer / judge / matcher prompt templates
+  shared/prompts/        reviewer / judge / matcher / sweeper templates
 docs/superpowers/        specs, plans, and design-decisions per phase
 tests/                   pure-bash hook + resolver tests
 bench/                   effect benchmark (living report + tasks/oracles)

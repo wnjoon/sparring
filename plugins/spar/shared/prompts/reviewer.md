@@ -24,6 +24,8 @@ Review ONLY the changed or new code and the files it directly touches.
 
 {{LEDGER}}
 
+{{INTENT}}
+
 ## Review criteria (in priority order)
 
 1. Requirement fit — does the change actually accomplish the task above?

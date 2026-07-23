@@ -1,6 +1,8 @@
 # sparring loop policy (SoT)
 
-Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
+The Claude-hosted adapter implements this policy. The planned Codex-hosted
+adapter must mirror it except where its weaker pre-commit enforcement is
+explicitly documented.
 
 ## Roles
 
@@ -14,14 +16,27 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
 
 ## Protocol
 
-1. Author implements the task, then tries to stop; a deterministic hook
-   blocks exit and prepares round 1.
+1. Setup refuses a pre-existing dirty worktree by default because the frozen
+   baseline cannot separate old and loop-induced hunks. `--include-dirty`
+   explicitly adopts the entire dirty surface and disables automatic skip.
+   After implementation, the Stop hook classifies the complete tracked,
+   staged, and untracked surface. A non-zero change no larger than 10 lines
+   across 2 paths may exit with the reported `skipped` reason only when no
+   risky touched path or unsafe kind (rename/copy/delete/type/mode/binary/
+   symlink/submodule) is present. Zero-diff still goes to review for
+   requirement fit.
+   Repo-level risk does not by itself block a small unrelated-path skip.
 2. Reviewer receives: task description + instruction to inspect the change
    surface — the codex reviewer runs git itself in its sandbox; the claude
    reviewer is given the diff inline. Conveyance boundary — the reviewer is
    NEVER told what was fixed or rejected; every round is a full fresh
    re-review against the frozen baseline. The only loop-generated context
-   conveyed is the decision ledger (empty until Phase 2c).
+   conveyed is the decision ledger (empty until Phase 2c). Each round also
+   receives fresh repository-resident design-intent pointers bounded to its
+   current changed surface: applicable `.claude/rules`, ancestor
+   `CLAUDE.md`/`AGENTS.md` rationale headings, and hunk-adjacent intentional
+   comments. Pointers are re-harvested because fixes can grow the surface;
+   repository content is never copied into this channel.
 3. Reviewer output: first line `STATUS: CONVERGED` or `STATUS: FINDINGS`;
    findings tagged `[MECHANICAL]` or `[DESIGN]` with file/problem/suggestion.
 4. Author must fix every MECHANICAL finding, decide DESIGN findings on the
@@ -51,6 +66,17 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
    stalemate streak on the canonical finding. A wrong or absent match never
    breaks an invariant — it only delays stalemate detection (the reviewer
    keeps raising it, bounded by the round cap).
+8. After reviewer convergence, a final sweep fires for a risky touched
+   surface or risky repository, 3+ reviewer rounds, or any reviewer design
+   finding. It is one fresh, read-only Claude author-family instance, blind to
+   the ledger and all loop history but allowed repository intent pointers.
+   It uses `SWEEP: CLEAN|FINDINGS`, never `STATUS: CONVERGED`, and runs at
+   most once. The sweep itself is not a reviewer round. Findings below the cap
+   receive a separate response and re-enter at reviewer round `r+1`; findings
+   at the cap terminate honestly as `sweep-findings-at-cap`.
+9. Every terminal path atomically writes one immutable outcome before cleanup:
+   at least `converged`, `cap`, `error-bypass`, `cancelled`, `skipped`, or
+   `sweep-findings-at-cap`. Only `converged` asserts a clean review result.
 
 ## Invariants
 
@@ -63,10 +89,9 @@ Both adapters (Claude-hosted, Codex-hosted) implement exactly this policy.
 
 ## Phase roadmap
 
-Phases 1–2 (implemented): core loop + design findings, blind judge, gate,
-decision ledger, semantic matcher. Phase 3: single-agent mode — same-family
-Claude reviewer/judge/matcher so `/spar` runs without Codex (auto-detect +
-override; cross-model stays default). Phase 4: final sweep + skip conditions.
+Phases 1–4 (implemented): core loop; design findings, blind judge, gate,
+decision ledger, semantic matcher; same-family Claude review; safe skip,
+changed-surface intent harvest, durable outcomes, and final sweep.
 Phase 5: unattended mode + final report. Phase 6: Codex-hosted adapter (git
 pre-commit enforcement). Phase 7: model economics (reviewer/effort config,
 tiered fix writers).

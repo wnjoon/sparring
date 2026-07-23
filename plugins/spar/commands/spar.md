@@ -1,6 +1,6 @@
 ---
-description: "Sparring loop: implement the task, then iterate independent Codex reviews until the reviewer declares CONVERGED"
-argument-hint: "<task description>"
+description: "Sparring loop: implement the task, then iterate independent reviews until the reviewer declares CONVERGED"
+argument-hint: "[--reviewer codex|claude] [--include-dirty] [--] <task description>"
 allowed-tools:
   - Bash
   - Read
@@ -21,8 +21,19 @@ SPAR_ARGS_EOF
 )"
 RESOLVED="$("${CLAUDE_PLUGIN_ROOT}/commands/spar-resolve-family.sh" "$SPAR_RAW")" || { printf '%s\n' "$RESOLVED" >&2; exit 1; }
 SPAR_REVIEWER="${RESOLVED%%$'\t'*}"
-SPAR_TASK="${RESOLVED#*$'\t'}"
-mkdir -p .claude reviews
+SPAR_REST="${RESOLVED#*$'\t'}"
+SPAR_INCLUDE_DIRTY="${SPAR_REST%%$'\t'*}"
+SPAR_TASK="${SPAR_REST#*$'\t'}"
+"${CLAUDE_PLUGIN_ROOT}/commands/spar-check-worktree.sh" "$SPAR_INCLUDE_DIRTY" || exit 1
+for SPAR_DIR in .claude reviews; do
+  if [ -e "$SPAR_DIR" ] || [ -L "$SPAR_DIR" ]; then
+    [ -d "$SPAR_DIR" ] && [ ! -L "$SPAR_DIR" ] || {
+      echo "Error: $SPAR_DIR must be a real directory."; exit 1;
+    }
+  else
+    mkdir "$SPAR_DIR"
+  fi
+done
 # Keep the review surface to real code: hide sparring's own loop artifacts from
 # git's untracked listing (both reviewer families inspect that listing, and the
 # author's response files are debate content — reviewers must stay blind to them).
@@ -35,6 +46,8 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 SPAR_ID="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 SPAR_BASE="$(git rev-parse HEAD 2>/dev/null || echo none)"
+SPAR_STATE_TMP="$(mktemp .claude/spar.local.md.tmp.XXXXXX)"
+trap 'rm -f "$SPAR_STATE_TMP"' EXIT
 {
   cat << STATE_EOF
 ---
@@ -44,12 +57,17 @@ round: 0
 review_id: ${SPAR_ID}
 base_sha: ${SPAR_BASE}
 reviewer: ${SPAR_REVIEWER}
+include_dirty: ${SPAR_INCLUDE_DIRTY}
 max_rounds: 5
+sweep_done: false
+sweep_result: not-run
 ---
 
 STATE_EOF
   printf '%s\n' "$SPAR_TASK"
-} > .claude/spar.local.md
+} > "$SPAR_STATE_TMP"
+mv "$SPAR_STATE_TMP" .claude/spar.local.md
+trap - EXIT
 echo "Sparring loop activated (${SPAR_ID}, reviewer=${SPAR_REVIEWER})"
 ```
 
@@ -88,6 +106,12 @@ sparring Stop hook takes over from there.
    `bash .claude/spar-run-matcher.sh` (600000ms timeout), then stop again. It
    is an independent pass that decides whether re-worded findings are the same
    defect — you only run it, you do not author its result.
+7. If the hook dispatches a **final sweep**, run
+   `bash .claude/spar-run-sweep.sh` (600000ms timeout), then stop. The sweep
+   is a fresh read-only author-family closure check and uses
+   `SWEEP: CLEAN|FINDINGS`, never the reviewer's convergence marker. For
+   findings, handle every item and write the requested sweep response before
+   stopping; the hook routes fixes through the next normal reviewer round.
 
 ## Hard rules
 
