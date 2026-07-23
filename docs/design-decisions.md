@@ -1,8 +1,8 @@
 # Design decisions
 
 Decisions settled in design sessions, recorded so a fresh session can write
-each phase's implementation plan without re-litigating them. Phase 1 is
-implemented — its section below is an as-built summary; later sections are
+each phase's implementation plan without re-litigating them. Implemented
+phases are marked as such and defer to `policy.md`; remaining sections are
 specs awaiting implementation, and each phase's plan document starts from its
 section here. Ideas marked *(EP)* are adapted from the review-loop protocol in
 [jongwony/epistemic-protocols](https://github.com/jongwony/epistemic-protocols) (MIT).
@@ -231,33 +231,11 @@ degradation to a first-class mode.**
   adapter, Phase 6, reusing this family abstraction); per-round lens rotation
   (future, empirical); persistent config (Phase 7).
 
-## Phase 4 — sweep + skip + intent harvest
+## Phase 4 — sweep + skip + intent harvest (implemented)
 
-**Final sweep** (existing roadmap): after convergence, when risk signals are
-present — risky repo (smart contracts, DDL, auth), 3+ rounds, or any design
-finding occurred — a fresh author-family subagent, blind to loop history,
-verifies diff + requirements once. Sweep findings re-enter the loop as normal
-rounds under the **same `max_rounds` ceiling counted from loop start** — the
-sweep does not reset the counter. If the ceiling is already reached (e.g. the
-loop converged exactly at the cap), a sweep finding is not looped further; it
-is reported as an unconverged/blocked result, never silently dropped. The
-sweep runs at most once per loop, so fixing its findings and re-converging
-does not re-arm it.
-
-**Skip conditions**: a change exits without a loop only when it is safe by
-BOTH size and kind — a small diff AND no risky path touched. Risky paths
-reuse the sweep's risk classifier (auth, migrations/DDL, CI, hooks, smart
-contracts, …), so skip-eligibility and sweep-trigger share one definition of
-"risky". Line count alone never authorizes a skip. The skip is always
-reported, never silent.
-
-**Design-intent harvest** *(EP)*: before round 1, collect the project rules
-that intersect the changed surface — relevant `.claude/rules/*.md`, the
-design-rationale sections of `CLAUDE.md`/`AGENTS.md`, and "why this is
-intentional" comments adjacent to changed hunks — and pass them to the
-reviewer **as file pointers, not copied content**, bounded to the changed
-files (never the whole rules directory). Purpose: stop the reviewer from
-spending findings refuting documented intentional choices.
+Implemented behavior has migrated to `plugins/spar/shared/policy.md`, the
+current-behavior source of truth. The Phase 4 brainstorming text was removed
+from this future-decisions document after landing.
 
 ## Phase 5 — unattended + final report
 
