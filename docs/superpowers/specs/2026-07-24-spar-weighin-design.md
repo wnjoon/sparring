@@ -127,8 +127,12 @@ worktree — plus a hook that, on each Stop, asks: is a weigh-in active, did the
 current task's `spar` just terminate, and if so, advance to the next task or
 finish. Open questions for `writing-plans`:
 
-- **Hook coexistence.** Does the weigh-in add its own Stop hook, or extend
-  `spar`'s `stop-hook.sh`? They must not fight over releasing the session.
+- **Hook coexistence — RESOLVED (single combined dispatcher).** A spike found
+  Claude Code does not guarantee Stop-hook order, cross-hook decision
+  aggregation, or side-effect visibility (`docs/superpowers/notes/weighin-hook-order-spike.md`).
+  So the weigh-in registers exactly ONE Stop hook that calls `spar`'s unchanged
+  `stop-hook.sh` in-process and then overrides the decision only when a weigh-in
+  is active and `spar` approved. No two-hook race remains.
 - **Task-boundary detection.** How does the controller know a task's `spar`
   reached a *terminal* outcome (`converged` / `cap` / `skipped` / `cancelled`)
   vs. is still mid-round? `spar` already writes a durable outcome per terminal

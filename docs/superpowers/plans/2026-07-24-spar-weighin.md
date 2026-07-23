@@ -4,50 +4,37 @@
 
 **Goal:** Add a `/spar-weighin` command that turns a spec into a checkbox plan, sets up an isolated ring, and drives the enforced `spar` loop task-by-task (or over the whole plan) to convergence.
 
-**Architecture:** `/spar-weighin` is a **separate command in the `spar` plugin** that wraps `spar`; it never edits `spar`'s loop internals. It adds a **second Stop hook** (`stop-weighin.sh`) registered to run **after** `spar`'s existing `stop-hook.sh` in the same `hooks.json` Stop array. `spar`'s hook drives one task's review loop and, on any terminal outcome, writes `reviews/spar-<id>-outcome.md` and removes `.claude/spar.local.md`. The weighin hook keys purely on "`.claude/spar.local.md` absent + the current task's outcome file present" to advance: flip the plan's checkboxes for that task, commit, and launch the next task's `spar` — or finish. Because weighin lives in the same plugin, we control hook order, which removes the same-event race.
+**Architecture:** `/spar-weighin` is a **separate command in the `spar` plugin** that wraps `spar`; it never edits `spar`'s `stop-hook.sh`. It installs a **single combined Stop-hook dispatcher** (`stop-weighin.sh`) as the plugin's only Stop hook. The dispatcher runs `spar`'s unchanged `stop-hook.sh` as a subroutine in the same process, captures its decision, and only then applies weigh-in logic. This replaces the earlier "two ordered hooks" idea: the Task 1 spike found Claude Code does NOT guarantee Stop-hook execution order, cross-hook decision aggregation, or side-effect visibility (see `docs/superpowers/notes/weighin-hook-order-spike.md`), so a sequential in-process call is the only race-free option. When no weigh-in is active, the dispatcher passes `spar`'s decision through verbatim — `spar`-only behavior is unchanged. When a weigh-in is active and `spar` decided `approve` (a task loop just terminated), the dispatcher reads that task's `reviews/spar-<id>-outcome.md`, flips the plan's checkboxes for the task, commits, and launches the next task's `spar` (blocking) — or finishes / stops honestly.
 
 **Tech Stack:** POSIX/bash, `jq`, `git`, Claude Code plugin hooks. Pure-bash tests in `tests/` (no framework), matching the existing `test_*.sh` style.
 
 ## Global Constraints
 
-- Fail **open**: any weighin-hook-internal error must approve exit (never trap the user), mirroring `spar`'s Stop hook (`plugins/spar/hooks/stop-hook.sh:75`).
-- The weighin hook must be a **no-op** (approve) whenever `.claude/spar-weighin.local.md` is absent or `.claude/spar.local.md` is present — it only acts in the gap between tasks.
+- Fail **open**: any dispatcher-internal error must approve exit (never trap the user), mirroring `spar`'s Stop hook (`plugins/spar/hooks/stop-hook.sh:75`). Because the dispatcher is now the ONLY registered Stop hook, this is load-bearing for `spar`-only users too.
+- The dispatcher must be a **pure pass-through** of `spar`'s decision whenever `.claude/spar-weighin.local.md` is absent, or whenever `spar` did not decide `approve` (i.e. `spar` is mid-round and blocked). The weigh-in advance logic runs only in the gap between tasks: weigh-in active AND `spar` approved.
 - Never write `spar`'s convergence marker, and never fabricate a `spar` outcome. Task success is read from `reviews/spar-<id>-outcome.md`'s `reason:` field, which only `spar` writes.
-- weighin never edits `spar`'s state machine files or `stop-hook.sh`. Its only touch of existing `spar` files is: adding a second entry to `hooks.json`, and extending `/spar-cancel` to also tear down weighin state.
+- weighin never edits `spar`'s state-machine files or `stop-hook.sh`; the dispatcher only *calls* `stop-hook.sh`. Its only touch of existing `spar` files is: repointing `hooks.json`'s Stop entry to the dispatcher, and extending `/spar-cancel` to also tear down weighin state.
 - State/artifact hygiene: reuse `spar`'s existing git-exclude patterns `.claude/spar*` and `reviews/spar-*` (they already match weighin's `.claude/spar-weighin*` files) so `git add -A` in weighin's per-task commit never stages loop artifacts.
 - Command surface: `/spar-weighin [--whole] [--reviewer codex|claude] [--] <spec path or description>`. Default is per-task execution.
 - Non-converged default: if a task's `spar` ends non-converged (`cap`, `sweep-findings-at-cap`, `cancelled`, `error-bypass`), weighin **stops and reports honestly** — it does not advance to the next task.
 
 ---
 
-## Task 1: Hook-ordering spike
+## Task 1: Hook-ordering spike — RESOLVED (combined dispatcher)
 
 **Files:**
-- Create: `docs/superpowers/notes/weighin-hook-order-spike.md`
+- Create: `docs/superpowers/notes/weighin-hook-order-spike.md` (done)
 
 **Interfaces:**
-- Produces: a documented, verified answer to "when two Stop hooks are registered in one plugin's `hooks.json` Stop array, do they run in array order, and does a `block` from any hook override an `approve` from another?" All later tasks depend on the answer being "yes, array order; block wins."
+- Produces: the verified answer to "can weigh-in rely on a second Stop hook running after `spar`'s and observing its side effects, with block winning?"
 
-This is a real experiment, not a code change. Everything downstream assumes `spar`'s hook runs first and the weighin hook second, and that a single `block` keeps the session alive.
+**Outcome (already recorded):** NO. Per the Claude Code hooks docs, Stop-hook execution **order is not guaranteed** (hooks may run in parallel), cross-hook **decision aggregation is undocumented**, and cross-hook **side-effect visibility is undocumented**. The two-ordered-hooks design is therefore unusable — it has a convergence-event race.
 
-- [ ] **Step 1: Register a throwaway probe pair of Stop hooks**
+**Decision:** use a **single combined dispatcher** — the weigh-in hook is the plugin's only Stop hook and calls `spar`'s unchanged `stop-hook.sh` as an in-process subroutine, so ordering and side-effect visibility are guaranteed by plain sequential execution. Full rationale in `docs/superpowers/notes/weighin-hook-order-spike.md`. Tasks 7 and 8 below reflect this design.
 
-Temporarily add to a scratch copy of `plugins/spar/hooks/hooks.json` a second Stop hook after the existing one, both pointing at a probe script that appends `"$1 $(date +%s%N)"` to `/tmp/weighin-probe.log` and prints a decision. Run one hook printing `{"decision":"approve"}` first and one printing `{"decision":"block","reason":"probe"}` second; then swap them.
-
-- [ ] **Step 2: Trigger Stop in a scratch session and read the log**
-
-In a throwaway Claude Code session, cause a Stop and inspect `/tmp/weighin-probe.log`: confirm both scripts ran, confirm the append order matches the array order, and confirm the session stayed alive (blocked) whenever exactly one hook blocked, regardless of position.
-
-- [ ] **Step 3: Record findings and the load-bearing assumption**
-
-Write `docs/superpowers/notes/weighin-hook-order-spike.md`: the observed ordering guarantee, the block-wins semantics, and — if either does NOT hold — the fallback (fold the weighin advance into a single combined hook that calls `stop-hook.sh` as a subroutine). Commit.
-
-```bash
-git add docs/superpowers/notes/weighin-hook-order-spike.md
-git commit -m "docs: verify two-hook Stop ordering for weighin"
-```
-
-If Step 2 shows order is NOT guaranteed, STOP and revise this plan to use one combined hook before continuing.
+- [x] **Step 1: Verify Stop-hook semantics against the docs** — done (docs reviewed; order/aggregation/visibility all unspecified for Stop hooks).
+- [x] **Step 2: Record findings and the decision** in `docs/superpowers/notes/weighin-hook-order-spike.md` — done.
+- [ ] **Step 3: Commit the note** (committed together with this plan revision).
 
 ---
 
@@ -572,27 +559,26 @@ git commit -m "feat: weighin task launcher (activates spar per task)"
 
 ---
 
-## Task 7: The weighin Stop hook
+## Task 7: The weighin Stop-hook dispatcher
 
 **Files:**
 - Create: `plugins/spar/hooks/stop-weighin.sh`
 - Test: `tests/test_stop_weighin.sh`
 
 **Interfaces:**
-- Consumes: `spar-weighin-lib.sh` (Task 2), `spar-weighin-check.sh` (Task 5), `spar-weighin-launch.sh` (Task 6), and the current task's `reviews/spar-<id>-outcome.md` (written by `spar`'s hook).
-- Produces: a Stop hook that reads only weighin + `spar` state/outcome files and prints a `{"decision":...}` JSON. Advances, finishes, or stops-and-reports. Fails open on any internal error. Must be registered to run AFTER `spar`'s `stop-hook.sh` (Task 8).
+- Consumes: `spar-weighin-lib.sh` (Task 2), `spar-weighin-check.sh` (Task 5), `spar-weighin-launch.sh` (Task 6), `spar`'s unchanged `stop-hook.sh` (called as a subroutine), and the current task's `reviews/spar-<id>-outcome.md`.
+- Produces: the plugin's SINGLE Stop hook. It calls `spar`'s `stop-hook.sh` in-process, captures its decision, and either passes it through or overrides it with a weigh-in advance. Fails open **preserving `spar`'s decision** (never loses a `spar` block). The path to `spar`'s hook is overridable via env `SPAR_WEIGHIN_SPAR_HOOK` (default `${CLAUDE_PLUGIN_ROOT}/hooks/stop-hook.sh`) so tests can inject a stub.
 
 **Behavior (the algorithm):**
-1. No `.claude/spar-weighin.local.md`, or `active` != true → `approve`.
-2. `phase` != `running` → `approve` (plan phase is agent-driven; done is terminal).
-3. `.claude/spar.local.md` present → `approve` (a task's `spar` loop is in flight; `spar`'s hook, which ran first, drives it).
-4. `current_review_id` empty → `approve` (task not launched yet; the command body launches task 1).
-5. Read `reviews/spar-<current_review_id>-outcome.md`. Missing → `approve` (fail open; `spar` always writes one on any terminal path).
-6. `reason` = the outcome's `reason:` field:
+1. Read the hook stdin, feed it to `spar`'s `stop-hook.sh`, capture its JSON decision as `SPAR_DEC` (default to `approve` if the call yields nothing).
+2. No `.claude/spar-weighin.local.md`, or `active` != true → **pass through** `SPAR_DEC` (identical to `spar`-only behavior).
+3. `SPAR_DEC` is not `approve` (i.e. `spar` blocked mid-round) → **pass through** — `spar` is driving the current task's loop.
+4. `phase` != `running`, or `current_review_id` empty, or `reviews/spar-<id>-outcome.md` missing → **pass through** `SPAR_DEC` (weigh-in has nothing to advance yet).
+5. Otherwise the current task's `spar` loop terminated. `reason` = the outcome's `reason:` field:
    - `converged` or `skipped` → **task success**: flip checkboxes for `current` (index `0` when `mode=whole`), mark the task row `done`, `git add -A && git commit`. Then:
-     - if `current` < `tasks` → increment `current`, write next task's text to `.claude/spar-weighin-task.txt`, launch it, `block` with the next task's implement-then-stop instructions.
-     - else → set `phase: done`, record a weighin outcome line, `block` with a "all tasks converged — summarize and stop" message (the next stop, with `phase=done`, approves).
-   - anything else (`cap`, `sweep-findings-at-cap`, `cancelled`, `error-bypass`) → mark the task row `stopped`, set `phase: done`, `block` with an honest "task N did not converge — report unresolved findings from its review and stop" message.
+     - if `current` < `tasks` → increment `current`, clear `current_review_id`, write next task's text to `.claude/spar-weighin-task.txt`, launch it, `block` with the next task's implement-then-stop instructions.
+     - else → set `phase: done`, `block` with an "all tasks converged — summarize and stop" message (the next stop passes through `spar`'s approve, since `phase` != running).
+   - anything else (`cap`, `sweep-findings-at-cap`, `cancelled`, `error-bypass`) → mark the task row `stopped`, set `phase: done`, `block` with an honest "task N did not converge — report unresolved findings and stop" message.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -604,26 +590,57 @@ PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOOK="$ROOT/plugins/spar/hooks/stop-weighin.sh"
 chk(){ if echo "$3" | grep -qF "$2"; then echo "PASS: $1"; PASS=$((PASS+1)); else echo "FAIL: $1"; echo "  want~:$2"; echo "  got :$3"; FAIL=$((FAIL+1)); fi; }
+nchk(){ if echo "$3" | grep -qF "$2"; then echo "FAIL: $1 (unexpected)"; FAIL=$((FAIL+1)); else echo "PASS: $1"; PASS=$((PASS+1)); fi; }
 
-# Each case runs in its own temp git repo so commits work.
-setup(){ TMP=$(mktemp -d); cd "$TMP"; git init -q; git config user.email a@b.c; git config user.name t; git commit -q --allow-empty -m init; mkdir -p .claude reviews docs; export CLAUDE_PLUGIN_ROOT="$ROOT/plugins/spar"; }
-teardown(){ cd /; rm -rf "$TMP"; }
+# Each case runs in its own temp git repo. spar's stop-hook is stubbed via
+# SPAR_WEIGHIN_SPAR_HOOK so we test the weigh-in logic in isolation.
+setup(){
+  TMP=$(mktemp -d); cd "$TMP"; git init -q; git config user.email a@b.c; git config user.name t
+  git commit -q --allow-empty -m init; mkdir -p .claude reviews docs
+  export CLAUDE_PLUGIN_ROOT="$ROOT/plugins/spar"
+  # mirror the real command's excludes so git add -A stays clean
+  EX="$(git rev-parse --git-common-dir)/info/exclude"; printf 'reviews/spar-*\n.claude/spar*\n' >> "$EX"
+  cat > "$TMP/spar-approve.sh" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+echo '{"decision":"approve"}'
+STUB
+  cat > "$TMP/spar-block.sh" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+echo '{"decision":"block","reason":"spar mid-round"}'
+STUB
+  chmod +x "$TMP"/spar-*.sh
+  export SPAR_WEIGHIN_SPAR_HOOK="$TMP/spar-approve.sh"
+}
+teardown(){ cd /; rm -rf "$TMP"; unset SPAR_WEIGHIN_SPAR_HOOK; }
 wstate(){ printf -- '---\nactive: true\nphase: %s\nmode: %s\nreviewer: codex\nplan_path: %s\nworktree: %s\ntasks: %s\ncurrent: %s\ncurrent_review_id: %s\n---\n' "$1" "$2" "$3" "$TMP" "$4" "$5" "$6"; }
 outcome(){ printf -- '---\nreason: %s\nreview_id: %s\nrounds: 2\nreviewer: codex\nsweep: not-triggered\nrecorded_at: x\n---\n' "$1" "$2"; }
 
-# Case A: no weighin state → approve
+# A: no weigh-in, spar approves → pass through approve
 setup
-chk "A no-state approve" '"approve"' "$(echo '{}' | bash "$HOOK")"
+chk "A passthrough approve" '"approve"' "$(echo '{}' | bash "$HOOK")"
 teardown
 
-# Case B: spar loop in flight → approve
+# A2: no weigh-in, spar blocks → pass through block (spar-only unchanged)
 setup
+export SPAR_WEIGHIN_SPAR_HOOK="$TMP/spar-block.sh"
+OUT="$(echo '{}' | bash "$HOOK")"
+chk "A2 passthrough block" '"block"' "$OUT"
+chk "A2 keeps spar reason" "spar mid-round" "$OUT"
+teardown
+
+# B: weigh-in active, spar blocks (mid-round) → pass through, do NOT advance
+setup
+export SPAR_WEIGHIN_SPAR_HOOK="$TMP/spar-block.sh"
 wstate running per-task docs/p.md 2 1 20260724-101010-aaaaaa > .claude/spar-weighin.local.md
-printf 'x' > .claude/spar.local.md
-chk "B spar active approve" '"approve"' "$(echo '{}' | bash "$HOOK")"
+printf '1\tpending\tT1\n2\tpending\tT2\n' >> .claude/spar-weighin.local.md
+OUT="$(echo '{}' | bash "$HOOK")"
+chk "B passthrough block" '"block"' "$OUT"
+nchk "B no task launched" "review_id" "$(cat .claude/spar.local.md 2>/dev/null)"
 teardown
 
-# Case C: task 1 converged, task 2 remains → block + advance + checkbox + launch
+# C: weigh-in active, spar approved, task1 converged, task2 remains → block+advance+checkbox+launch
 setup
 cat > docs/p.md <<'EOF'
 ### Task 1: Alpha
@@ -641,12 +658,9 @@ chk "C task1 checkbox flipped" "- [x] a" "$(sed -n '2p' docs/p.md)"
 chk "C launched task2 spar" "review_id" "$(cat .claude/spar.local.md 2>/dev/null)"
 teardown
 
-# Case D: last task converged → finish (block to summarize, phase done)
+# D: last task converged → finish (block to summarize, phase done)
 setup
-cat > docs/p.md <<'EOF'
-### Task 1: Alpha
-- [ ] a
-EOF
+printf '### Task 1: Alpha\n- [ ] a\n' > docs/p.md
 git add docs/p.md; git commit -q -m plan
 wstate running per-task docs/p.md 1 1 20260724-101010-bbbbbb > .claude/spar-weighin.local.md
 printf '1\tpending\tTask 1: Alpha\n' >> .claude/spar-weighin.local.md
@@ -656,14 +670,9 @@ chk "D blocks with summary" '"block"' "$OUT"
 chk "D phase done" "phase: done" "$(cat .claude/spar-weighin.local.md)"
 teardown
 
-# Case E: task hit cap → stop and report honestly
+# E: task hit cap → stop and report honestly
 setup
-cat > docs/p.md <<'EOF'
-### Task 1: Alpha
-- [ ] a
-### Task 2: Beta
-- [ ] b
-EOF
+printf '### Task 1: Alpha\n- [ ] a\n### Task 2: Beta\n- [ ] b\n' > docs/p.md
 git add docs/p.md; git commit -q -m plan
 wstate running per-task docs/p.md 2 1 20260724-101010-cccccc > .claude/spar-weighin.local.md
 printf '1\tpending\tTask 1: Alpha\n2\tpending\tTask 2: Beta\n' >> .claude/spar-weighin.local.md
@@ -672,7 +681,7 @@ OUT="$(echo '{}' | bash "$HOOK")"
 chk "E blocks" '"block"' "$OUT"
 chk "E does not converge" "did not converge" "$OUT"
 chk "E phase done" "phase: done" "$(cat .claude/spar-weighin.local.md)"
-chk "E task2 not launched" "" "$(cat .claude/spar.local.md 2>/dev/null)"
+nchk "E task2 not launched" "review_id" "$(cat .claude/spar.local.md 2>/dev/null)"
 teardown
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
@@ -687,48 +696,54 @@ Expected: FAIL — hook missing.
 
 ```bash
 #!/usr/bin/env bash
-# sparring weigh-in — second Stop hook. Runs AFTER spar's stop-hook.sh.
-# Advances the plan task-by-task once each task's spar loop has terminated.
-# Fails OPEN on any internal error. Acts only in the gap between tasks.
+# sparring weigh-in — the plugin's single Stop hook (combined dispatcher).
+# Runs spar's unchanged stop-hook.sh in-process, captures its decision, and
+# only when a weigh-in is active AND spar approved (a task loop terminated)
+# advances the plan. Otherwise passes spar's decision through. Fails OPEN,
+# preserving spar's decision (never loses a spar block).
 set -uo pipefail
 WGN_STATE=".claude/spar-weighin.local.md"
-SPAR_STATE=".claude/spar.local.md"
 LOG=".claude/spar-weighin.log"
 DIR="${CLAUDE_PLUGIN_ROOT:-}/commands"
 LIB="$DIR/spar-weighin-lib.sh"
 CHECK="$DIR/spar-weighin-check.sh"
 LAUNCH="$DIR/spar-weighin-launch.sh"
 TASKFILE=".claude/spar-weighin-task.txt"
+SPAR_HOOK="${SPAR_WEIGHIN_SPAR_HOOK:-${CLAUDE_PLUGIN_ROOT:-}/hooks/stop-hook.sh}"
 
 log(){ mkdir -p .claude; echo "[$(date -u +%FT%TZ)] $*" >> "$LOG"; }
-approve(){ printf '{"decision":"approve"}\n'; exit 0; }
+SPAR_DEC='{"decision":"approve"}'
+passthrough(){ printf '%s\n' "$SPAR_DEC"; exit 0; }
 block(){ jq -nc --arg r "$1" --arg s "${2:-sparring weigh-in}" \
   '{decision:"block",reason:$r,systemMessage:$s}' 2>/dev/null \
   || printf '{"decision":"block","reason":"weighin"}\n'; exit 0; }
 
-trap 'log "ERR line $LINENO — fail open"; printf "{\"decision\":\"approve\"}\n"; exit 0' ERR
-cat >/dev/null  # consume hook stdin
+# On any internal error emit spar's captured decision — never lose a spar block.
+trap 'log "ERR line $LINENO — emitting spar decision"; printf "%s\n" "$SPAR_DEC"; exit 0' ERR
 
-[ -f "$WGN_STATE" ] || approve
-[ -f "$LIB" ] || approve
+INPUT="$(cat)"
+NEW="$(printf '%s' "$INPUT" | bash "$SPAR_HOOK" 2>>"$LOG")" && [ -n "$NEW" ] && SPAR_DEC="$NEW"
+DEC="$(printf '%s\n' "$SPAR_DEC" | jq -r '.decision // "approve"' 2>/dev/null || echo approve)"
+
+[ -f "$WGN_STATE" ] || passthrough
+[ -f "$LIB" ] || passthrough
 . "$LIB"
-
-[ "$(wgn_field active "$WGN_STATE")" = "true" ] || approve
-[ "$(wgn_field phase "$WGN_STATE")" = "running" ] || approve
-[ -f "$SPAR_STATE" ] && approve   # a task loop is in flight; spar's hook drives it
+[ "$(wgn_field active "$WGN_STATE")" = "true" ] || passthrough
+[ "$DEC" = "approve" ] || passthrough            # spar blocked mid-round — let it drive
+[ "$(wgn_field phase "$WGN_STATE")" = "running" ] || passthrough
 
 RID="$(wgn_field current_review_id "$WGN_STATE")"
-[ -n "$RID" ] || approve          # task not launched yet
+[ -n "$RID" ] || passthrough                      # task not launched yet
 OUTCOME="reviews/spar-${RID}-outcome.md"
-[ -f "$OUTCOME" ] || approve      # no terminal yet — fail open
+[ -f "$OUTCOME" ] || passthrough                  # no terminal yet
 
 REASON="$(sed -n 's/^reason: *//p' "$OUTCOME" | head -1)"
 CUR="$(wgn_field current "$WGN_STATE")"
 TASKS="$(wgn_field tasks "$WGN_STATE")"
 MODE="$(wgn_field mode "$WGN_STATE")"
 PLAN="$(wgn_field plan_path "$WGN_STATE")"
-case "$CUR" in ''|*[!0-9]*) log "bad current"; approve;; esac
-case "$TASKS" in ''|*[!0-9]*) log "bad tasks"; approve;; esac
+case "$CUR" in ''|*[!0-9]*) log "bad current"; passthrough;; esac
+case "$TASKS" in ''|*[!0-9]*) log "bad tasks"; passthrough;; esac
 
 HEADING="$(wgn_task_line "$CUR" "$WGN_STATE" | cut -f3)"
 
@@ -746,7 +761,7 @@ case "$REASON" in
       # Build the next task's text from its plan section (whole mode: entire plan).
       if [ "$MODE" = "whole" ]; then cp "$PLAN" "$TASKFILE"
       else awk -v h="### ${NHEAD}" '$0==h{f=1} f&&/^### /&&$0!=h&&seen{exit} $0==h{seen=1} f{print}' "$PLAN" > "$TASKFILE"; fi
-      bash "$LAUNCH" "$WGN_STATE" "$TASKFILE" 2>>"$LOG" || { log "launch failed"; approve; }
+      bash "$LAUNCH" "$WGN_STATE" "$TASKFILE" 2>>"$LOG" || { log "launch failed"; passthrough; }
       block "Task ${CUR} converged and was committed. Now implement task ${NEXT}: ${NHEAD}, following its steps in ${PLAN}. When done, stop — the sparring reviewer will engage automatically." \
         "sparring weigh-in: task ${NEXT}/${TASKS}"
     else
@@ -767,26 +782,26 @@ esac
 - [ ] **Step 4: Run the test to confirm it passes**
 
 Run: `bash tests/test_stop_weighin.sh`
-Expected: `PASS=13 FAIL=0`
+Expected: `PASS=14 FAIL=0`
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add plugins/spar/hooks/stop-weighin.sh tests/test_stop_weighin.sh
-git commit -m "feat: weighin Stop hook — advance/finish/stop per task"
+git commit -m "feat: weighin Stop-hook dispatcher — advance/finish/stop per task"
 ```
 
 ---
 
-## Task 8: Register the weighin hook after spar's
+## Task 8: Repoint the Stop hook to the dispatcher
 
 **Files:**
 - Modify: `plugins/spar/hooks/hooks.json`
 - Test: `tests/test_weighin_hooks_json.sh`
 
 **Interfaces:**
-- Consumes: Task 1's confirmed ordering guarantee.
-- Produces: a `hooks.json` whose Stop array runs `stop-hook.sh` first and `stop-weighin.sh` second.
+- Consumes: Task 1's decision (single combined dispatcher; ordering unreliable).
+- Produces: a `hooks.json` whose Stop array registers exactly ONE hook — `stop-weighin.sh` — which calls `stop-hook.sh` internally. `spar`-only behavior is preserved because the dispatcher passes `spar`'s decision through when no weigh-in is active.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -800,38 +815,34 @@ J="$ROOT/plugins/spar/hooks/hooks.json"
 chk(){ if [ "$2" = "$3" ]; then echo "PASS: $1"; PASS=$((PASS+1)); else echo "FAIL: $1"; echo "  want:[$2]"; echo "  got:[$3]"; FAIL=$((FAIL+1)); fi; }
 jq -e . "$J" >/dev/null && { echo "PASS: valid json"; PASS=$((PASS+1)); } || { echo "FAIL: valid json"; FAIL=$((FAIL+1)); }
 CMDS="$(jq -r '.hooks.Stop[].hooks[].command' "$J")"
-chk "first is stop-hook" "stop-hook.sh" "$(echo "$CMDS" | sed -n '1p' | sed 's#.*/##')"
-chk "second is stop-weighin" "stop-weighin.sh" "$(echo "$CMDS" | sed -n '2p' | sed 's#.*/##')"
+chk "exactly one Stop command" "1" "$(echo "$CMDS" | grep -c .)"
+chk "the Stop command is the dispatcher" "stop-weighin.sh" "$(echo "$CMDS" | sed -n '1p' | sed 's#.*/##')"
+# the dispatcher must call spar's real hook by its default path
+grep -q 'hooks/stop-hook.sh' "$ROOT/plugins/spar/hooks/stop-weighin.sh" && { echo "PASS: dispatcher references stop-hook.sh"; PASS=$((PASS+1)); } || { echo "FAIL: dispatcher references stop-hook.sh"; FAIL=$((FAIL+1)); }
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
 
 Run: `bash tests/test_weighin_hooks_json.sh`
-Expected: FAIL — only one command present.
+Expected: FAIL — the Stop command is still `stop-hook.sh`, not the dispatcher.
 
 - [ ] **Step 3: Edit `hooks.json`**
 
-Add the weighin hook as a second entry in the same Stop group's `hooks` array, after the existing one:
+Replace the Stop hook's command so the dispatcher is the only registered Stop hook (it calls `stop-hook.sh` itself):
 
 ```json
 {
-  "description": "Sparring loop stop hook: blocks exit until the independent reviewer declares CONVERGED",
+  "description": "Sparring loop stop hook: blocks exit until the independent reviewer declares CONVERGED (weigh-in dispatcher wraps spar's own hook)",
   "hooks": {
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-hook.sh",
-            "timeout": 30,
-            "statusMessage": "sparring: checking loop phase..."
-          },
-          {
-            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-weighin.sh",
-            "timeout": 30,
-            "statusMessage": "sparring weigh-in: checking plan progress..."
+            "timeout": 60,
+            "statusMessage": "sparring: checking loop phase..."
           }
         ]
       }
@@ -840,16 +851,25 @@ Add the weighin hook as a second entry in the same Stop group's `hooks` array, a
 }
 ```
 
+Note: `timeout` is raised to 60s because the dispatcher's work now includes the nested `stop-hook.sh` call. The dispatcher does no reviewer runs itself, so this is ample.
+
 - [ ] **Step 4: Run the test to confirm it passes**
 
 Run: `bash tests/test_weighin_hooks_json.sh`
-Expected: `PASS=3 FAIL=0`
+Expected: `PASS=4 FAIL=0`
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verify spar-only behavior is unchanged**
+
+With no weigh-in active, the dispatcher must reproduce `spar`'s decision. Confirm the existing spar hook suite still passes end-to-end through the dispatcher path:
+
+Run: `bash tests/test_stop_hook.sh`
+Expected: unchanged `FAIL=0` (this suite drives `stop-hook.sh` directly and is unaffected; it confirms the wrapped hook itself is intact).
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add plugins/spar/hooks/hooks.json tests/test_weighin_hooks_json.sh
-git commit -m "feat: register weighin Stop hook after spar's"
+git commit -m "feat: repoint Stop hook to weighin dispatcher"
 ```
 
 ---
@@ -1025,10 +1045,11 @@ Add to the Phase roadmap section of `plugins/spar/shared/policy.md`:
 ```markdown
 Phase 8 (orchestration): `/spar-weighin` — a plan-to-spar orchestrator layered
 ABOVE the loop. It runs writing-plans → isolated worktree → spar (per-task by
-default, `--whole` optional), driven by a second Stop hook ordered after the
-loop's own. It reads each task's durable outcome to advance, flips the plan's
-checkboxes, and commits per task. Depends only on Phases 1–4; order-independent
-of 5–7. It never writes convergence and stops honestly on a non-converged task.
+default, `--whole` optional), driven by a single combined Stop-hook dispatcher
+that wraps the loop's own `stop-hook.sh`. It reads each task's durable outcome
+to advance, flips the plan's checkboxes, and commits per task. Depends only on
+Phases 1–4; order-independent of 5–7. It never writes convergence and stops
+honestly on a non-converged task.
 ```
 
 - [ ] **Step 3: Add the Phase 8 row to the README roadmap**
@@ -1036,7 +1057,7 @@ of 5–7. It never writes convergence and stops honestly on a non-converged task
 In `README.md`'s Roadmap table, add:
 
 ```markdown
-| 8 | `/spar-weighin` orchestrator: writing-plans → worktree → per-task (or `--whole`) spar loop, second Stop hook, per-task checkbox commits | planned |
+| 8 | `/spar-weighin` orchestrator: writing-plans → worktree → per-task (or `--whole`) spar loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | planned |
 ```
 
 Also add a one-line mention under "How it works" or Install noting `/spar-weighin` wraps `/spar` for multi-task plans.
@@ -1068,7 +1089,7 @@ git commit -m "feat: weighin cancel teardown + Phase 8 docs"
 - Roadmap placement Phase 8 → Task 10. ✓
 
 **Open risks carried from the spec:**
-- Hook ordering is load-bearing and verified first (Task 1). If it fails, the plan branches to a single combined hook.
+- Hook ordering was found unreliable (Task 1), so the design uses a single combined dispatcher that calls `spar`'s hook in-process — no ordering assumption remains. The new load-bearing point is the dispatcher's fail-open: it must always emit `spar`'s decision on error, since it is now the only registered Stop hook (Task 7 handles this via the ERR trap emitting `$SPAR_DEC`).
 - `writing-plans` must run without its execution handoff — handled by an explicit instruction in Task 9; if the skill insists on the handoff, the command still works (the agent just declines the offered execution).
 - `--whole` review quality is untested until real use; per-task remains the default.
 
