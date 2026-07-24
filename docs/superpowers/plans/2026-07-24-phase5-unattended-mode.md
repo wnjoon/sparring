@@ -555,7 +555,7 @@ A fail-open `SessionStart` hook announces how many pending decisions sit in the 
 - Consumes: `reviews/spar-pending.md` (Task 1 / Task 3 write it) — counts `^## ` headings.
 - Produces: on stdout, either nothing (queue absent/empty/unsafe) or a single JSON object `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"…"}}`. Always exits 0.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_session_start.sh`:
 
@@ -608,12 +608,12 @@ chk "Stop hook untouched" "stop-weighin.sh" "$(jq -r '.hooks.Stop[].hooks[].comm
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bash tests/test_session_start.sh`
 Expected: FAIL — the hook script and the `SessionStart` registration do not exist yet.
 
-- [ ] **Step 3: Write the SessionStart hook**
+- [x] **Step 3: Write the SessionStart hook**
 
 Create `plugins/spar/hooks/session-start.sh`:
 
@@ -641,11 +641,11 @@ jq -nc --arg c "$msg" \
 exit 0
 ```
 
-- [ ] **Step 4: Make it executable**
+- [x] **Step 4: Make it executable**
 
 Run: `chmod +x plugins/spar/hooks/session-start.sh`
 
-- [ ] **Step 5: Register the hook in hooks.json**
+- [x] **Step 5: Register the hook in hooks.json**
 
 Replace the entire contents of `plugins/spar/hooks/hooks.json` with:
 
@@ -681,12 +681,12 @@ Replace the entire contents of `plugins/spar/hooks/hooks.json` with:
 }
 ```
 
-- [ ] **Step 6: Run the new test and the hooks-json test to verify they pass**
+- [x] **Step 6: Run the new test and the hooks-json test to verify they pass**
 
 Run: `bash tests/test_session_start.sh && bash tests/test_weighin_hooks_json.sh`
 Expected: both `PASS=… FAIL=0` (the existing hooks-json test only inspects `.hooks.Stop`, which is unchanged).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add plugins/spar/hooks/session-start.sh plugins/spar/hooks/hooks.json tests/test_session_start.sh
