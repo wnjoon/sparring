@@ -251,7 +251,18 @@ from this future-decisions document after landing.
   rounds run, findings fixed/rejected (with reasons), judge rulings,
   model-settled design decisions (prominent), parked questions,
   blocked-pending-user decisions, sweep result, reviewer pairing used (cross-
-  or same-model).
+  or same-model). Plus **changed files** (`git diff --stat` vs `base_sha`).
+- Final report delivery (agreed 2026-07-24, see
+  `docs/superpowers/specs/2026-07-24-spar-report-design.md`): **generation vs
+  display are split.** A deterministic `spar-report.sh` assembles
+  `reviews/spar-<id>-report.md` and a `/spar-report [id]` command displays it.
+  The report is informational, so it stays OUT of the hook's enforcement
+  machinery — the hook's only role is one **fail-open** call to the generator at
+  the terminal path. Generation MUST run **before `cleanup()`**, because cleanup
+  deletes the ledger (`.claude/spar-ledger.md`) and registry that hold the
+  settled-decision and finding data; the reviews/ files persist but those do not.
+  No new phase and no extra round-trip. Scope: converged first (generator is
+  terminal-reason-agnostic, so cap/skip/sweep and a weighin roll-up extend easily).
 
 ## Phase 6 — Codex-hosted adapter
 
