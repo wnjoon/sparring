@@ -1,6 +1,6 @@
 ---
 description: "Sparring loop: implement the task, then iterate independent reviews until the reviewer declares CONVERGED"
-argument-hint: "[--reviewer codex|claude] [--include-dirty] [--] <task description>"
+argument-hint: "[--reviewer codex|claude] [--include-dirty] [--unattended] [--] <task description>"
 allowed-tools:
   - Bash
   - Read
@@ -23,7 +23,9 @@ RESOLVED="$("${CLAUDE_PLUGIN_ROOT}/commands/spar-resolve-family.sh" "$SPAR_RAW")
 SPAR_REVIEWER="${RESOLVED%%$'\t'*}"
 SPAR_REST="${RESOLVED#*$'\t'}"
 SPAR_INCLUDE_DIRTY="${SPAR_REST%%$'\t'*}"
-SPAR_TASK="${SPAR_REST#*$'\t'}"
+SPAR_REST2="${SPAR_REST#*$'\t'}"
+SPAR_UNATTENDED="${SPAR_REST2%%$'\t'*}"
+SPAR_TASK="${SPAR_REST2#*$'\t'}"
 "${CLAUDE_PLUGIN_ROOT}/commands/spar-check-worktree.sh" "$SPAR_INCLUDE_DIRTY" || exit 1
 for SPAR_DIR in .claude reviews; do
   if [ -e "$SPAR_DIR" ] || [ -L "$SPAR_DIR" ]; then
@@ -58,6 +60,7 @@ review_id: ${SPAR_ID}
 base_sha: ${SPAR_BASE}
 reviewer: ${SPAR_REVIEWER}
 include_dirty: ${SPAR_INCLUDE_DIRTY}
+unattended: ${SPAR_UNATTENDED}
 max_rounds: 5
 sweep_done: false
 sweep_result: not-run
@@ -68,7 +71,7 @@ STATE_EOF
 } > "$SPAR_STATE_TMP"
 mv "$SPAR_STATE_TMP" .claude/spar.local.md
 trap - EXIT
-echo "Sparring loop activated (${SPAR_ID}, reviewer=${SPAR_REVIEWER})"
+echo "Sparring loop activated (${SPAR_ID}, reviewer=${SPAR_REVIEWER}, unattended=${SPAR_UNATTENDED})"
 ```
 
 Then implement the task described in the arguments — completely and cleanly,

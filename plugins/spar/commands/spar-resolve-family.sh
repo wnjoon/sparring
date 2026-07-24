@@ -4,8 +4,8 @@
 # The whole /spar argument text is passed as a single positional string (not
 # argv-split) so whitespace/newlines/tabs and shell-metacharacters in the task
 # survive verbatim — the caller must NOT word-split before invoking this.
-# Prints: "<family>\t<include-dirty>\t<task text>"
-#   family ∈ codex|claude; include-dirty ∈ true|false
+# Prints: "<family>\t<include-dirty>\t<unattended>\t<task text>"
+#   family ∈ codex|claude; include-dirty ∈ true|false; unattended ∈ true|false
 # Exits non-zero with "error: …" on an unusable resolution.
 set -uo pipefail
 
@@ -23,8 +23,10 @@ fi
 
 family=""
 include_dirty=false
+unattended=false
 seen_reviewer=false
 seen_include_dirty=false
+seen_unattended=false
 task=""
 
 # Step 2: consume known leading flags in either order. A "--" after flags
@@ -49,6 +51,18 @@ while :; do
     seen_include_dirty=true
     include_dirty=true
     remainder="${remainder#--include-dirty }"
+  elif [ "$remainder" = "--unattended" ]; then
+    [ "$seen_unattended" = false ] \
+      || { echo "error: --unattended specified more than once" >&2; exit 2; }
+    seen_unattended=true
+    unattended=true
+    remainder=""
+  elif [ "${remainder#--unattended }" != "$remainder" ]; then
+    [ "$seen_unattended" = false ] \
+      || { echo "error: --unattended specified more than once" >&2; exit 2; }
+    seen_unattended=true
+    unattended=true
+    remainder="${remainder#--unattended }"
   elif [ "$remainder" = "--reviewer" ]; then
     echo "error: --reviewer must be codex|claude" >&2
     exit 2
@@ -82,4 +96,4 @@ if [ -z "$family" ]; then
 fi
 command -v "$family" >/dev/null 2>&1 || { echo "error: '$family' CLI not on PATH" >&2; exit 3; }
 
-printf '%s\t%s\t%s\n' "$family" "$include_dirty" "$task"
+printf '%s\t%s\t%s\t%s\n' "$family" "$include_dirty" "$unattended" "$task"

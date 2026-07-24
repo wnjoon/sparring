@@ -179,7 +179,7 @@ Parse `--unattended` in the family resolver and persist `unattended:` into the s
   - `spar-resolve-family.sh` output gains a field: `<family>\t<include-dirty>\t<unattended>\t<task>` (unattended ∈ `true|false`, default `false`). The task remains the trailing field (may itself contain tabs).
   - `.claude/spar.local.md` frontmatter gains a line `unattended: true|false` (Task 3 reads it).
 
-- [ ] **Step 1: Update the resolver test (make it fail)**
+- [x] **Step 1: Update the resolver test (make it fail)**
 
 In `tests/test_resolve_family.sh`, the output now has a `<unattended>` field before the task. Update every existing expectation that spells out the tab-joined output, and add `--unattended` cases. Replace the assertion block from the line `chk "codex present → codex" …` through the final `chk "duplicate reviewer → error" …` with:
 
@@ -235,12 +235,12 @@ chk "duplicate unattended → error" "error" \
   "$(PATH="$BOTH:$PATH" bash "$R" "--unattended --unattended x" 2>&1; echo)"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bash tests/test_resolve_family.sh`
 Expected: FAIL — current output has only 3 fields (`codex\tfalse\t…`), so the new `\tfalse\t` expectations and all `--unattended` cases fail.
 
-- [ ] **Step 3: Add `--unattended` parsing to the resolver**
+- [x] **Step 3: Add `--unattended` parsing to the resolver**
 
 In `plugins/spar/commands/spar-resolve-family.sh`:
 
@@ -295,12 +295,12 @@ with:
 printf '%s\t%s\t%s\t%s\n' "$family" "$include_dirty" "$unattended" "$task"
 ```
 
-- [ ] **Step 4: Run the resolver test to verify it passes**
+- [x] **Step 4: Run the resolver test to verify it passes**
 
 Run: `bash tests/test_resolve_family.sh`
 Expected: `PASS=… FAIL=0`.
 
-- [ ] **Step 5: Thread `unattended` through `/spar` setup**
+- [x] **Step 5: Thread `unattended` through `/spar` setup**
 
 In `plugins/spar/commands/spar.md`:
 
@@ -365,12 +365,12 @@ with:
 echo "Sparring loop activated (${SPAR_ID}, reviewer=${SPAR_REVIEWER}, unattended=${SPAR_UNATTENDED})"
 ```
 
-- [ ] **Step 6: Verify the state block is well-formed**
+- [x] **Step 6: Verify the state block is well-formed**
 
 Run: `sed -n '/STATE_EOF/,/STATE_EOF/p' plugins/spar/commands/spar.md | grep -n 'unattended\|include_dirty\|max_rounds'`
 Expected: `unattended: ${SPAR_UNATTENDED}` appears once, between `include_dirty:` and `max_rounds:`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add plugins/spar/commands/spar-resolve-family.sh plugins/spar/commands/spar.md tests/test_resolve_family.sh
