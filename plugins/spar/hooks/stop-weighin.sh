@@ -55,16 +55,35 @@ case "$REASON" in
     idx="$CUR"; [ "$MODE" = "whole" ] && idx=0
     [ -f "$PLAN" ] && bash "$CHECK" "$PLAN" "$idx" 2>>"$LOG" || log "checkbox flip skipped"
     wgn_set_task_status "$CUR" done "$WGN_STATE"
-    git add -A 2>>"$LOG" || true
+    # Exclude loop artifacts even if the command's git-excludes are absent
+    # (defense in depth; the command also adds them to .git/info/exclude).
+    git add -A -- . ':!.claude/spar*' ':!reviews/spar-*' 2>>"$LOG" || git add -A 2>>"$LOG" || true
     git commit -q -m "weighin: task ${CUR} (${HEADING}) — ${REASON}" 2>>"$LOG" || log "nothing to commit for task $CUR"
     if [ "$CUR" -lt "$TASKS" ]; then
-      NEXT=$((CUR+1)); wgn_set_field current "$NEXT" "$WGN_STATE"
-      wgn_set_field current_review_id "" "$WGN_STATE"
+      NEXT=$((CUR+1))
+      # Atomic: advance current AND clear current_review_id in ONE write. A crash
+      # between two separate writes could otherwise leave current=NEXT with a
+      # stale, already-consumed review_id whose outcome file still exists — the
+      # next invocation would then advance again into an unimplemented task and
+      # falsely mark it done. One awk pass makes that state unreachable.
+      wtmp="${WGN_STATE}.tmp.$$"
+      awk -v n="$NEXT" '
+        /^---$/ {m++}
+        m<2 && /^current: / {print "current: " n; next}
+        m<2 && /^current_review_id: / {print "current_review_id:"; next}
+        {print}
+      ' "$WGN_STATE" > "$wtmp" && mv "$wtmp" "$WGN_STATE"
       NHEAD="$(wgn_task_line "$NEXT" "$WGN_STATE" | cut -f3)"
       # Build the next task's text from its plan section (whole mode: entire plan).
       if [ "$MODE" = "whole" ]; then cp "$PLAN" "$TASKFILE"
       else awk -v h="### ${NHEAD}" '$0==h{f=1} f&&/^### /&&$0!=h&&seen{exit} $0==h{seen=1} f{print}' "$PLAN" > "$TASKFILE"; fi
-      bash "$LAUNCH" "$WGN_STATE" "$TASKFILE" 2>>"$LOG" || { log "launch failed"; passthrough; }
+      if ! bash "$LAUNCH" "$WGN_STATE" "$TASKFILE" 2>>"$LOG"; then
+        log "launch failed for task $NEXT"
+        wgn_set_field phase done "$WGN_STATE"
+        block "Task ${CUR} converged, but launching task ${NEXT} failed. The
+weigh-in is stopping — check .claude/spar-weighin.log, then re-run
+/spar-weighin to resume." "sparring weigh-in: launch failed"
+      fi
       block "Task ${CUR} converged and was committed. Now implement task ${NEXT}: ${NHEAD}, following its steps in ${PLAN}. When done, stop — the sparring reviewer will engage automatically." \
         "sparring weigh-in: task ${NEXT}/${TASKS}"
     else

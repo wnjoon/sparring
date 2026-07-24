@@ -70,6 +70,11 @@ OUT="$(echo '{}' | bash "$HOOK")"
 chk "C blocks" '"block"' "$OUT"
 chk "C task1 checkbox flipped" "- [x] a" "$(sed -n '2p' docs/p.md)"
 chk "C launched task2 spar" "review_id" "$(cat .claude/spar.local.md 2>/dev/null)"
+# atomicity/consistency: weighin current_review_id must equal the NEWLY launched
+# spar id (never a stale one), and current must have advanced to 2 together.
+NEWID="$(grep '^review_id:' .claude/spar.local.md | sed 's/^review_id: //')"
+chk "C weighin id matches launched spar id" "$NEWID" "$(cat .claude/spar-weighin.local.md)"
+chk "C current advanced to 2" "current: 2" "$(cat .claude/spar-weighin.local.md)"
 teardown
 
 # D: last task converged → finish (block to summarize, phase done)
