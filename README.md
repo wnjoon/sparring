@@ -5,7 +5,7 @@
 
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: v0.3.0 — the Claude-hosted loop includes safe skips, design-intent pointers, and a risk-triggered final sweep.**
+**Status: v0.4.0 — adds `/spar-weighin`, a plan-to-spar orchestrator that runs a checkbox plan through the loop task-by-task. The Claude-hosted loop includes safe skips, design-intent pointers, and a risk-triggered final sweep.**
 
 Phases 1–4 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar` gives you:
 
@@ -18,7 +18,7 @@ Phases 1–4 are implemented; the core loop is verified end-to-end against real 
 - changed-surface **design-intent pointers** on every fresh review;
 - a once-only, fresh Claude **final sweep** after risky, long, or design-bearing loops.
 
-Phases 5–7 (unattended mode, the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
+Phase 8 (the `/spar-weighin` orchestrator) ships in v0.4.0. Phases 5–7 (unattended mode, the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 
 ## Direction
 
@@ -48,7 +48,7 @@ sparring is inspired by [hamelsmu/claude-review-loop](https://github.com/hamelsm
 
 ## How it works
 
-Everything below runs today, except the steps tagged `(planned Pn)`.
+Everything below runs today, except the steps tagged `(planned Pn)`. `/spar-weighin` wraps `/spar` for multi-task plans, running each task through the loop independently.
 
 ```
 /spar <task description>
@@ -107,6 +107,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 5 | Unattended mode + final report | planned |
 | 6 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
 | 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
+| 8 | `/spar-weighin` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) spar loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | ✅ done |
 
 ## Install
 
