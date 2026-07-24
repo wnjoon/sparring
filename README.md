@@ -18,6 +18,12 @@ Phases 1–4 are implemented; the core loop is verified end-to-end against real 
 - changed-surface **design-intent pointers** on every fresh review;
 - a once-only, fresh Claude **final sweep** after risky, long, or design-bearing loops.
 
+<br>
+
+<img src="image/weighin.png" alt="weighin — a cross-model code-review loop" width="100%">
+
+
+
 Phase 8 (the `/spar-weighin` orchestrator) ships in v0.4.0. Phases 5–7 (unattended mode, the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 
 ## Direction
