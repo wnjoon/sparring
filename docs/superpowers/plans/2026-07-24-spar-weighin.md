@@ -1074,7 +1074,7 @@ Add to the Phase roadmap section of `plugins/spar/shared/policy.md`:
 
 ```markdown
 Phase 8 (orchestration): `/spar-weighin` — a plan-to-spar orchestrator layered
-ABOVE the loop. It runs writing-plans → isolated worktree → spar (per-task by
+ABOVE the loop. It runs writing-plans → dedicated branch → spar (per-task by
 default, `--whole` optional), driven by a single combined Stop-hook dispatcher
 that wraps the loop's own `stop-hook.sh`. It reads each task's durable outcome
 to advance, flips the plan's checkboxes, and commits per task. Depends only on
@@ -1087,7 +1087,7 @@ honestly on a non-converged task.
 In `README.md`'s Roadmap table, add:
 
 ```markdown
-| 8 | `/spar-weighin` orchestrator: writing-plans → worktree → per-task (or `--whole`) spar loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | planned |
+| 8 | `/spar-weighin` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) spar loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | planned |
 ```
 
 Also add a one-line mention under "How it works" or Install noting `/spar-weighin` wraps `/spar` for multi-task plans.
