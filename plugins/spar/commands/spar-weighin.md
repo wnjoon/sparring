@@ -44,6 +44,8 @@ EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
 for pat in 'reviews/spar-*' '.claude/spar*'; do
   grep -qxF "$pat" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$pat" >> "$EXCLUDE"
 done
+# Note: the 'worktree' state field holds the dedicated BRANCH name (kept under
+# that key for schema compatibility; there is no separate worktree).
 TMP="$(mktemp .claude/spar-weighin.local.md.tmp.XXXXXX)"
 trap 'rm -f "$TMP"' EXIT
 cat > "$TMP" <<STATE_EOF
@@ -103,9 +105,12 @@ launched — from that point the weigh-in Stop hook drives the rest.
    bash "${CLAUDE_PLUGIN_ROOT}/commands/spar-weighin-launch.sh" .claude/spar-weighin.local.md .claude/spar-weighin-task.txt
    ```
 
-   Then implement task 1 following its steps in the plan. When you believe it is
-   done, stop — the sparring reviewer engages automatically, and on convergence
-   the weigh-in advances to the next task on its own.
+   Then implement task 1 following its steps in the plan. You may follow the
+   plan's own "Commit" steps or not — the weigh-in makes one task-boundary commit
+   on convergence regardless, and spar froze the baseline at launch, so an extra
+   intermediate commit is harmless. When you believe the task is done, stop — the
+   sparring reviewer engages automatically, and on convergence the weigh-in
+   advances to the next task on its own.
 
 ## Hard rules
 

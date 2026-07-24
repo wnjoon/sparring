@@ -81,21 +81,22 @@ case "$REASON" in
         log "launch failed for task $NEXT"
         wgn_set_field phase done "$WGN_STATE"
         block "Task ${CUR} converged, but launching task ${NEXT} failed. The
-weigh-in is stopping — check .claude/spar-weighin.log, then re-run
-/spar-weighin to resume." "sparring weigh-in: launch failed"
+weigh-in is stopping — check .claude/spar-weighin.log, run /spar-cancel to
+clear this weigh-in, then start a new /spar-weighin." \
+          "sparring weigh-in: launch failed"
       fi
       block "Task ${CUR} converged and was committed. Now implement task ${NEXT}: ${NHEAD}, following its steps in ${PLAN}. When done, stop — the sparring reviewer will engage automatically." \
         "sparring weigh-in: task ${NEXT}/${TASKS}"
     else
       wgn_set_field phase done "$WGN_STATE"
-      block "All ${TASKS} tasks converged and were committed on this branch. Summarize what shipped for the user (branch, plan path, tasks), then stop." \
+      block "All ${TASKS} tasks converged and were committed on this branch. Summarize what shipped for the user (branch, plan path, tasks). Then run /spar-cancel to clear this weigh-in's state (otherwise the next /spar-weighin is refused as 'already active'), and stop." \
         "sparring weigh-in: complete"
     fi
     ;;
   *)
     wgn_set_task_status "$CUR" stopped "$WGN_STATE"
     wgn_set_field phase done "$WGN_STATE"
-    block "Task ${CUR} (${HEADING}) did not converge — its sparring loop ended '${REASON}'. Per weigh-in policy the run stops here rather than advancing. Report the unresolved findings from that task's last review to the user honestly, then stop. (To resume later, fix and re-run /spar-weighin.)" \
+    block "Task ${CUR} (${HEADING}) did not converge — its sparring loop ended '${REASON}'. Per weigh-in policy the run stops here rather than advancing. Report the unresolved findings from that task's last review to the user honestly, then stop. (To move on: run /spar-cancel to clear this weigh-in, fix the findings, then start a new /spar-weighin.)" \
       "sparring weigh-in: stopped — task ${CUR} ${REASON}"
     ;;
 esac
