@@ -41,6 +41,8 @@ OUTCOME_WRITER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-record-outcome.sh"
 CHANGE_CLASSIFIER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-classify-change.sh"
 INTENT_HARVESTER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-harvest-intent.sh"
 INTENT_FILE=".claude/spar-intent-pointers.txt"
+QUEUE_WRITER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-queue-pending.sh"
+REPORT_GEN="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-report.sh"
 SWEEP_RUNNER=".claude/spar-run-sweep.sh"
 SWEEP_PROMPT_FILE=".claude/spar-sweep-prompt.txt"
 SWEEP_RETRY_FILE=".claude/spar-sweep-retries"
@@ -72,6 +74,38 @@ finish_approve() { # $1=reason $2=sweep result (optional)
   approve
 }
 
+# Unattended terminal: every parked design stalemate is essential (spec §3).
+# Persist each pending finding to the durable queue (survives cleanup), record
+# the honest blocked-pending-user outcome, make a fail-open report call while
+# the ledger/registry still exist, then clean up and release. Never a gate.
+unattended_block_terminal() { # $1=round
+  local n="$1" pfp ptxt
+  while IFS= read -r pfp; do
+    [ -n "$pfp" ] || continue
+    ptxt=$(mktemp) || continue
+    # Recover the finding text from whatever round raised it (not just the
+    # terminal round), and never enqueue an empty body — a heading with no text
+    # would falsely dedup future runs and preserve nothing actionable.
+    if resolve_finding_text "$pfp" "$n" > "$ptxt" && [ -s "$ptxt" ]; then
+      if [ -x "$QUEUE_WRITER" ]; then
+        "$QUEUE_WRITER" "$REVIEW_ID" "$pfp" "$ptxt" 2>>"$LOG_FILE" \
+          || log "could not queue pending finding: $pfp"
+      else
+        log "queue writer missing: $QUEUE_WRITER"
+      fi
+    else
+      log "no finding text found for parked fingerprint (not enqueued): $pfp"
+    fi
+    rm -f "$ptxt"
+  done < <(parked_fingerprints)
+  record_outcome blocked-pending-user
+  if [ -x "$REPORT_GEN" ]; then
+    "$REPORT_GEN" "$REVIEW_ID" "$BASE" 2>>"$LOG_FILE" || log "report generation failed"
+  fi
+  cleanup
+  approve
+}
+
 trap 'log "ERR trap line $LINENO"; record_outcome error-bypass error; cleanup; printf "{\"decision\":\"approve\"}\n"; exit 0' ERR
 
 HOOK_INPUT=$(cat) # consume stdin (hook JSON)
@@ -95,6 +129,12 @@ case "$INCLUDE_DIRTY" in
   ''|false) INCLUDE_DIRTY=false ;;
   true) ;;
   *) log "invalid include_dirty: $INCLUDE_DIRTY"; finish_approve error-bypass;;
+esac
+UNATTENDED=$(field unattended)
+case "$UNATTENDED" in
+  ''|false) UNATTENDED=false ;;
+  true) ;;
+  *) log "invalid unattended: $UNATTENDED"; finish_approve error-bypass;;
 esac
 case "$SWEEP_DONE" in ''|false) SWEEP_DONE=false;; true) ;; *)
   log "invalid sweep_done: $SWEEP_DONE"; finish_approve error-bypass;;
@@ -570,6 +610,21 @@ gate_finding_text() { # $1=review file  $2=canonical fp
   printf '%s' "$t"
 }
 
+# Finding text for a parked fingerprint, searched from the current round back to
+# round 1. A finding parked in an EARLIER round may not appear in the terminal
+# round's review, so its text must be recovered from whichever round raised it.
+# Returns non-zero (and prints nothing) if no round carries the finding.
+resolve_finding_text() { # $1=fp  $2=current round
+  local fp="$1" r="$2" t
+  case "$r" in ''|*[!0-9]*) return 1;; esac
+  while [ "$r" -ge 1 ]; do
+    t=$(gate_finding_text "$(review_file "$r")" "$fp")
+    if [ -n "$t" ]; then printf '%s' "$t"; return 0; fi
+    r=$((r-1))
+  done
+  return 1
+}
+
 # Dispatch a blind judge for one fingerprint: writes prompt + runner + pending,
 # sets status judging. Returns non-zero (caller falls back to escalation) if the
 # template is missing or the finding cannot be extracted.
@@ -970,8 +1025,13 @@ again. (To abandon the loop instead: /spar-cancel.)" \
       rm -f "$GATE_MANIFEST" "$GATE_FILE"
     fi
 
-    # (C2) Stuck on parked findings → fire the single batched gate.
+    # (C2) Stuck on parked findings → attended: fire the single batched gate;
+    # unattended: take the honest blocked-pending-user terminal (spec §2/§3).
     if only_parked_this_round "$ROUND"; then
+      if [ "$UNATTENDED" = true ]; then
+        log "unattended: parked design stalemate → blocked-pending-user at round $ROUND"
+        unattended_block_terminal "$ROUND"
+      fi
       : > "$GATE_MANIFEST"
       {
         echo "# sparring design gate — batched parked decisions"

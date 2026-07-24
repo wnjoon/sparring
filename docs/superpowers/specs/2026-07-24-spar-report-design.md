@@ -1,5 +1,7 @@
 # `/spar-report` — Final Run Report — Design (Phase 5 prep)
 
+> _Command names updated post-refactor: `/spar` → `/spar:fight`; `/spar-weighin` → `/spar:ready` (plan) + `/spar:fight` (execute)._
+
 **Status:** design, prepared for **Phase 5**. NOT yet implemented. This refines
 the "Final report" half of Phase 5 (the other half is unattended mode); see
 `docs/design-decisions.md` §Phase 5.
@@ -97,8 +99,8 @@ report can be shown any time). If the file is missing, it says so plainly.
   artifacts and is terminal-reason-agnostic, so extending to `cap`,
   `sweep-findings-at-cap`, or `skipped` is a one-line change at those terminal
   paths — deferred.
-- **`/spar-weighin` roll-up** (a Phase-8-flow summary aggregating each task's
-  per-run report) is a natural follow-on: weighin controls its own terminal
+- **`/spar:fight` roll-up** (a Phase-8-flow summary aggregating each task's
+  per-run report) is a natural follow-on: `/spar:fight` controls its own terminal
   path, so it can call the same generator/command. Deferred.
 
 ## Non-goals

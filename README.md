@@ -5,15 +5,15 @@
 
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: v0.4.0 — adds `/spar-weighin`, a plan-to-spar orchestrator that runs a checkbox plan through the loop task-by-task. The Claude-hosted loop includes safe skips, design-intent pointers, and a risk-triggered final sweep.**
+**Status: v0.5.0 — splits the plan-to-spar orchestrator into `/spar:ready` (turn a spec into a checkbox plan on a dedicated branch, then stop) and `/spar:fight` (run a single task, or drive a ready plan task-by-task). The Claude-hosted loop includes safe skips, design-intent pointers, a risk-triggered final sweep, and unattended mode.**
 
-Phases 1–4 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar` gives you:
+Phases 1–4 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar:fight` gives you:
 
 - an **enforced** review loop that iterates until the *reviewer* declares convergence;
 - a **blind judge** that rules factual (`[MECHANICAL]`) stalemates;
 - a **batched user gate + decision ledger** for genuine design choices;
 - **cross-round matching** of re-worded findings;
-- **single-agent mode** — auto-detects the reviewer (Codex if installed → cross-model, the recommended default; otherwise Claude), so `/spar` works with no second vendor. `--reviewer codex|claude` overrides;
+- **single-agent mode** — auto-detects the reviewer (Codex if installed → cross-model, the recommended default; otherwise Claude), so `/spar:fight` works with no second vendor. `--reviewer codex|claude` overrides;
 - a reported **safe skip** for changes no larger than 10 lines / 2 paths when no risky path or unsafe change kind is touched;
 - changed-surface **design-intent pointers** on every fresh review;
 - a once-only, fresh Claude **final sweep** after risky, long, or design-bearing loops.
@@ -24,7 +24,7 @@ Phases 1–4 are implemented; the core loop is verified end-to-end against real 
 
 
 
-Phase 8 (the `/spar-weighin` orchestrator) ships in v0.4.0. Phases 5–7 (unattended mode, the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
+Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5 (unattended mode) ship in v0.5.0. Phases 6–7 (the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 
 ## Direction
 
@@ -54,10 +54,10 @@ sparring is inspired by [hamelsmu/claude-review-loop](https://github.com/hamelsm
 
 ## How it works
 
-Everything below runs today, except the steps tagged `(planned Pn)`. `/spar-weighin` wraps `/spar` for multi-task plans, running each task through the loop independently.
+Everything below runs today, except the steps tagged `(planned Pn)`. `/spar:ready` turns a spec into a checkbox plan; `/spar:fight` then runs each task through the loop independently (or runs a single ad-hoc task on its own).
 
 ```
-/spar <task description>
+/spar:fight <task description>
       │
       ▼
 [Implement]   the author writes the code, then tries to stop
@@ -89,7 +89,7 @@ The reviewer / judge / matcher run as **Codex** (`codex exec --sandbox read-only
 
 The same structure runs in both directions. The seats swap; the invariants don't:
 
-| Seat | Claude-hosted (`/spar`) | Codex-hosted (planned) |
+| Seat | Claude-hosted (`/spar:fight`) | Codex-hosted (planned) |
 |---|---|---|
 | Author (sole writer) | Claude Code session | Codex CLI session |
 | Reviewer (declares `CONVERGED`) | `codex exec --sandbox read-only` (default) or `claude -p` (single-agent) | `claude -p` (read-only tools) |
@@ -106,14 +106,14 @@ The same structure runs in both directions. The seats swap; the invariants don't
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Core loop: `/spar`, Stop hook, round machinery, per-finding response enforcement, round cap, read-only reviewer | ✅ done |
+| 1 | Core loop: `/spar:fight`, Stop hook, round machinery, per-finding response enforcement, round cap, read-only reviewer | ✅ done |
 | 2 | `[DESIGN]` debate-first (conveyance boundary + decision ledger) · stalemate blind judge · batched end-of-loop gate · cross-round semantic finding matcher | ✅ done |
-| 3 | Single-agent mode: same-family sparring (Claude reviewer/judge/matcher) so `/spar` works without Codex — auto-detect + explicit override; cross-model stays the default | ✅ done |
+| 3 | Single-agent mode: same-family sparring (Claude reviewer/judge/matcher) so `/spar:fight` works without Codex — auto-detect + explicit override; cross-model stays the default | ✅ done |
 | 4 | Safe skip + changed-surface intent harvest + risk-triggered final sweep + durable exit reason | ✅ done |
 | 5 | Unattended mode + final report | planned |
 | 6 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
 | 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
-| 8 | `/spar-weighin` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) spar loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | ✅ done |
+| 8 | `/spar:ready` + `/spar:fight` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) fight loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | ✅ done |
 
 ## Install
 
@@ -122,9 +122,9 @@ claude plugin marketplace add wnjoon/sparring
 claude plugin install spar@sparring
 ```
 
-Requires `jq`. The [Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`) is **recommended** — with it, `/spar` runs cross-model (Claude author ↔ Codex reviewer). Without it, single-agent mode reviews with Claude alone. Force a family with `/spar --reviewer codex|claude -- <task>`.
+Requires `jq`. The [Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`) is **recommended** — with it, `/spar:fight` runs cross-model (Claude author ↔ Codex reviewer). Without it, single-agent mode reviews with Claude alone. Force a family with `/spar:fight --reviewer codex|claude -- <task>`.
 
-`/spar` starts only from a clean worktree by default. `--include-dirty`
+`/spar:fight` starts only from a clean worktree by default. `--include-dirty`
 explicitly adopts the entire pre-existing dirty surface and disables automatic
 skip.
 
@@ -132,7 +132,7 @@ skip.
 
 ```
 plugins/spar/            Claude Code plugin (commands, Stop hook)
-  commands/              /spar, /spar-cancel, setup guards + surface helpers
+  commands/              /spar:ready, /spar:fight, /spar:cancel, setup guards + surface helpers
   shared/policy.md       loop policy — source of truth for both adapters
   shared/prompts/        reviewer / judge / matcher / sweeper templates
 docs/superpowers/        specs, plans, and design-decisions per phase

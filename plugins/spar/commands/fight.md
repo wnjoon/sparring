@@ -1,6 +1,6 @@
 ---
-description: "Sparring loop: implement the task, then iterate independent reviews until the reviewer declares CONVERGED"
-argument-hint: "[--reviewer codex|claude] [--include-dirty] [--] <task description>"
+description: "Fight: run the sparring review loop — a single task, or a plan prepared by /spar:ready"
+argument-hint: "[--reviewer codex|claude] [--include-dirty] [--unattended] [--] <task description>"
 allowed-tools:
   - Bash
   - Read
@@ -14,16 +14,53 @@ First, activate the loop by running this setup command:
 
 ```bash
 set -e
-if [ -f .claude/spar.local.md ]; then echo "Error: a sparring loop is already active. Use /spar-cancel first."; exit 1; fi
+if [ -f .claude/spar.local.md ]; then echo "Error: a fight loop is already active. Use /spar:cancel first."; exit 1; fi
 SPAR_RAW="$(cat <<'SPAR_ARGS_EOF'
 $ARGUMENTS
 SPAR_ARGS_EOF
 )"
-RESOLVED="$("${CLAUDE_PLUGIN_ROOT}/commands/spar-resolve-family.sh" "$SPAR_RAW")" || { printf '%s\n' "$RESOLVED" >&2; exit 1; }
+RESOLVED="$("${CLAUDE_PLUGIN_ROOT}/commands/spar-fight-resolve.sh" "$SPAR_RAW")" || { printf '%s\n' "$RESOLVED" >&2; exit 1; }
 SPAR_REVIEWER="${RESOLVED%%$'\t'*}"
 SPAR_REST="${RESOLVED#*$'\t'}"
 SPAR_INCLUDE_DIRTY="${SPAR_REST%%$'\t'*}"
-SPAR_TASK="${SPAR_REST#*$'\t'}"
+SPAR_REST2="${SPAR_REST#*$'\t'}"
+SPAR_UNATTENDED="${SPAR_REST2%%$'\t'*}"
+SPAR_TASK="${SPAR_REST2#*$'\t'}"
+# ── Dispatch: plan-aware vs single-task ──────────────────────────────────────
+# A plan prepared by /spar:ready lives in .claude/spar-plan.local.md. With one
+# pending, `fight` (no task) drives it task-by-task; a task arg is refused so a
+# prepared plan is never silently skipped. With no plan, a task arg starts a
+# single loop; no task at all is an error.
+PLAN_STATE=".claude/spar-plan.local.md"
+if [ -f "$PLAN_STATE" ]; then
+  if [ -n "$SPAR_TASK" ]; then
+    echo "Error: a plan is ready — run /spar:fight with no task to execute it, or clear it with /spar:cancel." >&2
+    exit 1
+  fi
+  . "${CLAUDE_PLUGIN_ROOT}/commands/spar-plan-lib.sh"
+  PHASE="$(plan_field phase "$PLAN_STATE")"
+  if [ "$PHASE" = "running" ]; then
+    echo "Error: this plan is already being fought. Continue by stopping, or /spar:cancel to abandon it." >&2
+    exit 1
+  fi
+  [ "$PHASE" = "planned" ] || { echo "Error: plan state is not ready to fight (phase: $PHASE)." >&2; exit 1; }
+  if [ -f .claude/spar.local.md ]; then echo "Error: a fight loop is already active. Use /spar:cancel first."; exit 1; fi
+  PLAN="$(plan_field plan_path "$PLAN_STATE")"
+  MODE="$(plan_field mode "$PLAN_STATE")"
+  [ -f "$PLAN" ] || { echo "Error: plan file not found: $PLAN" >&2; exit 1; }
+  plan_set_field phase running "$PLAN_STATE"
+  H1="$(plan_task_line 1 "$PLAN_STATE" | cut -f3)"
+  if [ "$MODE" = "whole" ]; then cp "$PLAN" .claude/spar-fight-task.txt
+  else awk -v h="### ${H1}" '$0==h{f=1} f&&/^### /&&$0!=h&&seen{exit} $0==h{seen=1} f{print}' "$PLAN" > .claude/spar-fight-task.txt; fi
+  bash "${CLAUDE_PLUGIN_ROOT}/commands/spar-fight-launch.sh" "$PLAN_STATE" .claude/spar-fight-task.txt || { echo "Error: could not launch task 1." >&2; exit 1; }
+  echo "Fight started on the ready plan (task 1/$(plan_field tasks "$PLAN_STATE")). Implement task 1 following its steps in ${PLAN}, then stop — the sparring reviewer engages automatically and the fight advances task-by-task on convergence."
+  exit 0
+fi
+if [ -z "$SPAR_TASK" ]; then
+  echo "Error: nothing to fight. Give a task description, or run /spar:ready <spec> first." >&2
+  exit 1
+fi
+# No pending plan + a task arg → single-task loop (setup continues below).
 "${CLAUDE_PLUGIN_ROOT}/commands/spar-check-worktree.sh" "$SPAR_INCLUDE_DIRTY" || exit 1
 for SPAR_DIR in .claude reviews; do
   if [ -e "$SPAR_DIR" ] || [ -L "$SPAR_DIR" ]; then
@@ -58,6 +95,7 @@ review_id: ${SPAR_ID}
 base_sha: ${SPAR_BASE}
 reviewer: ${SPAR_REVIEWER}
 include_dirty: ${SPAR_INCLUDE_DIRTY}
+unattended: ${SPAR_UNATTENDED}
 max_rounds: 5
 sweep_done: false
 sweep_result: not-run
@@ -68,7 +106,7 @@ STATE_EOF
 } > "$SPAR_STATE_TMP"
 mv "$SPAR_STATE_TMP" .claude/spar.local.md
 trap - EXIT
-echo "Sparring loop activated (${SPAR_ID}, reviewer=${SPAR_REVIEWER})"
+echo "Fight (single task) activated (${SPAR_ID}, reviewer=${SPAR_REVIEWER}, unattended=${SPAR_UNATTENDED})"
 ```
 
 Then implement the task described in the arguments — completely and cleanly,
@@ -121,6 +159,6 @@ sparring Stop hook takes over from there.
   `RULING:` line yourself.
 - Never write `STATUS: CONVERGED` anywhere yourself. Convergence is the
   reviewer's call alone.
-- Never edit `.claude/spar.local.md` by hand; cancellation is `/spar-cancel`.
+- Never edit `.claude/spar.local.md` by hand; cancellation is `/spar:cancel`.
 - If the hook reports the round cap was reached, summarize the unresolved
   findings to the user honestly — do not present the work as fully converged.
