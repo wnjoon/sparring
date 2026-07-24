@@ -14,6 +14,7 @@ First, activate the weigh-in by running this setup command:
 
 ```bash
 set -e
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "Error: /spar-weighin must run inside a git repository."; exit 1; }
 if [ -f .claude/spar-weighin.local.md ]; then echo "Error: a weigh-in is already active. Finish it or run /spar-cancel."; exit 1; fi
 if [ -f .claude/spar.local.md ]; then echo "Error: a sparring loop is already active. Use /spar-cancel first."; exit 1; fi
 WGN_RAW="$(cat <<'WGN_ARGS_EOF'
@@ -30,14 +31,19 @@ if [ -z "$WGN_REVIEWER" ]; then
   if command -v codex >/dev/null 2>&1; then WGN_REVIEWER=codex; else WGN_REVIEWER=claude; fi
 fi
 command -v "$WGN_REVIEWER" >/dev/null 2>&1 || { echo "Error: '$WGN_REVIEWER' CLI not on PATH."; exit 1; }
+# Isolate this run on a dedicated branch in the CURRENT directory. No separate
+# worktree, so the working directory — and thus every state path the Stop hook
+# reads — never changes mid-run. All task commits land on this branch.
+WGN_SLUG="$(printf '%s' "$WGN_SPEC" | sed 's#.*/##; s/\.[A-Za-z0-9]*$//' | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-' | sed 's/^-*//; s/-*$//' | cut -c1-40)"
+[ -n "$WGN_SLUG" ] || WGN_SLUG=run
+WGN_BRANCH="weighin/${WGN_SLUG}-$(date +%Y%m%d-%H%M%S)"
+git checkout -b "$WGN_BRANCH" || { echo "Error: could not create branch $WGN_BRANCH."; exit 1; }
 for D in .claude reviews docs/superpowers/plans; do mkdir -p "$D"; done
 # Reuse spar's git-excludes so weighin's own commits never stage loop artifacts.
-if git rev-parse --git-dir >/dev/null 2>&1; then
-  EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
-  for pat in 'reviews/spar-*' '.claude/spar*'; do
-    grep -qxF "$pat" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$pat" >> "$EXCLUDE"
-  done
-fi
+EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
+for pat in 'reviews/spar-*' '.claude/spar*'; do
+  grep -qxF "$pat" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$pat" >> "$EXCLUDE"
+done
 TMP="$(mktemp .claude/spar-weighin.local.md.tmp.XXXXXX)"
 trap 'rm -f "$TMP"' EXIT
 cat > "$TMP" <<STATE_EOF
@@ -47,7 +53,7 @@ phase: plan
 mode: ${WGN_MODE}
 reviewer: ${WGN_REVIEWER}
 plan_path:
-worktree:
+worktree: ${WGN_BRANCH}
 tasks: 0
 current: 1
 current_review_id:
@@ -55,7 +61,7 @@ current_review_id:
 STATE_EOF
 mv "$TMP" .claude/spar-weighin.local.md
 trap - EXIT
-printf 'Weigh-in activated (mode=%s, reviewer=%s)\nSPEC=%s\n' "$WGN_MODE" "$WGN_REVIEWER" "$WGN_SPEC"
+printf 'Weigh-in activated (mode=%s, reviewer=%s, branch=%s)\nSPEC=%s\n' "$WGN_MODE" "$WGN_REVIEWER" "$WGN_BRANCH" "$WGN_SPEC"
 ```
 
 Then run these steps in order. Do NOT stop until task 1's sparring loop is
@@ -69,14 +75,13 @@ launched — from that point the weigh-in Stop hook drives the rest.
    the executor.** If the spec is empty or missing, stop and tell the user to run
    `superpowers:brainstorming` first.
 
-2. **Record the plan path and create the ring.** Set the plan path into state and
-   create an isolated worktree with the `superpowers:using-git-worktrees` skill,
-   then record it:
+2. **Record the plan path.** The dedicated branch was already created at setup
+   (shown as `branch=` above), so there is no worktree to make — just record the
+   plan path into state:
 
    ```bash
    . "${CLAUDE_PLUGIN_ROOT}/commands/spar-weighin-lib.sh"
    wgn_set_field plan_path "<the plan path you just wrote>"
-   wgn_set_field worktree "$(pwd)"
    ```
 
 3. **Ingest the plan into the task table:**
