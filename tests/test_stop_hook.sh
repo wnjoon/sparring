@@ -90,9 +90,9 @@ chk "prompt resolves ledger slot (no {{LEDGER}})" "absent" \
 chk "prev-context template deleted from plugin" "absent" \
   "$([ -f "$CLAUDE_PLUGIN_ROOT/shared/prompts/reviewer-prev-context.md" ] && echo present || echo absent)"
 chk "/spar creates initial state through mktemp" 'mktemp .claude/spar.local.md.tmp.XXXXXX' \
-  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/spar.md")"
+  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
 chk "/spar atomically publishes initial state" 'mv "$SPAR_STATE_TMP" .claude/spar.local.md' \
-  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/spar.md")"
+  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
 
 # ── 4d. Phase 4 skip: small + safe only, always reported and persisted ──
 skip_repo() {
@@ -761,7 +761,7 @@ chk "symlinked sweep → blocked as unsafe" 'unsafe sweep artifact' "$OUT"
 chk "symlinked sweep → set aside" "present" "$([ -L "${SF}.invalid-1" ] && echo present || echo absent)"
 
 chk "/spar-cancel preserves state sweep result" '"$SPAR_SWEEP_RESULT"' \
-  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/spar-cancel.md")"
+  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/cancel.md")"
 
 # ── Phase 5: unattended terminal at the design gate ──
 # helper: mark the active state file unattended

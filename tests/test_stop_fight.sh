@@ -7,7 +7,7 @@ chk(){ if echo "$3" | grep -qF -- "$2"; then echo "PASS: $1"; PASS=$((PASS+1)); 
 nchk(){ if echo "$3" | grep -qF -- "$2"; then echo "FAIL: $1 (unexpected)"; FAIL=$((FAIL+1)); else echo "PASS: $1"; PASS=$((PASS+1)); fi; }
 
 # Each case runs in its own temp git repo. spar's stop-hook is stubbed via
-# SPAR_FIGHT_SPAR_HOOK so we test the weigh-in logic in isolation.
+# SPAR_FIGHT_SPAR_HOOK so we test the fight-dispatch logic in isolation.
 setup(){
   TMP=$(mktemp -d); cd "$TMP"; git init -q; git config user.email a@b.c; git config user.name t
   git commit -q --allow-empty -m init; mkdir -p .claude reviews docs
@@ -31,12 +31,12 @@ teardown(){ cd /; rm -rf "$TMP"; unset SPAR_FIGHT_SPAR_HOOK; }
 wstate(){ printf -- '---\nactive: true\nphase: %s\nmode: %s\nreviewer: codex\nplan_path: %s\nbranch: %s\ntasks: %s\ncurrent: %s\ncurrent_review_id: %s\n---\n' "$1" "$2" "$3" "$TMP" "$4" "$5" "$6"; }
 outcome(){ printf -- '---\nreason: %s\nreview_id: %s\nrounds: 2\nreviewer: codex\nsweep: not-triggered\nrecorded_at: x\n---\n' "$1" "$2"; }
 
-# A: no weigh-in, spar approves → pass through approve
+# A: no plan, spar approves → pass through approve
 setup
 chk "A passthrough approve" '"approve"' "$(echo '{}' | bash "$HOOK")"
 teardown
 
-# A2: no weigh-in, spar blocks → pass through block (spar-only unchanged)
+# A2: no plan, spar blocks → pass through block (spar-only unchanged)
 setup
 export SPAR_FIGHT_SPAR_HOOK="$TMP/spar-block.sh"
 OUT="$(echo '{}' | bash "$HOOK")"
@@ -44,7 +44,7 @@ chk "A2 passthrough block" '"block"' "$OUT"
 chk "A2 keeps spar reason" "spar mid-round" "$OUT"
 teardown
 
-# B: weigh-in active, spar blocks (mid-round) → pass through, do NOT advance
+# B: plan active, spar blocks (mid-round) → pass through, do NOT advance
 setup
 export SPAR_FIGHT_SPAR_HOOK="$TMP/spar-block.sh"
 wstate running per-task docs/p.md 2 1 20260724-101010-aaaaaa > .claude/spar-plan.local.md
@@ -54,7 +54,7 @@ chk "B passthrough block" '"block"' "$OUT"
 nchk "B no task launched" "review_id" "$(cat .claude/spar.local.md 2>/dev/null)"
 teardown
 
-# C: weigh-in active, spar approved, task1 converged, task2 remains → block+advance+checkbox+launch
+# C: plan active, spar approved, task1 converged, task2 remains → block+advance+checkbox+launch
 setup
 cat > docs/p.md <<'EOF'
 ### Task 1: Alpha
@@ -103,7 +103,7 @@ chk "E phase done" "phase: done" "$(cat .claude/spar-plan.local.md)"
 nchk "E task2 not launched" "review_id" "$(cat .claude/spar.local.md 2>/dev/null)"
 teardown
 
-# F: fail-open — an internal error (corrupt lib) while a weigh-in is active AND
+# F: fail-open — an internal error (corrupt lib) while a plan is active AND
 # spar BLOCKED must NOT release spar's enforced loop. The ERR trap emits the
 # captured spar decision (block), never a hardcoded approve.
 setup

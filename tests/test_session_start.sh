@@ -41,6 +41,6 @@ chk_empty "symlinked queue → no output" "" "$(run '{"source":"startup"}')"
 jq -e . "$J" >/dev/null && { echo "PASS: hooks.json valid"; PASS=$((PASS+1)); } \
   || { echo "FAIL: hooks.json valid"; FAIL=$((FAIL+1)); }
 chk "SessionStart command registered" "session-start.sh" "$(jq -r '.hooks.SessionStart[].hooks[].command' "$J")"
-chk "Stop hook untouched" "stop-weighin.sh" "$(jq -r '.hooks.Stop[].hooks[].command' "$J")"
+chk "Stop hook untouched" "stop-fight.sh" "$(jq -r '.hooks.Stop[].hooks[].command' "$J")"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

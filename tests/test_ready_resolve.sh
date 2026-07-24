@@ -14,7 +14,7 @@ chk "bad reviewer errors" "error" "$(bash "$R" "--reviewer bogus -- x" 2>&1; ech
 chk "empty spec errors" "error" "$(bash "$R" "" 2>&1; echo)"
 chk "dashed spec after --" "$(printf 'per-task\t\tfalse\t--weird-spec-name')" "$(bash "$R" "-- --weird-spec-name")"
 
-# Phase 5: --unattended threads through the weigh-in resolver.
+# Phase 5: --unattended threads through the ready resolver.
 chk "unattended default false" "$(printf 'per-task\t\tfalse\tspec.md')" "$(bash "$R" "spec.md")"
 chk "unattended alone" "$(printf 'per-task\t\ttrue\tspec.md')" "$(bash "$R" "--unattended -- spec.md")"
 chk "unattended with whole + reviewer" "$(printf 'whole\tcodex\ttrue\tspec.md')" "$(bash "$R" "--whole --unattended --reviewer codex -- spec.md")"
