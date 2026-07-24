@@ -391,7 +391,7 @@ The core change. Validate the `unattended` field, and at the batched-gate branch
 - Consumes: `unattended: true|false` from `.claude/spar.local.md` (Task 2); `spar-queue-pending.sh` (Task 1); optionally `spar-report.sh` (separate spec — call is fail-open and guarded, so absence is fine).
 - Produces: at the unattended terminal, `reviews/spar-pending.md` (one keyed section per parked finding), `reviews/spar-<id>-outcome.md` with `reason: blocked-pending-user`, cleaned-up `.claude/` state, and a bare `{"decision":"approve"}`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_stop_hook.sh`, just before its final `echo; echo "PASS=$PASS FAIL=$FAIL"` / `exit "$FAIL"` lines:
 
@@ -442,12 +442,12 @@ chk "malformed unattended → approve" '"decision":"approve"' "$(run_hook)"
 chk "malformed unattended → error-bypass outcome" "reason: error-bypass" "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: FAIL on the U1 asserts (`unattended parked → approve` gets a gate block; no pending queue; no blocked-pending-user outcome) and U3 (`unattended: maybe` is currently ignored, so it does not error-bypass). U2 passes already.
 
-- [ ] **Step 3: Declare the new script paths**
+- [x] **Step 3: Declare the new script paths**
 
 In `plugins/spar/hooks/stop-hook.sh`, next to the other `${CLAUDE_PLUGIN_ROOT}`-based paths (after the `INTENT_HARVESTER=` line, ~line 42), add:
 
@@ -456,7 +456,7 @@ QUEUE_WRITER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-queue-pending.sh"
 REPORT_GEN="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-report.sh"
 ```
 
-- [ ] **Step 4: Validate the `unattended` field**
+- [x] **Step 4: Validate the `unattended` field**
 
 In the field-validation block, right after the `include_dirty` `case` (the block ending at the `esac` after `*) log "invalid include_dirty: $INCLUDE_DIRTY"; finish_approve error-bypass;;`), add:
 
@@ -471,7 +471,7 @@ esac
 
 (Empty → `false` keeps old state files and attended runs unchanged; a malformed value fails open — Global Constraints.)
 
-- [ ] **Step 5: Add the unattended terminal helper**
+- [x] **Step 5: Add the unattended terminal helper**
 
 In `plugins/spar/hooks/stop-hook.sh`, add a function near the other terminal helpers (right after the `finish_approve()` definition, ~line 73):
 
@@ -503,7 +503,7 @@ unattended_block_terminal() { # $1=round
 }
 ```
 
-- [ ] **Step 6: Branch to the terminal at the batched gate**
+- [x] **Step 6: Branch to the terminal at the batched gate**
 
 In the `review)` case, at the C2 block, change the guard so unattended mode diverts before the gate is built. Replace:
 
@@ -528,12 +528,12 @@ with:
 
 (`unattended_block_terminal` ends in `approve`/`exit 0`, so the gate code below never runs in unattended mode.)
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: `PASS=… FAIL=0` (U1, U2, U3 all pass; all prior tests still pass).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add plugins/spar/hooks/stop-hook.sh tests/test_stop_hook.sh

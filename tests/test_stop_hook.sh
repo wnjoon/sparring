@@ -763,5 +763,74 @@ chk "symlinked sweep → set aside" "present" "$([ -L "${SF}.invalid-1" ] && ech
 chk "/spar-cancel preserves state sweep result" '"$SPAR_SWEEP_RESULT"' \
   "$(cat "$CLAUDE_PLUGIN_ROOT/commands/spar-cancel.md")"
 
+# ── Phase 5: unattended terminal at the design gate ──
+# helper: mark the active state file unattended
+add_unattended() {
+  sed -i '' 's/^sweep_result: not-run/sweep_result: not-run\nunattended: true/' .claude/spar.local.md 2>/dev/null \
+    || sed -i 's/^sweep_result: not-run/sweep_result: not-run\nunattended: true/' .claude/spar.local.md
+}
+
+# U1. unattended + parked DESIGN stalemate → NO gate; blocked-pending-user terminal
+fresh_dir; write_state review 1; add_unattended; mkdir -p reviews
+UFa="reviews/spar-20260721-120000-abc123-r1.md"
+UPa="reviews/spar-20260721-120000-abc123-r1-response.md"
+UFb="reviews/spar-20260721-120000-abc123-r2.md"
+UPb="reviews/spar-20260721-120000-abc123-r2-response.md"
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$UFa"
+printf '### F1-1: REJECTED — cohesive on purpose\n' > "$UPa"
+run_hook >/dev/null   # fold r1 (streak 1), advance to r2
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$UFb"
+printf '### F2-1: REJECTED — still cohesive\n' > "$UPb"
+OUT=$(run_hook)       # fold r2 (streak 2) → parked → unattended terminal
+chk "unattended parked → approve (no gate hold)" '"decision":"approve"' "$OUT"
+chk "unattended → no gate manifest" "gone" "$([ -f .claude/spar-gate-manifest.tsv ] && echo present || echo gone)"
+chk "unattended → pending queue written" "present" "$([ -f reviews/spar-pending.md ] && echo present || echo gone)"
+chk "queue keyed by review-id + fingerprint" "## 20260721-120000-abc123 :: mod.py | split the module" "$(cat reviews/spar-pending.md)"
+chk "queue carries the finding text" "split the module" "$(cat reviews/spar-pending.md)"
+chk "unattended → blocked-pending-user outcome" "reason: blocked-pending-user" "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
+chk "unattended → state cleaned up" "gone" "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
+
+# U2. attended (unattended:false / absent) still fires the gate — default-safety
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$UFa"
+printf '### F1-1: REJECTED — cohesive\n' > "$UPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$UFb"
+printf '### F2-1: REJECTED — still cohesive\n' > "$UPb"
+OUT=$(run_hook)
+chk "attended default → gate still fires" 'gate' "$OUT"
+chk "attended default → no pending queue" "gone" "$([ -f reviews/spar-pending.md ] && echo present || echo gone)"
+
+# U3. malformed unattended value → fail-open approve (never silently unattended)
+fresh_dir; write_state task 0
+sed -i '' 's/^sweep_result: not-run/sweep_result: not-run\nunattended: maybe/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^sweep_result: not-run/sweep_result: not-run\nunattended: maybe/' .claude/spar.local.md
+chk "malformed unattended → approve" '"decision":"approve"' "$(run_hook)"
+chk "malformed unattended → error-bypass outcome" "reason: error-bypass" "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
+
+# U4. a finding parked in an EARLIER round (absent from the terminal round's
+# review) must still reach the queue WITH its original body — recovered from the
+# round that raised it — alongside a finding parked in the terminal round.
+fresh_dir; write_state review 1; add_unattended; mkdir -p reviews
+U4r1="reviews/spar-20260721-120000-abc123-r1.md"; U4p1="reviews/spar-20260721-120000-abc123-r1-response.md"
+U4r2="reviews/spar-20260721-120000-abc123-r2.md"; U4p2="reviews/spar-20260721-120000-abc123-r2-response.md"
+U4r3="reviews/spar-20260721-120000-abc123-r3.md"; U4p3="reviews/spar-20260721-120000-abc123-r3-response.md"
+# R1: finding A only (mod.py) rejected → streak 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: A-BODY-BIG\n- suggestion: split\n' > "$U4r1"
+printf '### F1-1: REJECTED — cohesive\n' > "$U4p1"
+run_hook >/dev/null   # A streak 1; advance r2
+# R2: A rejected again (→ parked) AND B (x.py) rejected (streak 1) → not only-parked
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: A-BODY-BIG\n- suggestion: split\n### F2-2 [DESIGN] rename thing\n- file: x.py:2\n- problem: B-BODY-UNCLEAR\n- suggestion: rename\n' > "$U4r2"
+printf '### F2-1: REJECTED — cohesive\n### F2-2: REJECTED — clear enough\n' > "$U4p2"
+run_hook >/dev/null   # A parked, B streak 1; only_parked false → advance r3
+# R3: B ONLY, rejected (→ parked). A is absent from this round entirely.
+printf 'STATUS: FINDINGS\n\n### F3-1 [DESIGN] rename thing\n- file: x.py:2\n- problem: B-BODY-UNCLEAR\n- suggestion: rename\n' > "$U4r3"
+printf '### F3-1: REJECTED — clear enough\n' > "$U4p3"
+OUT=$(run_hook)   # B parked; only_parked(r3) true → unattended terminal
+chk "multi-round unattended → approve" '"decision":"approve"' "$OUT"
+chk "terminal-round finding B body preserved" "B-BODY-UNCLEAR" "$(cat reviews/spar-pending.md)"
+chk "earlier-round finding A body preserved (not empty)" "A-BODY-BIG" "$(cat reviews/spar-pending.md)"
+chk "both parked findings queued" "2" "$(grep -c '^## ' reviews/spar-pending.md)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
