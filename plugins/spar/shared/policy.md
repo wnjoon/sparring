@@ -95,3 +95,10 @@ changed-surface intent harvest, durable outcomes, and final sweep.
 Phase 5: unattended mode + final report. Phase 6: Codex-hosted adapter (git
 pre-commit enforcement). Phase 7: model economics (reviewer/effort config,
 tiered fix writers).
+Phase 8 (orchestration): `/spar-weighin` — a plan-to-spar orchestrator layered
+ABOVE the loop. It runs writing-plans → dedicated branch → spar (per-task by
+default, `--whole` optional), driven by a single combined Stop-hook dispatcher
+that wraps the loop's own `stop-hook.sh`. It reads each task's durable outcome
+to advance, flips the plan's checkboxes, and commits per task. Depends only on
+Phases 1–4; order-independent of 5–7. It never writes convergence and stops
+honestly on a non-converged task.
