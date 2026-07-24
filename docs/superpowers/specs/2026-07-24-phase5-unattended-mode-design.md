@@ -2,14 +2,14 @@
 
 > _Command names updated post-refactor: `/spar` → `/spar:fight`; `/spar-weighin` → `/spar:ready` (plan) + `/spar:fight` (execute)._
 
-**Status:** design, prepared for **Phase 5**. NOT yet implemented. The three
-formerly-open questions (§1, §3, §4) were **settled on 2026-07-24 by a blind
-cross-model check** — Claude and Codex independently reviewed the same brief
-against the invariants and the code, and converged on the same option for all
-three (no conflicts). Their conclusions, and the two load-bearing code facts they
-rest on (`cleanup()` leaves `reviews/` intact; the design gate fires before the
-round-cap check), are verified in `stop-hook.sh`. The spec is now ready for
-writing-plans.
+**Status:** **implemented in v0.5.0.** The three formerly-open questions (§1, §3,
+§4) were **settled on 2026-07-24 by a blind cross-model check** — Claude and Codex
+independently reviewed the same brief against the invariants and the code, and
+converged on the same option for all three (no conflicts). Their conclusions, and
+the two load-bearing code facts they rest on (`cleanup()` leaves `reviews/` intact;
+the design gate fires before the round-cap check), are verified in `stop-hook.sh`.
+The unattended terminal, durable queue, and SessionStart surfacing shipped; the
+`--unattended` flag threads through `/spar:ready` and `/spar:fight`.
 
 Phase 5 has **two halves**:
 
@@ -25,12 +25,12 @@ Phase 5 has **two halves**:
 Today the loop assumes a human is present for one thing: the **design gate**. When
 the loop is stuck on nothing but parked `[DESIGN]` findings, `stop-hook.sh` fires
 one batched gate and **holds the loop there** — the only ways out are the user
-recording a decision in the ledger or `/spar-cancel` (the round cap does NOT
+recording a decision in the ledger or `/spar:cancel` (the round cap does NOT
 release a gated loop). That is correct when a human is watching, but it means an
 unattended run (scheduled, CI-adjacent, or simply "go do this while I'm away")
 can hang forever at the gate.
 
-Goal: let `/spar` (and, through it, `/spar-weighin`) run without a human to answer
+Goal: let `/spar:fight` (and, through it, a `/spar:ready` plan) run without a human to answer
 design questions — **without ever fabricating completion**. Mechanical progress
 continues; genuine design decisions are deferred honestly rather than guessed.
 
@@ -56,11 +56,12 @@ continues; genuine design decisions are deferred honestly rather than guessed.
 
 ### 1. Activation — how a run is marked "unattended" — DECIDED (a)
 
-**Decision (cross-verified):** an explicit `/spar --unattended` flag, persisted to
-the state file as `unattended: true|false` (mirrors `--reviewer` /
-`--include-dirty`). The Stop hook validates the field once and makes the gate
-decision solely from durable state. The flag threads through `/spar-weighin`,
-whose launcher already builds each task's `.claude/spar.local.md`. Auto-detection
+**Decision (cross-verified):** an explicit `--unattended` flag (on `/spar:fight`
+and `/spar:ready`), persisted to the state file as `unattended: true|false`
+(mirrors `--reviewer` / `--include-dirty`). The Stop hook validates the field once
+and makes the gate decision solely from durable state. `/spar:ready` records the
+flag in the plan state, and `/spar:fight`'s launcher (`spar-fight-launch.sh`)
+copies it into each task's `.claude/spar.local.md`. Auto-detection
 (TTY/CI/piping) is **rejected** — a piped session is not necessarily unattended,
 and enforcement must be deterministic. An unknown/malformed value must fail as an
 internal-state error (fail-open), never silently select unattended behavior.
@@ -125,13 +126,13 @@ With the Q1 v1 decision, the queue initially holds only `blocked-pending-user`
 items; it can carry non-essential pending items later if a sound classification
 contract (§3) is added.
 
-### 5. Interaction with `/spar-weighin`
+### 5. Interaction with `/spar:ready` / `/spar:fight`
 
-An unattended weigh-in runs each task's `/spar` unattended. If a task exits
-`blocked-pending-user`, the weigh-in stops at that task (its existing
+An unattended `/spar:ready` plan runs each task's `/spar:fight` unattended. If a task exits
+`blocked-pending-user`, the fight stops at that task (its existing
 "non-converged → stop honestly" path already covers this) and the pending
-decision is surfaced. No new weigh-in logic beyond threading the `unattended`
-flag into each task's launched state.
+decision is surfaced. No new fight-orchestration logic beyond threading the
+`unattended` flag into each task's launched state.
 
 ## Non-goals
 

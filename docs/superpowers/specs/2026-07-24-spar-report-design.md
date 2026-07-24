@@ -99,8 +99,8 @@ report can be shown any time). If the file is missing, it says so plainly.
   artifacts and is terminal-reason-agnostic, so extending to `cap`,
   `sweep-findings-at-cap`, or `skipped` is a one-line change at those terminal
   paths — deferred.
-- **`/spar-weighin` roll-up** (a Phase-8-flow summary aggregating each task's
-  per-run report) is a natural follow-on: weighin controls its own terminal
+- **`/spar:fight` roll-up** (a Phase-8-flow summary aggregating each task's
+  per-run report) is a natural follow-on: `/spar:fight` controls its own terminal
   path, so it can call the same generator/command. Deferred.
 
 ## Non-goals
