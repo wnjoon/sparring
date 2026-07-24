@@ -549,7 +549,7 @@ wgn_set_field current_review_id "$id" "$state"
 - [ ] **Step 4: Run the test to confirm it passes**
 
 Run: `bash tests/test_weighin_launch.sh`
-Expected: `PASS=8 FAIL=0`
+Expected: `PASS=7 FAIL=0`
 
 - [ ] **Step 5: Commit**
 
