@@ -1,13 +1,13 @@
 {
-  "description": "Sparring loop stop hook: blocks exit until the independent reviewer declares CONVERGED",
+  "description": "Sparring loop stop hook: blocks exit until the independent reviewer declares CONVERGED (weigh-in dispatcher wraps spar's own hook)",
   "hooks": {
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-hook.sh",
-            "timeout": 30,
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-weighin.sh",
+            "timeout": 60,
             "statusMessage": "sparring: checking loop phase..."
           }
         ]
