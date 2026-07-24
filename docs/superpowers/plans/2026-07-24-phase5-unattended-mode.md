@@ -713,7 +713,7 @@ An unattended weigh-in runs each task's `/spar` unattended. Parse the flag in th
   - Weigh-in state file frontmatter carries `unattended: true|false`.
   - `spar-weighin-launch.sh` writes `unattended: <val>` into each launched task's `.claude/spar.local.md` (missing in weigh-in state → `false`, keeping older weigh-ins working).
 
-- [ ] **Step 1: Update the weigh-in resolver test (make it fail)**
+- [x] **Step 1: Update the weigh-in resolver test (make it fail)**
 
 Read the current expectations first: `sed -n '1,40p' tests/test_weighin_resolve.sh`. The output now has a `<unattended>` field before the spec. For every assertion that spells out the tab-joined resolver output, insert the extra field (default `false`, or `true` for the new `--unattended` cases). Add these `--unattended` cases near the other flag cases (adapt the exact `chk` helper name / invocation to match that file's harness):
 
@@ -731,12 +731,12 @@ chk "weighin duplicate --unattended → error" "error" \
 
 (The existing `<mode>\t<reviewer>\t<spec>` expectations become `<mode>\t<reviewer>\t<unattended>\t<spec>` — insert `false` before the spec in each.)
 
-- [ ] **Step 2: Run the resolver test to verify it fails**
+- [x] **Step 2: Run the resolver test to verify it fails**
 
 Run: `bash tests/test_weighin_resolve.sh`
 Expected: FAIL — output still has 3 fields; the new field and `--unattended` cases fail.
 
-- [ ] **Step 3: Add `--unattended` to the weigh-in resolver**
+- [x] **Step 3: Add `--unattended` to the weigh-in resolver**
 
 In `plugins/spar/commands/spar-weighin-resolve.sh`:
 
@@ -775,12 +775,12 @@ with:
 printf '%s\t%s\t%s\t%s\n' "$mode" "$reviewer" "$unattended" "$spec"
 ```
 
-- [ ] **Step 4: Run the resolver test to verify it passes**
+- [x] **Step 4: Run the resolver test to verify it passes**
 
 Run: `bash tests/test_weighin_resolve.sh`
 Expected: `PASS=… FAIL=0`.
 
-- [ ] **Step 5: Store `unattended` in weigh-in state (the command)**
+- [x] **Step 5: Store `unattended` in weigh-in state (the command)**
 
 In `plugins/spar/commands/spar-weighin.md`, in the top setup `bash` block:
 
@@ -833,7 +833,7 @@ with:
 printf 'Weigh-in activated (mode=%s, reviewer=%s, unattended=%s, branch=%s)\nSPEC=%s\n' "$WGN_MODE" "$WGN_REVIEWER" "$WGN_UNATTENDED" "$WGN_BRANCH" "$WGN_SPEC"
 ```
 
-- [ ] **Step 6: Write the failing launcher test**
+- [x] **Step 6: Write the failing launcher test**
 
 Read the current launcher test harness first: `sed -n '1,60p' tests/test_weighin_launch.sh` (note how it builds a weigh-in state file and calls the launcher). Then append a case, adapting to that file's helper names and fixture setup:
 
@@ -854,12 +854,12 @@ bash "$LAUNCH" "$STATE" "$TASKFILE"
 chk "missing weigh-in flag → task state unattended false" "unattended: false" "$(cat .claude/spar.local.md)"
 ```
 
-- [ ] **Step 7: Run the launcher test to verify it fails**
+- [x] **Step 7: Run the launcher test to verify it fails**
 
 Run: `bash tests/test_weighin_launch.sh`
 Expected: FAIL — the launcher does not yet write an `unattended:` line into `.claude/spar.local.md`.
 
-- [ ] **Step 8: Propagate `unattended` in the launcher**
+- [x] **Step 8: Propagate `unattended` in the launcher**
 
 In `plugins/spar/commands/spar-weighin-launch.sh`:
 
@@ -887,19 +887,19 @@ unattended: ${unattended}
 max_rounds: 5
 ```
 
-- [ ] **Step 9: Run the launcher test to verify it passes**
+- [x] **Step 9: Run the launcher test to verify it passes**
 
 Run: `bash tests/test_weighin_launch.sh`
 Expected: `PASS=… FAIL=0`.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add plugins/spar/commands/spar-weighin-resolve.sh plugins/spar/commands/spar-weighin.md plugins/spar/commands/spar-weighin-launch.sh tests/test_weighin_resolve.sh tests/test_weighin_launch.sh
 git commit -m "feat: --unattended threads through /spar-weighin into each task"
 ```
 
-- [ ] **Step 11: Run the full test suite**
+- [x] **Step 11: Run the full test suite**
 
 Run: `for t in tests/test_*.sh; do echo "== $t =="; bash "$t" || echo "FAILED: $t"; done`
 Expected: every test file ends `FAIL=0`; no `FAILED:` line printed.

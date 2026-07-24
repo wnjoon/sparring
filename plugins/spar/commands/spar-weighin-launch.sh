@@ -10,6 +10,12 @@ state="${1:?weighin state}"; taskfile="${2:?task text file}"
 reviewer="$(wgn_field reviewer "$state")"
 case "$reviewer" in codex|claude) ;; *) echo "error: bad reviewer in weighin state" >&2; exit 2 ;; esac
 
+# Propagate the weigh-in's unattended flag into each task's spar state. A missing
+# or malformed value defaults to false (attended) — older weigh-in states that
+# predate the flag keep working unchanged.
+unattended="$(wgn_field unattended "$state")"
+case "$unattended" in true) ;; ''|false) unattended=false ;; *) unattended=false ;; esac
+
 id="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 base="$(git rev-parse HEAD 2>/dev/null || echo none)"
 
@@ -26,6 +32,7 @@ review_id: ${id}
 base_sha: ${base}
 reviewer: ${reviewer}
 include_dirty: false
+unattended: ${unattended}
 max_rounds: 5
 sweep_done: false
 sweep_result: not-run

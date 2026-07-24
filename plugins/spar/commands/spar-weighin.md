@@ -1,6 +1,6 @@
 ---
 description: "Weigh-in: turn a spec into a checkbox plan, set up the ring, and run the enforced spar loop task-by-task to convergence"
-argument-hint: "[--whole] [--reviewer codex|claude] [--] <spec path or description>"
+argument-hint: "[--whole] [--reviewer codex|claude] [--unattended] [--] <spec path or description>"
 allowed-tools:
   - Bash
   - Read
@@ -25,7 +25,9 @@ RESOLVED="$("${CLAUDE_PLUGIN_ROOT}/commands/spar-weighin-resolve.sh" "$WGN_RAW")
 WGN_MODE="${RESOLVED%%$'\t'*}"
 WGN_REST="${RESOLVED#*$'\t'}"
 WGN_REVIEWER="${WGN_REST%%$'\t'*}"
-WGN_SPEC="${WGN_REST#*$'\t'}"
+WGN_REST2="${WGN_REST#*$'\t'}"
+WGN_UNATTENDED="${WGN_REST2%%$'\t'*}"
+WGN_SPEC="${WGN_REST2#*$'\t'}"
 # Reviewer: empty means auto-detect (codex if present, else claude), matching /spar.
 if [ -z "$WGN_REVIEWER" ]; then
   if command -v codex >/dev/null 2>&1; then WGN_REVIEWER=codex; else WGN_REVIEWER=claude; fi
@@ -54,6 +56,7 @@ active: true
 phase: plan
 mode: ${WGN_MODE}
 reviewer: ${WGN_REVIEWER}
+unattended: ${WGN_UNATTENDED}
 plan_path:
 worktree: ${WGN_BRANCH}
 tasks: 0
@@ -63,7 +66,7 @@ current_review_id:
 STATE_EOF
 mv "$TMP" .claude/spar-weighin.local.md
 trap - EXIT
-printf 'Weigh-in activated (mode=%s, reviewer=%s, branch=%s)\nSPEC=%s\n' "$WGN_MODE" "$WGN_REVIEWER" "$WGN_BRANCH" "$WGN_SPEC"
+printf 'Weigh-in activated (mode=%s, reviewer=%s, unattended=%s, branch=%s)\nSPEC=%s\n' "$WGN_MODE" "$WGN_REVIEWER" "$WGN_UNATTENDED" "$WGN_BRANCH" "$WGN_SPEC"
 ```
 
 Then run these steps in order. Do NOT stop until task 1's sparring loop is
