@@ -1,5 +1,7 @@
 # Phase 5 — Unattended Mode Implementation Plan
 
+> _Command names updated post-refactor: `/spar` → `/spar:fight`; `/spar-weighin` → `/spar:ready` (plan) + `/spar:fight` (execute)._
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let a `/spar` loop (and, through it, `/spar-weighin`) run without a human at the design gate — continuing mechanical progress, but deferring every essential design decision honestly as `blocked-pending-user` instead of hanging or fabricating completion.

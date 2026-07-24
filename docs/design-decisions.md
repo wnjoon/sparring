@@ -22,7 +22,7 @@ Spec: [superpowers/plans/2026-07-21-phase1-core-loop.md](superpowers/plans/2026-
 tests: `tests/test_stop_hook.sh` (38 cases) · verified E2E against a real
 Codex reviewer (planted-bug task: FINDINGS → fix → re-review → CONVERGED, 2 rounds).
 
-- `/spar <task>` writes the state file (`.claude/spar.local.md`); a bash Stop
+- `/spar:fight <task>` writes the state file (`.claude/spar.local.md`); a bash Stop
   hook is the state machine: task phase → review rounds → converged/cap.
 - Reviewer = `codex exec --sandbox read-only`, stateless per round, prompt
   from `shared/prompts/reviewer.md`; first line `STATUS: CONVERGED |
@@ -42,7 +42,7 @@ Post-plan patches (rationale absorbed from *(EP)*, landed after the plan doc
   files — new files never appear in a diff.
 - **Pre-existing dirty state (known gap, fix pending)**: `base_sha` = `HEAD`,
   so tracked edits and untracked files that were already present *before*
-  `/spar` are currently mixed into the reviewed surface. A status/file-list
+  `/spar:fight` are currently mixed into the reviewed surface. A status/file-list
   snapshot is NOT enough — if the same file is edited both before and during
   the loop, a list can't tell which hunk came from where. Two options:
   (**v1**) refuse by default when the worktree has pre-existing dirty tracked
@@ -203,7 +203,7 @@ cap.
 
 Spec: [superpowers/specs/2026-07-22-single-agent-mode-design.md](superpowers/specs/2026-07-22-single-agent-mode-design.md).
 
-Adds a Claude reviewer/judge/matcher so `/spar` works with Claude alone — the
+Adds a Claude reviewer/judge/matcher so `/spar:fight` works with Claude alone — the
 Codex CLI is no longer a hard requirement. Cross-model (Claude author ↔ Codex
 reviewer) stays the recommended default; same-family keeps the enforced loop +
 fresh blind review + judge/gate/matcher and drops only cross-vendor blind-spot
@@ -216,7 +216,7 @@ degradation to a first-class mode.**
   family instead of hardcoding `codex exec`; the three prompts are
   model-agnostic and reused unchanged.
 - **Activation**: an explicit leading `--reviewer <codex|claude>` token on
-  `/spar` overrides; else auto-detect (`codex` on PATH → codex, else claude).
+  `/spar:fight` overrides; else auto-detect (`codex` on PATH → codex, else claude).
   Codex-missing stops being a hard block — it resolves to `claude`. An
   explicit override to an absent CLI errors (no silent swap).
 - **Read-only blind Claude reviewer**: `claude -p` with a tool allowlist
@@ -262,7 +262,7 @@ from this future-decisions document after landing.
   deletes the ledger (`.claude/spar-ledger.md`) and registry that hold the
   settled-decision and finding data; the reviews/ files persist but those do not.
   No new phase and no extra round-trip. Scope: converged first (generator is
-  terminal-reason-agnostic, so cap/skip/sweep and a weighin roll-up extend easily).
+  terminal-reason-agnostic, so cap/skip/sweep and a /spar:fight roll-up extend easily).
 
 ## Phase 6 — Codex-hosted adapter
 
@@ -323,7 +323,7 @@ from this future-decisions document after landing.
   solve this?".
 - **Exit honesty.** Every loop exit carries a machine-readable reason, at
   least: `converged`, `cap`, `error-bypass` (fail-open fired), `cancelled`
-  (`/spar-cancel`), `skipped` (skip conditions), `blocked-pending-user`, and
+  (`/spar:cancel`), `skipped` (skip conditions), `blocked-pending-user`, and
   `sweep-findings-at-cap`. Quality is asserted ONLY for `converged`; every
   other reason means the work is not a clean pass and must never read as one —
   not in state, logs, or the final report. The reason must be **persisted to
@@ -339,7 +339,7 @@ from this future-decisions document after landing.
   (preferred over a hash alone — a hash detects later tampering but cannot
   restore the original response for the final report), so a later edit cannot
   silently rewrite what a transition was based on. Correcting an earlier overstatement: not every write is atomic today — the hook's state
-  mutations use temp+rename, but `/spar`'s initial state creation is a direct
+  mutations use temp+rename, but `/spar:fight`'s initial state creation is a direct
   redirection, and the reviewer runner is a **user-invokable command that can
   be launched twice** (a real multi-process path). Decisions: (a) make initial
   state creation atomic like the hook's; (b) the runner writes its output via

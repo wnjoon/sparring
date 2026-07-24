@@ -1,5 +1,7 @@
 # `/spar-weighin` — Plan-to-Spar Orchestrator — Design
 
+> _Command names updated post-refactor: `/spar` → `/spar:fight`; `/spar-weighin` → `/spar:ready` (plan) + `/spar:fight` (execute)._
+
 **Status:** design, rev. 1. Awaiting spec review → writing-plans.
 
 **Roadmap placement:** a **new, independent phase** (Phase 8), not folded into

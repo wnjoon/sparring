@@ -1,5 +1,7 @@
 # Phase 5 — Unattended Mode (+ Final Report) — Design
 
+> _Command names updated post-refactor: `/spar` → `/spar:fight`; `/spar-weighin` → `/spar:ready` (plan) + `/spar:fight` (execute)._
+
 **Status:** design, prepared for **Phase 5**. NOT yet implemented. The three
 formerly-open questions (§1, §3, §4) were **settled on 2026-07-24 by a blind
 cross-model check** — Claude and Codex independently reviewed the same brief

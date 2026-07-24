@@ -1,5 +1,7 @@
 # `/spar-report` — Final Run Report — Design (Phase 5 prep)
 
+> _Command names updated post-refactor: `/spar` → `/spar:fight`; `/spar-weighin` → `/spar:ready` (plan) + `/spar:fight` (execute)._
+
 **Status:** design, prepared for **Phase 5**. NOT yet implemented. This refines
 the "Final report" half of Phase 5 (the other half is unattended mode); see
 `docs/design-decisions.md` §Phase 5.
