@@ -80,8 +80,10 @@ Flags:
 2. **Plan.** Invoke `writing-plans` on the spec → `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`.
    This document, with its checkbox tasks, is both the plan and the live progress
    tracker.
-3. **Ring setup.** Invoke `using-git-worktrees` to create the isolated
-   branch/worktree for the feature.
+3. **Ring setup.** Create a dedicated branch (`weighin/<slug>-<ts>`) in the
+   current directory for the run. (Decided during implementation: a *dedicated
+   branch*, not a separate worktree — a mid-run worktree switch would change cwd
+   and strand the hook's state file. The working directory never changes.)
 4. **Execute via `spar`** (§4).
 5. **Done** when every task has converged. Report which tasks converged, the
    branch/worktree, and the plan path.

@@ -980,15 +980,22 @@ launched — from that point the weigh-in Stop hook drives the rest.
    the executor.** If the spec is empty or missing, stop and tell the user to run
    `superpowers:brainstorming` first.
 
-2. **Record the plan path and create the ring.** Set the plan path into state and
-   create an isolated worktree with the `superpowers:using-git-worktrees` skill,
-   then record it:
+2. **Record the plan path.** Isolation is a dedicated branch (`weighin/<slug>-<ts>`)
+   created in the CURRENT directory at setup — no separate worktree, so cwd (and
+   every hook state path) never changes mid-run. The setup bash already created
+   the branch and stored it in the state's `worktree:` field; just record the plan
+   path:
 
    ```bash
    . "${CLAUDE_PLUGIN_ROOT}/commands/spar-weighin-lib.sh"
    wgn_set_field plan_path "<the plan path you just wrote>"
-   wgn_set_field worktree "$(pwd)"
    ```
+
+   > **Note:** the setup bash above must `git checkout -b weighin/<slug>-<ts>`
+   > right after resolving flags (before writing state/plan), NOT via
+   > `using-git-worktrees`. See `plugins/spar/commands/spar-weighin.md` for the
+   > authoritative setup script. A mid-run worktree switch would strand the state
+   > file where the Stop hook can't find it.
 
 3. **Ingest the plan into the task table:**
 
