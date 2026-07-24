@@ -1,8 +1,13 @@
 # Phase 5 — Unattended Mode (+ Final Report) — Design
 
-**Status:** design, prepared for **Phase 5**. NOT yet implemented. Consolidates
-the Phase 5 decisions in `docs/design-decisions.md` §Phase 5 and flags the open
-questions that must be resolved (a short brainstorm) before a writing-plans plan.
+**Status:** design, prepared for **Phase 5**. NOT yet implemented. The three
+formerly-open questions (§1, §3, §4) were **settled on 2026-07-24 by a blind
+cross-model check** — Claude and Codex independently reviewed the same brief
+against the invariants and the code, and converged on the same option for all
+three (no conflicts). Their conclusions, and the two load-bearing code facts they
+rest on (`cleanup()` leaves `reviews/` intact; the design gate fires before the
+round-cap check), are verified in `stop-hook.sh`. The spec is now ready for
+writing-plans.
 
 Phase 5 has **two halves**:
 
@@ -47,60 +52,76 @@ continues; genuine design decisions are deferred honestly rather than guessed.
 
 ## Design
 
-### 1. Activation — how a run is marked "unattended"
+### 1. Activation — how a run is marked "unattended" — DECIDED (a)
 
-A run must declare it has no human at the gate. Options (decision needed, see
-Open Questions): an explicit `/spar --unattended` flag written into the state
-file (mirrors `--reviewer` / `--include-dirty`); or auto-detection (no TTY on
-stdin). **Recommendation:** an explicit flag written to the state file as
-`unattended: true`, because auto-detection is easy to get wrong (a piped session
-is not necessarily unattended) and enforcement must be deterministic. The flag
-threads to `/spar-weighin` too (an unattended weigh-in runs its tasks unattended).
+**Decision (cross-verified):** an explicit `/spar --unattended` flag, persisted to
+the state file as `unattended: true|false` (mirrors `--reviewer` /
+`--include-dirty`). The Stop hook validates the field once and makes the gate
+decision solely from durable state. The flag threads through `/spar-weighin`,
+whose launcher already builds each task's `.claude/spar.local.md`. Auto-detection
+(TTY/CI/piping) is **rejected** — a piped session is not necessarily unattended,
+and enforcement must be deterministic. An unknown/malformed value must fail as an
+internal-state error (fail-open), never silently select unattended behavior.
 
-### 2. Gate behavior changes only at the gate
+### 2. Gate behavior in unattended mode — DECIDED
 
-Everything up to the gate is unchanged: the reviewer runs, MECHANICAL findings
-are fixed, DESIGN findings are parked, the judge rules factual stalemates. The
-change is only where the loop would otherwise **hold at the batched design gate**:
+Everything up to the gate is unchanged: the reviewer runs, MECHANICAL findings are
+fixed, DESIGN findings are parked, the judge rules factual stalemates. The only
+change is where the loop would otherwise **hold at the batched design gate**
+(`only_parked_this_round`, which fires *before* the round-cap check):
 
 - **Attended (today):** hold; wait for a ledger decision per parked finding.
-- **Unattended:** do NOT hold. Classify each parked design finding as
-  *non-essential* or *essential* (§3), then take a terminal path:
-  - If every pending design finding is non-essential → the loop may **converge/exit
-    as done**, writing the parked questions to a pending store (§4) for next-session
-    surfacing. Completion is honest because nothing essential is unresolved.
-  - If any is essential → exit `blocked-pending-user`: work is **incomplete**,
-    recorded durably, never reported as done.
+- **Unattended (v1):** do NOT hold and do NOT invent a "done" path. Every pending
+  design finding is treated as essential (§3), so the terminal sequence is:
+  1. persist the pending finding(s) to the durable queue (§4),
+  2. `record_outcome blocked-pending-user`,
+  3. generate the final report **while the ledger and registry still exist**
+     (before `cleanup()`),
+  4. `cleanup()` and approve exit.
 
-### 3. Essential vs. non-essential — the crux (OPEN)
+  The work is **incomplete**, recorded durably, and never reported as done. The
+  round cap stays a circuit breaker; it must not become an escape that relabels
+  parked findings as complete.
 
-The split between "surface later, still done" and "blocks completion" is the
-hardest undecided piece. Today all design stalemates are simply *parked*; there is
-no essential/non-essential signal. Candidates (to resolve in brainstorm):
+### 3. Essential vs. non-essential — DECIDED (b): conservative default
 
-- The **reviewer** tags a design finding's essentiality when it raises it (adds a
-  marker the parser reads). Pro: the party who sees the defect judges its weight.
-  Con: adds reviewer-prompt surface and a new contract.
-- A **conservative default**: in unattended mode, treat *every* unresolved design
-  stalemate as essential (→ `blocked-pending-user`). Safest (never fabricates
-  completion), simplest to implement, at the cost of more "incomplete" exits.
-  **Recommended as the Phase 5 v1**, with reviewer-tagged essentiality as a later
-  refinement once dogfooding shows the conservative default stops too often.
+**Decision (cross-verified):** in unattended mode v1, treat **every** unresolved
+`[DESIGN]` stalemate as essential → `blocked-pending-user`. Rationale is stronger
+than "honest exit" alone: the reviewer has returned `STATUS: FINDINGS`, so letting
+the hook reclassify a finding into "done with non-essential questions" would create
+a **second completion authority**, conflicting with the **reviewer-declares**
+invariant — and recording `converged` (the only outcome that asserts a clean
+review) would be dishonest. Option (b) needs no new reviewer marker, parser, prompt
+contract, or model-dependent judgment, and drops cleanly into the existing
+`only_parked_this_round` branch.
 
-### 4. Cross-session surfacing (OPEN mechanism)
+Cost: v1 stops more often and does not deliver the "complete with non-essential
+pending" behavior sketched in `design-decisions.md`. That is the correct
+conservative limitation. A later refinement is more than an essentiality tag: it
+needs an explicit **reviewer-owned terminal contract** and a distinct durable
+outcome that does not falsely claim a clean review. Missing/malformed
+classifications must always default to essential.
 
-Parked (non-essential) questions and blocked-pending-user items must appear "at
-the next session start." There is **no SessionStart hook today**. Options:
+### 4. Cross-session surfacing — DECIDED (a): SessionStart hook + durable queue
 
-- Add a **SessionStart hook** that checks a pending store (e.g.
-  `.claude/spar-pending.md`, which survives loop cleanup) and prints
-  "N design decisions pending" with pointers.
-- Or leave surfacing to the **final report** + a durable pending file the user
-  reads on return, with no automatic session-start prompt.
+**Decision (cross-verified):** a fail-open **SessionStart hook** backed by a
+durable pending queue. The queue must live **outside** the disposable
+`.claude/spar*` state that `cleanup()` deletes — verified: `cleanup()` removes only
+`.claude/...` state (state file, ledger, registry, gate/judge/matcher/sweep runner
+files) and touches **no** `reviews/` path, so the queue lives under `reviews/`
+(e.g. `reviews/spar-pending.md`, or per-run records under `reviews/`).
 
-**Recommendation:** a small pending file written at the unattended terminal path,
-plus a SessionStart hook that announces its presence — but the file is the source
-of truth; the hook is only a reminder (fail-open, like every other hook).
+- The unattended terminal path appends to the queue, merging entries keyed by
+  **review-id + canonical finding-id** — multiple runs merge, never overwrite —
+  with dedup and safe regular-file-vs-symlink handling.
+- The SessionStart hook only announces the count and points to the queue and the
+  corresponding final reports; the queue file is authoritative.
+- The hook is best-effort: a broken SessionStart hook must stay silent / fail open
+  and must never alter an outcome or block a session.
+
+With the Q1 v1 decision, the queue initially holds only `blocked-pending-user`
+items; it can carry non-essential pending items later if a sound classification
+contract (§3) is added.
 
 ### 5. Interaction with `/spar-weighin`
 
@@ -124,20 +145,28 @@ flag into each task's launched state.
   the hook from durable state; any SessionStart reminder is best-effort.
 - **Honest exit** — reuses the existing outcome enum; adds no "success-y" reason.
 
-## Open questions to resolve before writing-plans
+## Settled by cross-verification (2026-07-24)
 
-1. **Essential vs. non-essential classification** (§3) — reviewer-tagged vs. the
-   conservative "all essential in unattended" default. This is the key design
-   decision; recommend the conservative default for v1.
-2. **Activation** (§1) — explicit `--unattended` flag (recommended) vs.
+The three questions that were open are now decided (§1, §3, §4) — Claude and Codex
+independently converged on the same option for each, with no conflicts, and the
+two load-bearing code facts were verified in `stop-hook.sh`:
+
+1. **Essential vs. non-essential** (§3) → **(b) conservative default**: all
+   unattended design stalemates are essential → `blocked-pending-user`.
+2. **Activation** (§1) → **(a) explicit `--unattended` flag** in state; no
    auto-detection.
-3. **Cross-session surfacing** (§4) — SessionStart hook vs. pending-file-only, and
-   where the pending store lives so it survives `cleanup()`.
-4. Whether unattended mode should also raise/adjust the round cap (an unattended
-   run has no human to nudge it), or keep the cap identical.
+3. **Cross-session surfacing** (§4) → **(a) SessionStart hook + durable queue under
+   `reviews/`** (survives `cleanup()`).
+
+### Residual question (safe to decide during writing-plans)
+
+- Whether unattended mode should adjust the round cap. **Default: keep the cap
+  identical** — the cap is a circuit breaker, not a completion mechanism, and an
+  unattended run gains nothing from a different cap. Revisit only with dogfooding
+  data.
 
 ## Terminal state
 
-Prepared for Phase 5. The three open questions above (especially §3) warrant a
-short brainstorm to settle before the Phase 5 plan is written. The final-report
-half is already design-complete in its own spec.
+Design-complete. The three key questions are settled by cross-verification, only
+a low-stakes residual (round cap) remains, and the final-report half is
+design-complete in its own spec. Ready for writing-plans.
