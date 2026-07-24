@@ -657,6 +657,10 @@ OUT="$(echo '{}' | bash "$HOOK")"
 chk "C blocks" '"block"' "$OUT"
 chk "C task1 checkbox flipped" "- [x] a" "$(sed -n '2p' docs/p.md)"
 chk "C launched task2 spar" "review_id" "$(cat .claude/spar.local.md 2>/dev/null)"
+# atomicity/consistency: weighin current_review_id equals the NEWLY launched id
+NEWID="$(grep '^review_id:' .claude/spar.local.md | sed 's/^review_id: //')"
+chk "C weighin id matches launched spar id" "$NEWID" "$(cat .claude/spar-weighin.local.md)"
+chk "C current advanced to 2" "current: 2" "$(cat .claude/spar-weighin.local.md)"
 teardown
 
 # D: last task converged → finish (block to summarize, phase done)
@@ -753,16 +757,33 @@ case "$REASON" in
     idx="$CUR"; [ "$MODE" = "whole" ] && idx=0
     [ -f "$PLAN" ] && bash "$CHECK" "$PLAN" "$idx" 2>>"$LOG" || log "checkbox flip skipped"
     wgn_set_task_status "$CUR" done "$WGN_STATE"
-    git add -A 2>>"$LOG" || true
+    # Exclude loop artifacts even if the command's git-excludes are absent.
+    git add -A -- . ':!.claude/spar*' ':!reviews/spar-*' 2>>"$LOG" || git add -A 2>>"$LOG" || true
     git commit -q -m "weighin: task ${CUR} (${HEADING}) — ${REASON}" 2>>"$LOG" || log "nothing to commit for task $CUR"
     if [ "$CUR" -lt "$TASKS" ]; then
-      NEXT=$((CUR+1)); wgn_set_field current "$NEXT" "$WGN_STATE"
-      wgn_set_field current_review_id "" "$WGN_STATE"
+      NEXT=$((CUR+1))
+      # Atomic: advance current AND clear current_review_id in ONE write so a
+      # crash between two writes can never leave current=NEXT with a stale,
+      # already-consumed review_id (which would double-advance into an
+      # unimplemented task and falsely mark it done).
+      wtmp="${WGN_STATE}.tmp.$$"
+      awk -v n="$NEXT" '
+        /^---$/ {m++}
+        m<2 && /^current: / {print "current: " n; next}
+        m<2 && /^current_review_id: / {print "current_review_id:"; next}
+        {print}
+      ' "$WGN_STATE" > "$wtmp" && mv "$wtmp" "$WGN_STATE"
       NHEAD="$(wgn_task_line "$NEXT" "$WGN_STATE" | cut -f3)"
       # Build the next task's text from its plan section (whole mode: entire plan).
       if [ "$MODE" = "whole" ]; then cp "$PLAN" "$TASKFILE"
       else awk -v h="### ${NHEAD}" '$0==h{f=1} f&&/^### /&&$0!=h&&seen{exit} $0==h{seen=1} f{print}' "$PLAN" > "$TASKFILE"; fi
-      bash "$LAUNCH" "$WGN_STATE" "$TASKFILE" 2>>"$LOG" || { log "launch failed"; passthrough; }
+      if ! bash "$LAUNCH" "$WGN_STATE" "$TASKFILE" 2>>"$LOG"; then
+        log "launch failed for task $NEXT"
+        wgn_set_field phase done "$WGN_STATE"
+        block "Task ${CUR} converged, but launching task ${NEXT} failed. The
+weigh-in is stopping — check .claude/spar-weighin.log, then re-run
+/spar-weighin to resume." "sparring weigh-in: launch failed"
+      fi
       block "Task ${CUR} converged and was committed. Now implement task ${NEXT}: ${NHEAD}, following its steps in ${PLAN}. When done, stop — the sparring reviewer will engage automatically." \
         "sparring weigh-in: task ${NEXT}/${TASKS}"
     else
@@ -783,7 +804,7 @@ esac
 - [ ] **Step 4: Run the test to confirm it passes**
 
 Run: `bash tests/test_stop_weighin.sh`
-Expected: `PASS=14 FAIL=0`
+Expected: `PASS=16 FAIL=0`
 
 - [ ] **Step 5: Commit**
 
