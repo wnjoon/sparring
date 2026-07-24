@@ -2,7 +2,7 @@
 set -uo pipefail
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-R="$ROOT/plugins/spar/commands/spar-weighin-resolve.sh"
+R="$ROOT/plugins/spar/commands/spar-ready-resolve.sh"
 chk(){ if echo "$3" | grep -qF "$2"; then echo "PASS: $1"; PASS=$((PASS+1)); else echo "FAIL: $1"; echo "  want:$2"; echo "  got :$3"; FAIL=$((FAIL+1)); fi; }
 
 # Output is: <mode>\t<reviewer|empty>\t<unattended>\t<spec>

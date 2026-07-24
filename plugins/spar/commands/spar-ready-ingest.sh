@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Parse a writing-plans plan into the weighin task table.
-# Usage: spar-weighin-ingest.sh <plan-path> <mode> <state-file>
+# Parse a writing-plans plan into the /spar:ready task table.
+# Usage: spar-ready-ingest.sh <plan-path> <mode> <state-file>
 set -uo pipefail
-DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/spar-weighin-lib.sh"
+DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/spar-plan-lib.sh"
 plan="${1:?plan path}"; mode="${2:?mode}"; state="${3:?state file}"
 [ -f "$plan" ] || { echo "error: plan not found: $plan" >&2; exit 2; }
 
@@ -23,5 +23,5 @@ tmp="${state}.tmp.$$"
 awk '/^---$/{c++} c<2{print} c==2 && !done{print; done=1}' "$state" > "$tmp"
 printf '%s\n' "$rows" | sed '/^$/d' >> "$tmp"
 mv "$tmp" "$state"
-wgn_set_field tasks "$count" "$state"
-wgn_set_field phase running "$state"
+plan_set_field tasks "$count" "$state"
+plan_set_field phase planned "$state"

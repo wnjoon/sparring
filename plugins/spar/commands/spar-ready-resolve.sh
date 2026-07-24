@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Resolve /spar-weighin flags from the ONE-string argument, strip them, and
+# Resolve /spar:ready flags from the ONE-string argument, strip them, and
 # print: "<mode>\t<reviewer|empty>\t<unattended>\t<spec>" (unattended ∈
 # true|false). Never argv-split the input.
 set -uo pipefail
