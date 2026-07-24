@@ -48,7 +48,7 @@ sparring is inspired by [hamelsmu/claude-review-loop](https://github.com/hamelsm
 
 ## How it works
 
-Everything below runs today, except the steps tagged `(planned Pn)`.
+Everything below runs today, except the steps tagged `(planned Pn)`. `/spar-weighin` wraps `/spar` for multi-task plans, running each task through the loop independently.
 
 ```
 /spar <task description>
@@ -107,6 +107,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 5 | Unattended mode + final report | planned |
 | 6 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
 | 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
+| 8 | `/spar-weighin` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) spar loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | planned |
 
 ## Install
 
