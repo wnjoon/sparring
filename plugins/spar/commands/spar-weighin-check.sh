@@ -9,8 +9,7 @@ awk -v idx="$idx" '
   function flip(line){ sub(/- \[ \]/, "- [x]", line); return line }
   idx==0 { print flip($0); next }
   /^### Task [0-9]+:/ {
-    n=$3; sub(/:.*/, "", n); # "### Task N:" -> field 3 is "N:" ; strip trailing colon
-    gsub(/[^0-9]/, "", n)
+    n=$3; gsub(/[^0-9]/, "", n) # "### Task N:" -> field 3 "N:" -> bare integer
     inzone = (n==idx)
     print; next
   }

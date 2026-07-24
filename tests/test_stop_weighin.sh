@@ -103,4 +103,19 @@ chk "E phase done" "phase: done" "$(cat .claude/spar-weighin.local.md)"
 nchk "E task2 not launched" "review_id" "$(cat .claude/spar.local.md 2>/dev/null)"
 teardown
 
+# F: fail-open — an internal error (corrupt lib) while a weigh-in is active AND
+# spar BLOCKED must NOT release spar's enforced loop. The ERR trap emits the
+# captured spar decision (block), never a hardcoded approve.
+setup
+export SPAR_WEIGHIN_SPAR_HOOK="$TMP/spar-block.sh"
+mkdir -p "$TMP/fakeplugin/commands"
+printf 'not valid bash ((((\n' > "$TMP/fakeplugin/commands/spar-weighin-lib.sh"
+export CLAUDE_PLUGIN_ROOT="$TMP/fakeplugin"
+wstate running per-task docs/p.md 2 1 20260724-101010-ffffff > .claude/spar-weighin.local.md
+printf '1\tpending\tT1\n2\tpending\tT2\n' >> .claude/spar-weighin.local.md
+OUT="$(echo '{}' | bash "$HOOK" 2>/dev/null)"
+chk "F fail-open preserves spar block" '"block"' "$OUT"
+chk "F keeps spar reason on internal error" "spar mid-round" "$OUT"
+teardown
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

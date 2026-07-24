@@ -14,8 +14,7 @@ wgn_field() { # $1=name [$2=file]
 
 wgn_task_line() { # $1=index [$2=file]
   local f="${2:-$WGN_STATE_DEFAULT}"
-  awk -v i="$1" '/^---$/{c++} c>=2 && $1==i {print; exit}' FS='\t' \
-    <(awk '/^---$/{c++} {print}' "$f" 2>/dev/null) 2>/dev/null
+  awk -v i="$1" -F'\t' '/^---$/{c++} c>=2 && $1==i {print; exit}' "$f" 2>/dev/null
 }
 
 wgn_set_field() { # $1=name $2=value [$3=file]
