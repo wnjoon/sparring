@@ -2,7 +2,7 @@
 set -uo pipefail
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-R="$ROOT/plugins/spar/commands/spar-resolve-family.sh"
+R="$ROOT/plugins/spar/commands/spar-fight-resolve.sh"
 chk() { if echo "$3" | grep -qF "$2"; then echo "PASS: $1"; PASS=$((PASS+1)); else echo "FAIL: $1"; echo "  want:$2"; echo "  got :$3"; FAIL=$((FAIL+1)); fi; }
 # fake PATH: control which CLIs "exist"
 mkbin() { d=$(mktemp -d); for n in "$@"; do printf '#!/bin/sh\n' > "$d/$n"; chmod +x "$d/$n"; done; echo "$d"; }

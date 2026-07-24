@@ -1,5 +1,5 @@
 ---
-description: "Sparring loop: implement the task, then iterate independent reviews until the reviewer declares CONVERGED"
+description: "Fight: run the sparring review loop — a single task, or a plan prepared by /spar:ready"
 argument-hint: "[--reviewer codex|claude] [--include-dirty] [--unattended] [--] <task description>"
 allowed-tools:
   - Bash
@@ -19,7 +19,7 @@ SPAR_RAW="$(cat <<'SPAR_ARGS_EOF'
 $ARGUMENTS
 SPAR_ARGS_EOF
 )"
-RESOLVED="$("${CLAUDE_PLUGIN_ROOT}/commands/spar-resolve-family.sh" "$SPAR_RAW")" || { printf '%s\n' "$RESOLVED" >&2; exit 1; }
+RESOLVED="$("${CLAUDE_PLUGIN_ROOT}/commands/spar-fight-resolve.sh" "$SPAR_RAW")" || { printf '%s\n' "$RESOLVED" >&2; exit 1; }
 SPAR_REVIEWER="${RESOLVED%%$'\t'*}"
 SPAR_REST="${RESOLVED#*$'\t'}"
 SPAR_INCLUDE_DIRTY="${SPAR_REST%%$'\t'*}"
