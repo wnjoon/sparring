@@ -1,5 +1,5 @@
 {
-  "description": "Sparring loop stop hook: blocks exit until the independent reviewer declares CONVERGED (weigh-in dispatcher wraps spar's own hook). SessionStart hook surfaces pending unattended design decisions.",
+  "description": "Sparring fight loop: the Stop hook blocks exit until the independent reviewer declares CONVERGED (the fight dispatcher wraps the round engine and drives a /spar:ready plan task-by-task). SessionStart surfaces pending unattended design decisions.",
   "hooks": {
     "SessionStart": [
       {
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-weighin.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-fight.sh",
             "timeout": 60,
             "statusMessage": "sparring: checking loop phase..."
           }

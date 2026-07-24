@@ -2,7 +2,7 @@
 set -uo pipefail
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-C="$ROOT/plugins/spar/commands/spar-weighin-check.sh"
+C="$ROOT/plugins/spar/commands/spar-fight-check.sh"
 chk(){ if [ "$2" = "$3" ]; then echo "PASS: $1"; PASS=$((PASS+1)); else echo "FAIL: $1"; echo "  want:[$2]"; echo "  got :[$3]"; FAIL=$((FAIL+1)); fi; }
 
 TMP=$(mktemp -d); PLAN="$TMP/plan.md"

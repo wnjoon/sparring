@@ -2,15 +2,15 @@
 set -uo pipefail
 PASS=0; FAIL=0
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-L="$ROOT/plugins/spar/commands/spar-weighin-launch.sh"
-LIB="$ROOT/plugins/spar/commands/spar-weighin-lib.sh"; . "$LIB"
+L="$ROOT/plugins/spar/commands/spar-fight-launch.sh"
+LIB="$ROOT/plugins/spar/commands/spar-plan-lib.sh"; . "$LIB"
 chk(){ if echo "$3" | grep -qE "$2"; then echo "PASS: $1"; PASS=$((PASS+1)); else echo "FAIL: $1"; echo "  want~:$2"; echo "  got :$3"; FAIL=$((FAIL+1)); fi; }
 eqchk(){ if [ "$2" = "$3" ]; then echo "PASS: $1"; PASS=$((PASS+1)); else echo "FAIL: $1"; echo "  want:[$2]"; echo "  got:[$3]"; FAIL=$((FAIL+1)); fi; }
 
 TMP=$(mktemp -d); cd "$TMP"; git init -q; git commit -q --allow-empty -m init
 mkdir -p .claude
-ST=".claude/spar-weighin.local.md"
-printf -- '---\nactive: true\nphase: running\nmode: per-task\nreviewer: codex\nplan_path: p.md\nworktree: %s\ntasks: 2\ncurrent: 1\ncurrent_review_id:\n---\n1\tpending\tTask 1: Alpha\n' "$TMP" > "$ST"
+ST=".claude/spar-plan.local.md"
+printf -- '---\nactive: true\nphase: running\nmode: per-task\nreviewer: codex\nplan_path: p.md\nbranch: %s\ntasks: 2\ncurrent: 1\ncurrent_review_id:\n---\n1\tpending\tTask 1: Alpha\n' "$TMP" > "$ST"
 printf 'Implement Task 1: Alpha\nDo the alpha thing.\n' > .claude/task.txt
 
 bash "$L" "$ST" .claude/task.txt
@@ -22,22 +22,22 @@ eqchk "phase task" "task" "$(sed -n 's/^phase: //p' "$SPAR" | head -1)"
 eqchk "round 0" "0" "$(sed -n 's/^round: //p' "$SPAR" | head -1)"
 eqchk "reviewer codex" "codex" "$(sed -n 's/^reviewer: //p' "$SPAR" | head -1)"
 chk "task body carried" "Do the alpha thing" "$(cat "$SPAR")"
-# weighin recorded the id
+# plan state recorded the id
 RID="$(grep '^review_id:' "$SPAR" | sed 's/^review_id: //')"
-eqchk "weighin current_review_id set" "$RID" "$(wgn_field current_review_id "$ST")"
+eqchk "plan current_review_id set" "$RID" "$(plan_field current_review_id "$ST")"
 
-# Phase 5: default (no unattended field in weighin state) → task state false.
+# Phase 5: default (no unattended field in plan state) → task state false.
 eqchk "task state unattended defaults false" "false" "$(sed -n 's/^unattended: //p' "$SPAR" | head -1)"
 
-# Phase 5: unattended: true in weighin state propagates into the launched task.
-# (wgn_set_field only replaces an existing key, so insert the field explicitly.)
+# Phase 5: unattended: true in plan state propagates into the launched task.
+# (plan_set_field only replaces an existing key, so insert the field explicitly.)
 sed -i '' 's/^reviewer: codex/reviewer: codex\nunattended: true/' "$ST" 2>/dev/null \
   || sed -i 's/^reviewer: codex/reviewer: codex\nunattended: true/' "$ST"
 rm -f "$SPAR"
 bash "$L" "$ST" .claude/task.txt
 eqchk "task state marked unattended true" "true" "$(sed -n 's/^unattended: //p' "$SPAR" | head -1)"
 
-# Phase 5: a malformed unattended value in weighin state defaults to false.
+# Phase 5: a malformed unattended value in plan state defaults to false.
 sed -i '' 's/^unattended: true/unattended: invalid/' "$ST" 2>/dev/null \
   || sed -i 's/^unattended: true/unattended: invalid/' "$ST"
 rm -f "$SPAR"

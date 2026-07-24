@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Activate a spar loop for the weighin current task by writing a valid
-# .claude/spar.local.md, and record the generated review_id in weighin state.
-# Usage: spar-weighin-launch.sh <weighin-state-file> <task-text-file>
+# Activate a fight loop for the plan's current task by writing a valid
+# .claude/spar.local.md, and record the generated review_id in the plan state.
+# Usage: spar-fight-launch.sh <plan-state-file> <task-text-file>
 set -uo pipefail
-DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/spar-weighin-lib.sh"
-state="${1:?weighin state}"; taskfile="${2:?task text file}"
+DIR="$(cd "$(dirname "$0")" && pwd)"; . "$DIR/spar-plan-lib.sh"
+state="${1:?plan state}"; taskfile="${2:?task text file}"
 [ -f "$taskfile" ] || { echo "error: task text file not found" >&2; exit 2; }
 
-reviewer="$(wgn_field reviewer "$state")"
-case "$reviewer" in codex|claude) ;; *) echo "error: bad reviewer in weighin state" >&2; exit 2 ;; esac
+reviewer="$(plan_field reviewer "$state")"
+case "$reviewer" in codex|claude) ;; *) echo "error: bad reviewer in plan state" >&2; exit 2 ;; esac
 
-# Propagate the weigh-in's unattended flag into each task's spar state. A missing
-# or malformed value defaults to false (attended) — older weigh-in states that
+# Propagate the plan's unattended flag into each task's fight state. A missing
+# or malformed value defaults to false (attended) — older plan states that
 # predate the flag keep working unchanged.
-unattended="$(wgn_field unattended "$state")"
+unattended="$(plan_field unattended "$state")"
 case "$unattended" in true) ;; ''|false) unattended=false ;; *) unattended=false ;; esac
 
 id="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
@@ -43,4 +43,4 @@ STATE_EOF
 } > "$tmp"
 mv "$tmp" .claude/spar.local.md
 trap - EXIT
-wgn_set_field current_review_id "$id" "$state"
+plan_set_field current_review_id "$id" "$state"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Flip '- [ ]' to '- [x]' within one task section (or all, when index=0).
-# Usage: spar-weighin-check.sh <plan-path> <task-index>
+# Usage: spar-fight-check.sh <plan-path> <task-index>
 set -uo pipefail
 plan="${1:?plan path}"; idx="${2:?task index}"
 [ -f "$plan" ] || { echo "error: plan not found: $plan" >&2; exit 2; }
