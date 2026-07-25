@@ -6,6 +6,23 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOOK="$ROOT/plugins/spar/hooks/stop-hook.sh"
 export CLAUDE_PLUGIN_ROOT="$ROOT/plugins/spar"
 
+# The hook refuses to dispatch a round when the reviewer CLI is missing
+# (stop-hook.sh:793-797), so every reviewed path below needs `codex` and
+# `claude` to merely exist. Provide no-op stubs and put them first on PATH: the
+# suite must not depend on what the developer happens to have installed, and CI
+# must never need a real reviewer CLI. Tests that drive a runner script build
+# their own fake CLI and prepend it, so they still win over these.
+STUB_BIN=$(mktemp -d)
+for stub_cli in codex claude; do
+  printf '#!/bin/sh\nexit 0\n' > "$STUB_BIN/$stub_cli"
+  chmod +x "$STUB_BIN/$stub_cli"
+done
+# A PATH with system tools but neither reviewer CLI, for the absent-CLI test.
+SYS_PATH="/usr/bin:/bin"
+PATH="$STUB_BIN:$PATH"
+export PATH
+trap 'rm -rf "$STUB_BIN"' EXIT
+
 chk() { # $1=desc $2=expected-substring $3=actual
   if echo "$3" | grep -qF "$2"; then echo "PASS: $1"; PASS=$((PASS+1))
   else echo "FAIL: $1"; echo "   want: $2"; echo "   got : $3"; FAIL=$((FAIL+1)); fi
@@ -984,6 +1001,29 @@ chk "error-bypass → outcome still recorded" "reason: error-bypass" \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
 chk "error-bypass → no report by design" "absent" \
   "$([ -f "$RPT" ] && echo present || echo absent)"
+
+# ── CLI presence: the hook refuses to start a round without the reviewer CLI ──
+# This branch (stop-hook.sh:793-797) had no coverage — the suite reached the
+# reviewed paths only because the developer happened to have codex installed.
+# SYS_PATH deliberately excludes STUB_BIN so the CLI really is missing. jq may
+# also be absent there, which is fine: block() falls back to a printf JSON that
+# still carries the first line of the reason.
+fresh_dir; write_state task 0; mkdir -p reviews
+OUT=$(PATH="$SYS_PATH" bash "$HOOK" <<< '{}')
+chk "reviewer CLI absent → block" '"decision":"block"' "$OUT"
+chk "reviewer CLI absent → says which CLI and why" "not on PATH" "$OUT"
+chk "reviewer CLI absent → honest error-bypass outcome" "reason: error-bypass" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+chk "reviewer CLI absent → loop state cleaned up" "gone" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
+chk "reviewer CLI absent → no report (error-bypass never reports)" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-report.md ] && echo present || echo absent)"
+
+# With the stubs on PATH the same state starts a round instead — this is what
+# every other test in this file has been relying on, now made explicit.
+fresh_dir; write_state task 0; mkdir -p reviews
+OUT=$(run_hook)
+chk "reviewer CLI present → round 1 dispatched" "spar-run-reviewer.sh" "$OUT"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
