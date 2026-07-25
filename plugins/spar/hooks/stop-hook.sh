@@ -189,6 +189,21 @@ case "$REVIEWER" in
   *) log "invalid reviewer: $REVIEWER"; finish_approve error-bypass;;
 esac
 
+# A user-scope hook registration fires in EVERY session of that host, so a run
+# claims its session and the engine ignores everyone else. Absent field → no
+# gating, which is every pre-existing run. Parsing is best-effort: no id while an
+# owner is set means "not the owner", and the answer is always approve — this
+# gate never blocks, so a foreign session is released rather than trapped.
+OWNER_SESSION=$(field owner_session)
+if [ -n "$OWNER_SESSION" ]; then
+  THIS_SESSION=$(printf '%s' "$HOOK_INPUT" \
+    | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  if [ "$THIS_SESSION" != "$OWNER_SESSION" ]; then
+    log "foreign session (${THIS_SESSION:-none}) — this run belongs to ${OWNER_SESSION}"
+    approve
+  fi
+fi
+
 BASE=$(field base_sha)
 echo "$BASE" | grep -qE '^([0-9a-f]{7,40}|none)$' || BASE="HEAD"
 

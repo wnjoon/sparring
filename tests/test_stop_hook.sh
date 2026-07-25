@@ -1096,5 +1096,48 @@ sed -i '' 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md 2>/dev/nu
   || sed -i 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md
 chk "claude author + claude reviewer → same-model notice" "same-model review" "$(run_hook)"
 
+# ── owner gating: a foreign session must not join someone else's run ──
+# A user-scope hook registration fires in EVERY session of that host, so without
+# this an unrelated Codex session opened in a repo with an active loop would be
+# pulled in and would advance the state machine.
+add_owner() { # $1=session id
+  sed -i '' "s/^reviewer: /owner_session: $1\nreviewer: /" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^reviewer: /owner_session: $1\nreviewer: /" .claude/spar.local.md
+}
+payload() { printf '{"session_id":"%s","hook_event_name":"Stop"}' "$1"; }
+
+# matching session → the loop runs normally
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+OUT=$(payload sess-aaa | bash "$HOOK")
+chk "owner match → round dispatched" "spar-run-reviewer.sh" "$OUT"
+
+# foreign session → approve, and the run is left completely untouched
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+OUT=$(payload sess-zzz | bash "$HOOK")
+chk "foreign session → approve" '"decision":"approve"' "$OUT"
+chk "foreign session → state untouched" "phase: task" "$(cat .claude/spar.local.md 2>/dev/null)"
+chk "foreign session → no runner written" "absent" \
+  "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
+chk "foreign session → no outcome recorded" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-outcome.md ] && echo present || echo absent)"
+
+# no owner field → unchanged behavior, whatever the payload says
+fresh_dir; write_state task 0; mkdir -p reviews
+OUT=$(payload sess-zzz | bash "$HOOK")
+chk "no owner field → round dispatched" "spar-run-reviewer.sh" "$OUT"
+
+# owner set but payload carries no session id → treated as foreign, approve
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+chk "no session id in payload → approve" '"decision":"approve"' "$(run_hook)"
+chk "no session id in payload → state untouched" "phase: task" \
+  "$(cat .claude/spar.local.md 2>/dev/null)"
+
+# the gate must never block — a foreign session is released, not trapped
+fresh_dir; write_state review 1; mkdir -p reviews; add_owner sess-aaa
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] x\n- file: a.py:1\n- problem: p\n- suggestion: s\n' \
+  > reviews/spar-20260721-120000-abc123-r1.md
+OUT=$(payload sess-zzz | bash "$HOOK")
+chk_absent_hook '"decision":"block"' "$OUT" "foreign session mid-round → never blocks"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
