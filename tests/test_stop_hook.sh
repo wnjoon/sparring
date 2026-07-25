@@ -7,7 +7,7 @@ HOOK="$ROOT/plugins/spar/hooks/stop-hook.sh"
 export CLAUDE_PLUGIN_ROOT="$ROOT/plugins/spar"
 
 # The hook refuses to dispatch a round when the reviewer CLI is missing
-# (stop-hook.sh:793-797), so every reviewed path below needs `codex` and
+# (stop-hook.sh:803-807), so every reviewed path below needs `codex` and
 # `claude` to merely exist. Provide no-op stubs and put them first on PATH: the
 # suite must not depend on what the developer happens to have installed, and CI
 # must never need a real reviewer CLI. Tests that drive a runner script build
@@ -1003,7 +1003,7 @@ chk "error-bypass → no report by design" "absent" \
   "$([ -f "$RPT" ] && echo present || echo absent)"
 
 # ── CLI presence: the hook refuses to start a round without the reviewer CLI ──
-# This branch (stop-hook.sh:793-797) had no coverage — the suite reached the
+# This branch (stop-hook.sh:803-807) had no coverage — the suite reached the
 # reviewed paths only because the developer happened to have codex installed.
 # SYS_PATH deliberately excludes STUB_BIN so the CLI really is missing. jq may
 # also be absent there, which is fine: block() falls back to a printf JSON that

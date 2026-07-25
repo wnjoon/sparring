@@ -118,12 +118,42 @@ chk "F fail-open preserves spar block" '"block"' "$OUT"
 chk "F keeps spar reason on internal error" "spar mid-round" "$OUT"
 teardown
 
-# ── the dispatcher must locate the engine without CLAUDE_PLUGIN_ROOT too ──
+# ── the dispatcher must locate the REAL engine with no env vars at all ──
 # Codex registers hooks from a hooks.json, which has no env field, so neither hook
-# may depend on the variable being exported.
-chk "dispatcher resolves the engine from its own path" "PLUGIN_ROOT" \
-  "$(grep -c 'PLUGIN_ROOT' "$ROOT/plugins/spar/hooks/stop-fight.sh" >/dev/null && grep 'PLUGIN_ROOT=' "$ROOT/plugins/spar/hooks/stop-fight.sh" | head -1)"
-nchk "dispatcher does not hardcode the bare env var for the engine" '${CLAUDE_PLUGIN_ROOT:-}/hooks/stop-hook.sh' \
-  "$(cat "$ROOT/plugins/spar/hooks/stop-fight.sh")"
+# may depend on CLAUDE_PLUGIN_ROOT being exported. This case runs the dispatcher
+# for real: no CLAUDE_PLUGIN_ROOT, and no SPAR_FIGHT_SPAR_HOOK stub, so the engine
+# it executes is whatever its own self-location resolved. Reviewer CLIs are stubbed
+# on PATH because the engine refuses to dispatch a round without one, and this
+# suite must stay hermetic.
+setup
+unset SPAR_FIGHT_SPAR_HOOK
+STUB_CLI=$(mktemp -d)
+for c in codex claude; do printf '#!/bin/sh\nexit 0\n' > "$STUB_CLI/$c"; chmod +x "$STUB_CLI/$c"; done
+cat > .claude/spar.local.md <<'SPARSTATE'
+---
+active: true
+phase: task
+round: 0
+review_id: 20260721-120000-abc123
+base_sha: none
+reviewer: codex
+include_dirty: false
+unattended: false
+max_rounds: 5
+sweep_done: false
+sweep_result: not-run
+---
+
+Add a fizzbuzz function with tests
+SPARSTATE
+OUT="$(echo '{}' | env -u CLAUDE_PLUGIN_ROOT PATH="$STUB_CLI:$PATH" bash "$HOOK")"
+chk "no env → real engine dispatched round 1" "spar-run-reviewer.sh" "$OUT"
+chk "no env → engine wrote the runner" "present" \
+  "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
+chk "no env → engine wrote the prompt from its own templates" "fizzbuzz" \
+  "$(cat .claude/spar-reviewer-prompt.txt 2>/dev/null)"
+chk "no env → state advanced to review" "phase: review" "$(cat .claude/spar.local.md)"
+rm -rf "$STUB_CLI"
+teardown
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

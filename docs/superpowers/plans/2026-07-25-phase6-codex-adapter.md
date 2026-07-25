@@ -26,10 +26,10 @@
 
 ### Task 1: Make the engine self-locating
 
-`stop-hook.sh` resolves five sibling scripts and three template dirs from `CLAUDE_PLUGIN_ROOT`. With it unset the engine cannot find `shared/prompts/reviewer.md`, takes `finish_approve error-bypass`, and — because the outcome writer path is broken the same way — records **no durable outcome**. The author sees a session that merely ended. Deriving the root from the script's own location removes the failure class for both hosts.
+`stop-hook.sh` resolves five sibling scripts and four template dirs from `CLAUDE_PLUGIN_ROOT`. With it unset the engine cannot find `shared/prompts/reviewer.md`, takes `finish_approve error-bypass`, and — because the outcome writer path is broken the same way — records **no durable outcome**. The author sees a session that merely ended. Deriving the root from the script's own location removes the failure class for both hosts.
 
 **Files:**
-- Modify: `plugins/spar/hooks/stop-hook.sh` (the path block at lines 40-45; templates at 503, 548, 652)
+- Modify: `plugins/spar/hooks/stop-hook.sh` (the path block at lines 40-45; templates at 503, 548, 652, 686)
 - Modify: `plugins/spar/hooks/stop-fight.sh` (same treatment, lines 10 and 15)
 - Test: `tests/test_stop_hook.sh`, `tests/test_stop_fight.sh`
 
@@ -37,7 +37,7 @@
 - Produces: `PLUGIN_ROOT` — an absolute path resolved as `${CLAUDE_PLUGIN_ROOT:-<dir of this script>/..}`. Every later task and both hooks read this instead of `CLAUDE_PLUGIN_ROOT` directly.
 - The env var keeps priority when set, so the Claude host and every existing test are unaffected.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_stop_hook.sh`, before the final PASS/FAIL lines:
 
@@ -64,20 +64,24 @@ chk "no plugin root → outcome still recorded" "reason: converged" \
 
 Append to `tests/test_stop_fight.sh`, before its final PASS/FAIL lines (match that file's own helper names when wiring the fixture — read the top of the file first):
 
-```bash
-# ── the dispatcher must locate the engine without CLAUDE_PLUGIN_ROOT too ──
-chk "dispatcher resolves the engine from its own path" "stop-hook.sh" \
-  "$(grep -n 'PLUGIN_ROOT' "$ROOT/plugins/spar/hooks/stop-fight.sh" | head -1)"
-```
+A grep-only assertion is not enough here — it would stay green if `PLUGIN_ROOT`
+resolved to the wrong directory. Add a **behavioral** case instead: `setup`, then
+`unset SPAR_FIGHT_SPAR_HOOK` so no engine stub is interposed, stub `codex`/`claude`
+on `PATH` (the engine refuses to dispatch without a reviewer CLI, and this suite
+must stay hermetic), write a real `phase: task` spar state, and invoke the
+dispatcher with `env -u CLAUDE_PLUGIN_ROOT`. Assert effects, not text: round 1
+dispatched, runner written, the prompt contains the task string (which proves the
+*templates* resolved too), and the state advanced to `phase: review`. See
+`tests/test_stop_fight.sh` for the landed version.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 bash tests/test_stop_hook.sh
 ```
 Expected: the four `no plugin root` checks FAIL — currently the engine dispatches nothing and writes no outcome when the variable is unset.
 
-- [ ] **Step 3: Resolve the root from the script's own location**
+- [x] **Step 3: Resolve the root from the script's own location**
 
 In `plugins/spar/hooks/stop-hook.sh`, immediately above the `OUTCOME_WRITER=` line (currently 40), insert:
 
@@ -94,7 +98,7 @@ if [ -z "$PLUGIN_ROOT" ]; then
 fi
 ```
 
-Then replace `${CLAUDE_PLUGIN_ROOT:-}` with `${PLUGIN_ROOT}` in all eight places: the five path variables (lines 40-45) and the three `tpl_dir` assignments (503, 548, 652).
+Then replace `${CLAUDE_PLUGIN_ROOT:-}` with `${PLUGIN_ROOT}` in all nine places: the five path variables (lines 40-45) and **all four** `tpl_dir` assignments (503, 548, 652, and `build_matcher`'s at 686 — missing that one silently disables semantic matching).
 
 In `plugins/spar/hooks/stop-fight.sh`, apply the same pattern above its line 10:
 
@@ -107,7 +111,7 @@ fi
 
 and use it for `DIR` and for the `SPAR_HOOK` default, keeping the `SPAR_FIGHT_SPAR_HOOK` override first.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 bash tests/test_stop_hook.sh
@@ -115,14 +119,14 @@ bash tests/test_stop_fight.sh
 ```
 Expected: `FAIL=0` for both.
 
-- [ ] **Step 5: Run the whole suite**
+- [x] **Step 5: Run the whole suite**
 
 ```bash
 for t in tests/test_*.sh; do printf '%-34s ' "$t"; bash "$t" >/dev/null 2>&1 && echo OK || echo FAILED; done
 ```
 Expected: every line `OK`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add plugins/spar/hooks/stop-hook.sh plugins/spar/hooks/stop-fight.sh tests/test_stop_hook.sh tests/test_stop_fight.sh
@@ -136,7 +140,7 @@ git commit -m "fix: resolve the plugin root from the script's own path (was a si
 The final sweep is meant to be a *fresh author-family* instance, but it is hardcoded to `claude`: `emit_sweep_runner` writes a runner calling `claude -p --safe-mode` and the dispatch guard checks `command -v claude`. With the seats swapped the author is Codex, so the sweep must be `codex exec --sandbox read-only` — otherwise the "same family, no context" property the sweep exists for is lost.
 
 **Files:**
-- Modify: `plugins/spar/hooks/stop-hook.sh` (state parsing near 133-152; `emit_sweep_runner` 440-500; the guard at 884-885; the reviewer notice at 834-835)
+- Modify: `plugins/spar/hooks/stop-hook.sh` (state parsing near 133-152; `emit_sweep_runner` 440-500; the guard at 894-895; the reviewer notice at 844-845)
 - Test: `tests/test_stop_hook.sh`
 
 **Interfaces:**
@@ -249,7 +253,7 @@ untouched. Update the function's comment and the generated banner — "fresh Cla
 author-family instance" → "fresh author-family instance" — since either family can
 now fill the seat.
 
-Then make the dispatch guard follow the same field (currently `command -v claude` at 884-885):
+Then make the dispatch guard follow the same field (currently `command -v claude` at 894-895):
 
 ```bash
         command -v "$AUTHOR" >/dev/null 2>&1 \
@@ -258,7 +262,7 @@ Then make the dispatch guard follow the same field (currently `command -v claude
 
 - [ ] **Step 5: Fix the pairing notice**
 
-Replace the notice at 834-835 so it describes the *pairing*, not the reviewer alone:
+Replace the notice at 844-845 so it describes the *pairing*, not the reviewer alone:
 
 ```bash
     NOTE=""
@@ -340,7 +344,7 @@ Expected: the four foreign/no-id checks FAIL — the engine currently ignores th
 
 - [ ] **Step 3: Gate on the owner**
 
-In `plugins/spar/hooks/stop-hook.sh`, the payload is already captured as `HOOK_INPUT` (line 130) and discarded. Directly after the `field()` definition and the state reads, add:
+In `plugins/spar/hooks/stop-hook.sh`, the payload is already captured as `HOOK_INPUT` (line 140) and discarded. Directly after the `field()` definition and the state reads, add:
 
 ```bash
 # A user-scope hook registration fires in EVERY session of that host, so a run
