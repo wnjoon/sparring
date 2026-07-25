@@ -21,6 +21,10 @@ chk_absent() { # $1=desc $2=unexpected-substring $3=actual
 
 fresh() {
   d=$(mktemp -d); cd "$d" || exit 1
+  # Physical cwd: on macOS mktemp hands back /var/... where /var is a symlink,
+  # and the generator (correctly) refuses to publish under a symlinked ancestor.
+  # The absolute-path cases below need a path with no symlinked component.
+  cd "$(pwd -P)" || exit 1
   mkdir -p reviews .claude
   git init -q
   git config user.email t@example.com
@@ -119,5 +123,146 @@ bash "$GEN" "$ID" none >/dev/null 2>&1
 chk "re-run → exit 0" "0" "$?"
 chk "one title only" "1" "$(grep -c '^# sparring run report' "$R")"
 chk_absent "no temp files left behind" ".spar-report-" "$(ls -a reviews)"
+
+# ── 9. symlinked ancestor → refused, and nothing is created through it ──
+fresh
+outside=$(mktemp -d)
+ln -s "$outside" link
+bash "$GEN" "$ID" none link/new >/dev/null 2>&1
+chk "symlinked ancestor → exit 3" "3" "$?"
+chk "no directory created through the symlink" "absent" \
+  "$([ -d "$outside/new" ] && echo present || echo absent)"
+chk "no report written through the symlink" "absent" \
+  "$([ -f "$outside/new/spar-${ID}-report.md" ] && echo present || echo absent)"
+
+# ── 10. custom reviews/state dirs → their artifacts stay out of the surface ──
+fresh
+mkdir -p myrev mystate
+printf -- '---\nreason: converged\nreview_id: %s\nrounds: 1\nreviewer: codex\nsweep: not-run\n---\n' \
+  "$ID" > "myrev/spar-${ID}-outcome.md"
+printf -- '---\nactive: true\nround: 1\nreviewer: codex\nsweep_result: not-run\n---\n' \
+  > mystate/spar.local.md
+printf 'brand new\n' > newmod.py
+bash "$GEN" "$ID" none myrev mystate >/dev/null 2>&1
+OUT="$(cat "myrev/spar-${ID}-report.md" 2>/dev/null)"
+chk "custom dirs → report written there" "- outcome: converged" "$OUT"
+chk "real untracked file still listed" "- newmod.py" "$OUT"
+chk_absent "custom reviews dir kept out of the surface" "myrev/" "$OUT"
+chk_absent "custom state dir kept out of the surface" "mystate/" "$OUT"
+chk_absent "report temp file kept out of the surface" ".spar-report-" "$OUT"
+
+# ── 11. absolute custom dirs → still recognized as artifact dirs ──
+fresh
+mkdir -p myrev mystate
+printf -- '---\nreason: converged\nreview_id: %s\nrounds: 1\nreviewer: codex\nsweep: not-run\n---\n' \
+  "$ID" > "myrev/spar-${ID}-outcome.md"
+printf -- '---\nactive: true\nround: 1\nreviewer: codex\nsweep_result: not-run\n---\n' \
+  > mystate/spar.local.md
+printf 'brand new\n' > newmod.py
+bash "$GEN" "$ID" none "$PWD/myrev" "$PWD/mystate" >/dev/null 2>&1
+OUT="$(cat "myrev/spar-${ID}-report.md" 2>/dev/null)"
+chk "absolute dirs → report written there" "- outcome: converged" "$OUT"
+chk "absolute dirs → real untracked file still listed" "- newmod.py" "$OUT"
+chk_absent "absolute reviews dir kept out of the surface" "myrev/" "$OUT"
+chk_absent "absolute state dir kept out of the surface" "mystate/" "$OUT"
+chk_absent "absolute dirs → temp file kept out of the surface" ".spar-report-" "$OUT"
+
+# ── 12. read-only state dir may contain '..' and is still recognized ──
+fresh
+mkdir -p sub myrev mystate
+printf -- '---\nreason: converged\nreview_id: %s\nrounds: 1\nreviewer: codex\nsweep: not-run\n---\n' \
+  "$ID" > "myrev/spar-${ID}-outcome.md"
+printf -- '---\nactive: true\nround: 1\nreviewer: codex\nsweep_result: not-run\n---\n' \
+  > mystate/spar.local.md
+printf 'brand new\n' > newmod.py
+bash "$GEN" "$ID" none myrev sub/../mystate >/dev/null 2>&1
+OUT="$(cat "myrev/spar-${ID}-report.md" 2>/dev/null)"
+chk "dotdot state dir → report written" "- outcome: converged" "$OUT"
+chk "dotdot state dir → real untracked file still listed" "- newmod.py" "$OUT"
+chk_absent "dotdot state dir kept out of the surface" "mystate/" "$OUT"
+chk_absent "dotdot state dir → temp file kept out of the surface" ".spar-report-" "$OUT"
+
+# ── 13. '..' in the WRITE target is refused (it defeats the symlink guard) ──
+fresh
+outside=$(mktemp -d)
+ln -s "$outside" link
+bash "$GEN" "$ID" none missing/../link/new >/dev/null 2>&1
+chk "dotdot reviews-dir → exit 3" "3" "$?"
+chk "dotdot reviews-dir → nothing created through the symlink" "absent" \
+  "$([ -d "$outside/new" ] && echo present || echo absent)"
+chk "dotdot reviews-dir → no partial component created" "absent" \
+  "$([ -d missing ] && echo present || echo absent)"
+bash "$GEN" "$ID" none sub/../myrev >/dev/null 2>&1
+chk "plain dotdot reviews-dir also refused" "3" "$?"
+
+# ── 14. artifact dir == working directory → filtered by name, not skipped ──
+fresh
+printf -- '---\nreason: converged\nreview_id: %s\nrounds: 1\nreviewer: codex\nsweep: not-run\n---\n' \
+  "$ID" > "spar-${ID}-outcome.md"
+printf -- '---\nactive: true\nround: 1\nreviewer: codex\nsweep_result: not-run\n---\n' \
+  > spar.local.md
+printf '# decisions\n' > spar-ledger.md
+printf 'brand new\n' > newmod.py
+bash "$GEN" "$ID" none . . >/dev/null 2>&1
+OUT="$(cat "spar-${ID}-report.md" 2>/dev/null)"
+chk "cwd as artifact dir → report written" "- outcome: converged" "$OUT"
+chk "cwd as artifact dir → real untracked file still listed" "- newmod.py" "$OUT"
+chk_absent "cwd outcome artifact kept out of the surface" "outcome.md" "$OUT"
+chk_absent "cwd report artifact kept out of the surface" "report.md" "$OUT"
+chk_absent "cwd state artifact kept out of the surface" "spar.local.md" "$OUT"
+chk_absent "cwd ledger artifact kept out of the surface" "spar-ledger.md" "$OUT"
+chk_absent "cwd temp file kept out of the surface" ".spar-report-" "$OUT"
+
+# ── 15. mixed dirs → each group's name filter applies only to its own dir ──
+fresh
+mkdir -p myrev
+printf -- '---\nreason: converged\nreview_id: %s\nrounds: 1\nreviewer: codex\nsweep: not-run\n---\n' \
+  "$ID" > "myrev/spar-${ID}-outcome.md"
+printf -- '---\nactive: true\nround: 1\nreviewer: codex\nsweep_result: not-run\n---\n' \
+  > spar.local.md
+printf '# decisions\n' > spar-ledger.md
+# A real project file whose name collides with the review-artifact pattern. Review
+# artifacts live under myrev/, so this must NOT be filtered.
+printf 'helper\n' > "spar-${ID}-helper.py"
+printf 'brand new\n' > newmod.py
+bash "$GEN" "$ID" none myrev . >/dev/null 2>&1
+OUT="$(cat "myrev/spar-${ID}-report.md" 2>/dev/null)"
+chk "mixed dirs → report written" "- outcome: converged" "$OUT"
+chk "mixed dirs → real untracked file listed" "- newmod.py" "$OUT"
+chk "mixed dirs → id-shaped project file still listed" "- spar-${ID}-helper.py" "$OUT"
+chk_absent "mixed dirs → cwd state file filtered" "spar.local.md" "$OUT"
+chk_absent "mixed dirs → cwd ledger filtered" "spar-ledger.md" "$OUT"
+chk_absent "mixed dirs → reviews dir filtered" "myrev/" "$OUT"
+
+# ── 16. reviews-dir=. → every artifact shape filtered, id-shaped code kept ──
+fresh
+printf -- '---\nreason: converged\nreview_id: %s\nrounds: 1\nreviewer: codex\nsweep: not-run\n---\n' \
+  "$ID" > "spar-${ID}-outcome.md"
+printf 'STATUS: FINDINGS\n' > "spar-${ID}-r1.md"
+printf '### F1-1: FIXED — done\n' > "spar-${ID}-r1-response.md"
+printf 'RULING: UPHELD\n' > "spar-${ID}-judge-1.md"
+printf 'SWEEP: CLEAN\n' > "spar-${ID}-sweep.md"
+printf 'SAME\n' > "spar-${ID}-matcher-r2.md"
+printf 'bad\n' > "spar-${ID}-r2.md.invalid-1"
+printf '## pending\n' > spar-pending.md
+# Real project files that merely start like a review artifact — must stay listed.
+printf 'helper\n' > "spar-${ID}-helper.py"
+printf 'runner\n' > "spar-${ID}-runtime.md"
+printf 'brand new\n' > newmod.py
+bash "$GEN" "$ID" none . >/dev/null 2>&1
+OUT="$(cat "spar-${ID}-report.md" 2>/dev/null)"
+chk "reviews-dir=. → report written" "- outcome: converged" "$OUT"
+chk "reviews-dir=. → real untracked file listed" "- newmod.py" "$OUT"
+chk "reviews-dir=. → id-shaped project file listed" "- spar-${ID}-helper.py" "$OUT"
+chk "reviews-dir=. → r-prefixed project file listed" "- spar-${ID}-runtime.md" "$OUT"
+chk_absent "round review filtered" "-r1.md" "$OUT"
+chk_absent "set-aside review filtered" ".invalid-1" "$OUT"
+chk_absent "judge ruling filtered" "judge-1.md" "$OUT"
+chk_absent "sweep artifact filtered" "sweep.md" "$OUT"
+chk_absent "matcher artifact filtered" "matcher-r2.md" "$OUT"
+chk_absent "pending queue filtered" "spar-pending.md" "$OUT"
+chk_absent "outcome filtered" "outcome.md" "$OUT"
+chk_absent "report filtered" "report.md" "$OUT"
+chk_absent "temp file filtered" ".spar-report-" "$OUT"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
