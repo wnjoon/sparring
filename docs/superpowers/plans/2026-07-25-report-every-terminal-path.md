@@ -43,7 +43,7 @@ Add the three call sites and pin each with a test. Also pin the executable bit t
 - Consumes: `generate_report()` — the existing no-argument fail-open helper in `stop-hook.sh` (added by the predecessor plan), which uses `REVIEW_ID` and `BASE` and always returns 0.
 - Produces: no new interface. After this task `reviews/spar-<id>-report.md` exists for `converged`, `blocked-pending-user`, `cap`, `sweep-findings-at-cap`, and `skipped`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_stop_hook.sh`, immediately before the final `echo; echo "PASS=$PASS FAIL=$FAIL"` and `exit "$FAIL"` lines. It reuses that file's existing `chk`, `chk_file`, `fresh_dir`, `write_state`, `run_hook` helpers and the `RPT` variable defined by the Phase 5 report block above it:
 
@@ -122,7 +122,7 @@ chk "display resolver is executable" "yes" \
   "$([ -x "$ROOT/plugins/spar/commands/spar-report-show.sh" ] && echo yes || echo no)"
 ```
 
-- [ ] **Step 2: Delete the test that asserted the opposite**
+- [x] **Step 2: Delete the test that asserted the opposite**
 
 `tests/test_stop_hook.sh` already contains `R3`, added when the report was scoped
 to converged runs only. It asserts the cap path writes **no** report, which this
@@ -142,7 +142,7 @@ chk "cap → no report (out of scope)" "absent" "$([ -f "$RPT" ] && echo present
 Do not weaken it into a report-exists check — T1 already covers the cap path with
 richer assertions, and two fixtures for one path would drift apart.
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 ```bash
 bash tests/test_stop_hook.sh
@@ -150,7 +150,7 @@ bash tests/test_spar_report.sh
 ```
 Expected: the new `T1`-`T4` report checks FAIL (`… report generated` reports the file missing) because no call site exists yet. `T5` and the two executable-bit checks may already pass; that is fine. Every pre-existing check must still pass.
 
-- [ ] **Step 4: Add the three call sites**
+- [x] **Step 4: Add the three call sites**
 
 In `plugins/spar/hooks/stop-hook.sh`, at the round-cap path, change:
 
@@ -204,7 +204,7 @@ to:
           deactivate_state
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 ```bash
 bash tests/test_stop_hook.sh
@@ -212,14 +212,14 @@ bash tests/test_spar_report.sh
 ```
 Expected: `FAIL=0` for both.
 
-- [ ] **Step 6: Run the whole suite**
+- [x] **Step 6: Run the whole suite**
 
 ```bash
 for t in tests/test_*.sh; do printf '%-34s ' "$t"; bash "$t" >/dev/null 2>&1 && echo OK || echo FAILED; done
 ```
 Expected: every line `OK`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add plugins/spar/hooks/stop-hook.sh tests/test_stop_hook.sh tests/test_spar_report.sh
@@ -255,10 +255,12 @@ In `plugins/spar/shared/policy.md` §Protocol, replace item 10's opening:
 with:
 
 ```markdown
-10. Every terminal path except `cancelled` also gets an informational report,
-    `reviews/spar-<id>-report.md` — `converged`, `blocked-pending-user`, `cap`,
-    `sweep-findings-at-cap`, and `skipped` alike, since an unconverged run is
-    exactly the one a human needs summarized: outcome, rounds, reviewer pairing, sweep
+10. Every terminal that ends a real review — `converged`, `blocked-pending-user`,
+    `cap`, `sweep-findings-at-cap`, and `skipped` — also gets an informational
+    report, `reviews/spar-<id>-report.md`, since an unconverged run is exactly the
+    one a human needs summarized. (`error-bypass` and `cancelled` get none: a
+    bailout has no run story, and a cancelling user is already present.) It
+    carries: outcome, rounds, reviewer pairing, sweep
 ```
 
 Then in §Phase roadmap, replace:
@@ -306,7 +308,7 @@ Replace the feature bullet:
 with:
 
 ```markdown
-- a **final run report** — every run writes `reviews/spar-<id>-report.md` (converged or not: `cap`, `sweep-findings-at-cap`, `skipped`, and unattended `blocked-pending-user` included): outcome, rounds, reviewer pairing, sweep result, findings tally, judge rulings, your settled design decisions, anything still pending, and the changed files. `/spar:report [id]` shows it (defaults to the latest run).
+- a **final run report** — converged or not, a finished run writes `reviews/spar-<id>-report.md` (`cap`, `sweep-findings-at-cap`, `skipped`, and unattended `blocked-pending-user` included; an internal-error bypass or an explicit `/spar:cancel` writes none): outcome, rounds, reviewer pairing, sweep result, findings tally, judge rulings, your settled design decisions, anything still pending, and the changed files. `/spar:report [id]` shows it (defaults to the latest run).
 ```
 
 Replace the ship sentence:
@@ -385,10 +387,13 @@ with:
 
 ```markdown
 Implemented, and extended past the original v1 scope: a report is generated for
-`converged`, `blocked-pending-user`, `cap`, `sweep-findings-at-cap`, and
-`skipped`. Only `cancelled` (a command-file path) and the `/spar:fight` plan-wide
-roll-up stay deferred — the roll-up needs the plan state to retain a review id per
-task, which is a separate contract change.
+every terminal that ends a real review — `converged`, `blocked-pending-user`,
+`cap`, `sweep-findings-at-cap`, and `skipped`. Two reasons produce none by design:
+`error-bypass` (an internal-error bailout has no run story, and its state is what
+could not be trusted) and `cancelled` (written by the `/spar:cancel` command file,
+with the user present by definition). The `/spar:fight` plan-wide roll-up stays
+deferred — it needs the plan state to retain a review id per task, which is a
+separate contract change.
 ```
 
 - [ ] **Step 5: Update `docs/design-decisions.md`**
@@ -458,6 +463,12 @@ git commit -m "docs: report covers every terminal path; sync Phase 5 status"
 ## Non-goals
 
 - **`cancelled`** — see Global Constraints.
+- **`error-bypass`** — it reaches `finish_approve` (the gate there is
+  `[ "$1" = converged ]`), so it produces no report, and that stays true. An
+  internal-error bailout has no run story worth summarizing, and the state a
+  report would read from is exactly what could not be trusted. Every doc claim in
+  Task 2 must therefore name the five reported reasons explicitly rather than
+  saying "every terminal path".
 - **The `/spar:fight` plan-wide roll-up** — needs the plan state to keep a review id per task (it currently holds a single `current_review_id` that each task overwrites), so it is a state-contract change with its own spec.
 - **Unattended non-essential parked decisions** — still needs a reviewer-owned terminal contract and a distinct outcome reason; unchanged here.
 - **Any change to the change-surface code, the enforced invariants, block messages, or the convergence decision.**

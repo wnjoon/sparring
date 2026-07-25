@@ -85,8 +85,11 @@ generate_report() {
 finish_approve() { # $1=reason $2=sweep result (optional)
   record_outcome "$1" "${2:-not-run}"
   # Converged runs get an informational report, generated while the ledger and
-  # registry still exist. Other reasons are deliberately out of scope for now
-  # (the generator itself is reason-agnostic, so adding one is a one-liner).
+  # registry still exist. The only other reason reaching this helper is
+  # error-bypass — an internal-error bailout has no run story worth summarizing,
+  # and its state may be exactly what could not be trusted. The other reported
+  # terminals (cap, sweep-findings-at-cap, skipped, and the unattended
+  # blocked-pending-user path) call generate_report at their own sites.
   if [ "$1" = converged ]; then generate_report; fi
   cleanup
   approve
