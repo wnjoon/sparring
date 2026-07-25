@@ -716,7 +716,7 @@ Add the read-only display path — a testable resolver script plus the command f
   - `spar-report-show.sh [review-id] [reviews-dir]` — prints `# report file: <path>` then the report body. Exit `0` printed; `1` nothing readable to show (message on stdout); `2` invalid review id.
   - `/spar:report [id]` — the user-facing command.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_report_show.sh`:
 
@@ -798,12 +798,12 @@ chk "command file calls the resolver" "spar-report-show.sh" "$(cat "$CMD")"
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bash tests/test_report_show.sh`
 Expected: FAIL — `spar-report-show.sh` and `report.md` do not exist yet.
 
-- [ ] **Step 3: Write the resolver script**
+- [x] **Step 3: Write the resolver script**
 
 Create `plugins/spar/commands/spar-report-show.sh`:
 
@@ -839,7 +839,7 @@ cat "$f"
 
 Then `chmod +x plugins/spar/commands/spar-report-show.sh`.
 
-- [ ] **Step 4: Write the command file**
+- [x] **Step 4: Write the command file**
 
 Create `plugins/spar/commands/report.md`:
 
@@ -867,12 +867,12 @@ report exists for that run (reports are written only for runs that reached a
 terminal path with this feature installed).
 ````
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `bash tests/test_report_show.sh`
 Expected: `PASS=… FAIL=0`.
 
-- [ ] **Step 6: Add the discovery hint to `fight.md`**
+- [x] **Step 6: Add the discovery hint to `fight.md`**
 
 In `plugins/spar/commands/fight.md`, in the "Loop protocol" section, replace this line:
 
@@ -888,7 +888,7 @@ with:
      mention it, or run `/spar:report` to show it.
 ```
 
-- [ ] **Step 7: Update `policy.md`**
+- [x] **Step 7: Update `policy.md`**
 
 In `plugins/spar/shared/policy.md` §Protocol, replace item 9:
 
@@ -915,7 +915,7 @@ with:
     enforcement. `/spar:report [id]` displays it.
 ```
 
-- [ ] **Step 8: Update `README.md`**
+- [x] **Step 8: Update `README.md`**
 
 In the feature list under "Today `/spar:fight` gives you:", add one bullet:
 
@@ -947,7 +947,7 @@ to:
   commands/              /spar:ready, /spar:fight, /spar:cancel, /spar:report, setup guards + surface helpers
 ```
 
-- [ ] **Step 9: Update `docs/design-decisions.md`**
+- [x] **Step 9: Update `docs/design-decisions.md`**
 
 In §"Phase 5 — unattended + final report", append to the "Final report delivery" bullet:
 
@@ -961,7 +961,7 @@ In §"Phase 5 — unattended + final report", append to the "Final report delive
   `/spar:fight` roll-up remain deferred.
 ```
 
-- [ ] **Step 10: Update both specs' status lines**
+- [x] **Step 10: Update both specs' status lines**
 
 In `docs/superpowers/specs/2026-07-24-spar-report-design.md`, replace the Status paragraph:
 
@@ -1018,14 +1018,14 @@ with:
    feeds it (parked / blocked-pending-user).
 ```
 
-- [ ] **Step 11: Run the whole test suite**
+- [x] **Step 11: Run the whole test suite**
 
 ```bash
 for t in tests/test_*.sh; do echo "== $t"; bash "$t" >/dev/null 2>&1 && echo OK || echo "FAILED: $t"; done
 ```
 Expected: every line `OK`. If any suite reports `FAILED`, re-run it directly and fix the cause before committing.
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add plugins/spar/commands/spar-report-show.sh plugins/spar/commands/report.md \

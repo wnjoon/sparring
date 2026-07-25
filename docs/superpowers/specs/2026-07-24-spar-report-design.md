@@ -1,6 +1,6 @@
-# `/spar-report` — Final Run Report — Design (Phase 5 prep)
+# `/spar:report` — Final Run Report — Design
 
-> _Command names updated post-refactor: `/spar` → `/spar:fight`; `/spar-weighin` → `/spar:ready` (plan) + `/spar:fight` (execute)._
+> _Command names updated post-refactor: `/spar` → `/spar:fight`; `/spar-weighin` → `/spar:ready` (plan) + `/spar:fight` (execute); this document's own `/spar-report` → `/spar:report`. The generator script keeps its original filename, `spar-report.sh`._
 
 **Status:** **implemented** 2026-07-25. The three open questions below were
 settled during planning: (1) the report layout is fixed by the generator; (2) the
@@ -29,7 +29,7 @@ Two distinct concerns, deliberately separated:
 
 1. **Generation** — a deterministic script `spar-report.sh` assembles the report
    from the run's artifacts and writes `reviews/spar-<id>-report.md`.
-2. **Display** — a `/spar-report [id]` command reads that file and presents it to
+2. **Display** — a `/spar:report [id]` command reads that file and presents it to
    the user (default: the most recent run).
 
 The report is **informational, not an enforced invariant**. Enforcement is the
@@ -43,12 +43,12 @@ fail-open call to the generator (below).
 design decisions) and `.claude/spar-registry.tsv` (finding fingerprints, stalemate
 streaks, statuses) along with the rest of the loop state. The per-round
 `reviews/spar-<id>-r*.md` / `-response.md`, judge, and sweep files persist, but
-the **ledger and registry do not**. A purely post-hoc `/spar-report` therefore
+the **ledger and registry do not**. A purely post-hoc `/spar:report` therefore
 could not reconstruct the "escalations & decisions" section.
 
 So the generator is invoked **at the terminal path, before `cleanup()`**, while
 the full live state (state file → `base_sha`, ledger, registry, all reviews) is
-still present. The `/spar-report` command then only re-displays the already-frozen
+still present. The `/spar:report` command then only re-displays the already-frozen
 `reviews/spar-<id>-report.md`; it never re-derives from (now-deleted) state.
 
 ## `spar-report.sh` — the generator
@@ -88,9 +88,9 @@ In `stop-hook.sh`, at the converged terminal path, insert one guarded call:
 **before** `finish_approve` runs `cleanup()`. No new phase, no extra round-trip,
 no change to the convergence decision. Optionally, the `STATUS: CONVERGED`
 handling text in the round prompt gains a one-line hint: "a summary was written
-to `reviews/spar-<id>-report.md` — run `/spar-report` to show it."
+to `reviews/spar-<id>-report.md` — run `/spar:report` to show it."
 
-## `/spar-report [id]` — the display command
+## `/spar:report [id]` — the display command
 
 Reads `reviews/spar-<id>-report.md` and presents it. With no id, picks the
 most recent `reviews/spar-*-report.md`. Read-only and re-runnable (a past run's
@@ -127,13 +127,13 @@ report can be shown any time). If the file is missing, it says so plainly.
   fixture set (planted rounds, a judge ruling, a ledger decision, a sweep) →
   assert the report's four sections carry the right tallies and lines. Matches
   the existing `tests/test_*.sh` style.
-- Smoke test of `/spar-report` selecting the newest report and printing it.
+- Smoke test of `/spar:report` selecting the newest report and printing it.
 
 ## Open questions for the writing-plans stage
 
 - Exact markdown layout of `reviews/spar-<id>-report.md`.
 - Whether to add the one-line `STATUS: CONVERGED` prompt hint, or leave discovery
-  entirely to `/spar-report`.
+  entirely to `/spar:report`.
 - Whether findings parsing should reuse `stop-hook.sh`'s `parse_findings` /
   `parse_responses` (extract to a shared sourced helper) or a lightweight
   independent parse in `spar-report.sh` (the report is best-effort, so a simple

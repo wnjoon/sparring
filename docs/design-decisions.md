@@ -255,7 +255,7 @@ from this future-decisions document after landing.
 - Final report delivery (agreed 2026-07-24, see
   `docs/superpowers/specs/2026-07-24-spar-report-design.md`): **generation vs
   display are split.** A deterministic `spar-report.sh` assembles
-  `reviews/spar-<id>-report.md` and a `/spar-report [id]` command displays it.
+  `reviews/spar-<id>-report.md` and a `/spar:report [id]` command displays it.
   The report is informational, so it stays OUT of the hook's enforcement
   machinery — the hook's only role is one **fail-open** call to the generator at
   the terminal path. Generation MUST run **before `cleanup()`**, because cleanup

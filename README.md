@@ -83,7 +83,8 @@ Everything below runs today, except the steps tagged `(planned Pn)`. `/spar:read
               │    → final sweep: fresh blind Claude subagent
               │      re-verifies diff + requirements → clean ? exit : round N+1
               ├─ otherwise → exit
-              └─ detailed final report                            (planned P5)
+              └─ detailed final report → reviews/spar-<id>-report.md
+                 (show it with /spar:report)
 ```
 
 The reviewer / judge / matcher run as **Codex** (`codex exec --sandbox read-only`, the default cross-model setup) or **Claude** (`claude -p`, read-only + isolated — single-agent mode); the protocol and invariants are identical either way.
