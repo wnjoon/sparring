@@ -106,7 +106,7 @@ Input contract being parsed (produced by the reviewer and the author):
 - review file `reviews/spar-<id>-r<N>.md` — `### F<N>-<n> [MECHANICAL|DESIGN] <title>`
 - response file `reviews/spar-<id>-r<N>-response.md` — `### F<N>-<n>: FIXED — …` or `### F<N>-<n>: REJECTED — …`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_spar_report.sh`, immediately before the final `echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"` lines:
 
@@ -171,12 +171,12 @@ chk "round 2 listed before round 10" "- round 2: raised 1, fixed 1, rejected 0
 - round 10: raised 1, fixed 1, rejected 0" "$(cat "$R")"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bash tests/test_spar_report.sh`
 Expected: the new checks FAIL (`want:## Findings`, `want:- raised: 4 …`) while the existing 74 checks still PASS.
 
-- [ ] **Step 3: Add the counters**
+- [x] **Step 3: Add the counters**
 
 In `plugins/spar/commands/spar-report.sh`, insert this block immediately after the result-header section (after the `case "$sweep" in …` line) and before `# ── change surface ──`:
 
@@ -244,7 +244,7 @@ tot_unanswered=$((tot_raised - tot_fixed - tot_rej))
 [ "$tot_unanswered" -ge 0 ] || tot_unanswered=0
 ```
 
-- [ ] **Step 4: Emit the section**
+- [x] **Step 4: Emit the section**
 
 In the same file, inside the `{ … } > "$tmp"` publish block, insert this between the blank `echo` that follows the `- generated_at:` line and `echo "## Changed files"`:
 
@@ -266,12 +266,12 @@ In the same file, inside the `{ … } > "$tmp"` publish block, insert this betwe
   echo
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `bash tests/test_spar_report.sh`
 Expected: `PASS=… FAIL=0`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add plugins/spar/commands/spar-report.sh tests/test_spar_report.sh
