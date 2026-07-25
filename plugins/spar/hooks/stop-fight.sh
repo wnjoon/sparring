@@ -7,12 +7,19 @@
 set -uo pipefail
 PLAN_STATE=".claude/spar-plan.local.md"
 LOG=".claude/spar-fight.log"
-DIR="${CLAUDE_PLUGIN_ROOT:-}/commands"
+# Resolve the plugin root from this script's own location: Codex registers hooks
+# from a hooks.json, which has no env field, so neither hook may depend on
+# CLAUDE_PLUGIN_ROOT being exported. The variable still wins when set.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [ -z "$PLUGIN_ROOT" ]; then
+  PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || PLUGIN_ROOT=""
+fi
+DIR="${PLUGIN_ROOT}/commands"
 LIB="$DIR/spar-plan-lib.sh"
 CHECK="$DIR/spar-fight-check.sh"
 LAUNCH="$DIR/spar-fight-launch.sh"
 TASKFILE=".claude/spar-fight-task.txt"
-SPAR_HOOK="${SPAR_FIGHT_SPAR_HOOK:-${CLAUDE_PLUGIN_ROOT:-}/hooks/stop-hook.sh}"
+SPAR_HOOK="${SPAR_FIGHT_SPAR_HOOK:-${PLUGIN_ROOT}/hooks/stop-hook.sh}"
 
 log(){ mkdir -p .claude; echo "[$(date -u +%FT%TZ)] $*" >> "$LOG"; }
 SPAR_DEC='{"decision":"approve"}'

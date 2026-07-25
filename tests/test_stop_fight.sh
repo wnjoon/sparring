@@ -118,4 +118,12 @@ chk "F fail-open preserves spar block" '"block"' "$OUT"
 chk "F keeps spar reason on internal error" "spar mid-round" "$OUT"
 teardown
 
+# ── the dispatcher must locate the engine without CLAUDE_PLUGIN_ROOT too ──
+# Codex registers hooks from a hooks.json, which has no env field, so neither hook
+# may depend on the variable being exported.
+chk "dispatcher resolves the engine from its own path" "PLUGIN_ROOT" \
+  "$(grep -c 'PLUGIN_ROOT' "$ROOT/plugins/spar/hooks/stop-fight.sh" >/dev/null && grep 'PLUGIN_ROOT=' "$ROOT/plugins/spar/hooks/stop-fight.sh" | head -1)"
+nchk "dispatcher does not hardcode the bare env var for the engine" '${CLAUDE_PLUGIN_ROOT:-}/hooks/stop-hook.sh' \
+  "$(cat "$ROOT/plugins/spar/hooks/stop-fight.sh")"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

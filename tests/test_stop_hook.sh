@@ -1025,5 +1025,24 @@ fresh_dir; write_state task 0; mkdir -p reviews
 OUT=$(run_hook)
 chk "reviewer CLI present → round 1 dispatched" "spar-run-reviewer.sh" "$OUT"
 
+# ── self-location: the engine must work without CLAUDE_PLUGIN_ROOT ──
+# With the var unset the engine used to fail open SILENTLY: no round dispatched,
+# no outcome recorded, state deleted. It must instead behave exactly as it does
+# with the var set, by locating its siblings from its own path.
+fresh_dir; write_state task 0; mkdir -p reviews
+OUT=$(env -u CLAUDE_PLUGIN_ROOT bash "$HOOK" <<< '{}')
+chk "no plugin root → still dispatches round 1" "spar-run-reviewer.sh" "$OUT"
+chk_file "no plugin root → runner written" ".claude/spar-run-reviewer.sh"
+chk "no plugin root → prompt carries the task" "fizzbuzz" \
+  "$(cat .claude/spar-reviewer-prompt.txt 2>/dev/null)"
+chk "no plugin root → state advanced" "phase: review" "$(cat .claude/spar.local.md 2>/dev/null)"
+
+# And the terminal path still records a durable outcome without the var.
+fresh_dir; write_state review 1; mkdir -p reviews
+converged_no_sweep
+env -u CLAUDE_PLUGIN_ROOT bash "$HOOK" <<< '{}' >/dev/null
+chk "no plugin root → outcome still recorded" "reason: converged" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

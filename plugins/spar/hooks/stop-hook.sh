@@ -37,12 +37,22 @@ block() { # $1=reason $2=statusMessage
   exit 0
 }
 DIFF_SURFACE_FILE=".claude/spar-diff.txt"
-OUTCOME_WRITER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-record-outcome.sh"
-CHANGE_CLASSIFIER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-classify-change.sh"
-INTENT_HARVESTER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-harvest-intent.sh"
+# Resolve the plugin root from this script's own location so the engine works
+# under any host that does not export CLAUDE_PLUGIN_ROOT (Codex registers hooks
+# from a project/user hooks.json, which has no env field). The env var still wins
+# when set, so the Claude host and existing tests are unaffected. Without this the
+# engine failed open SILENTLY — it could not find its templates, and the outcome
+# writer was broken by the same missing root, so nothing was recorded.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [ -z "$PLUGIN_ROOT" ]; then
+  PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || PLUGIN_ROOT=""
+fi
+OUTCOME_WRITER="${PLUGIN_ROOT}/commands/spar-record-outcome.sh"
+CHANGE_CLASSIFIER="${PLUGIN_ROOT}/commands/spar-classify-change.sh"
+INTENT_HARVESTER="${PLUGIN_ROOT}/commands/spar-harvest-intent.sh"
 INTENT_FILE=".claude/spar-intent-pointers.txt"
-QUEUE_WRITER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-queue-pending.sh"
-REPORT_GEN="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-report.sh"
+QUEUE_WRITER="${PLUGIN_ROOT}/commands/spar-queue-pending.sh"
+REPORT_GEN="${PLUGIN_ROOT}/commands/spar-report.sh"
 SWEEP_RUNNER=".claude/spar-run-sweep.sh"
 SWEEP_PROMPT_FILE=".claude/spar-sweep-prompt.txt"
 SWEEP_RETRY_FILE=".claude/spar-sweep-retries"
@@ -500,7 +510,7 @@ EOF
 }
 
 prepare_sweep() {
-  local tpl_dir="${CLAUDE_PLUGIN_ROOT:-}/shared/prompts"
+  local tpl_dir="${PLUGIN_ROOT}/shared/prompts"
   [ -f "$tpl_dir/sweeper.md" ] \
     || { log "template missing: $tpl_dir/sweeper.md"; finish_approve error-bypass error; }
   local prompt intent=""
@@ -545,7 +555,7 @@ should_sweep() {
 
 prepare_round() { # $1=round number → writes PROMPT_FILE + RUNNER
   local n="$1"
-  local tpl_dir="${CLAUDE_PLUGIN_ROOT:-}/shared/prompts"
+  local tpl_dir="${PLUGIN_ROOT}/shared/prompts"
   [ -f "$tpl_dir/reviewer.md" ] \
     || { log "template missing: $tpl_dir/reviewer.md"; finish_approve error-bypass; }
 
@@ -649,7 +659,7 @@ resolve_finding_text() { # $1=fp  $2=current round
 # template is missing or the finding cannot be extracted.
 prepare_judge() { # $1=fingerprint
   local fp="$1"
-  local tpl_dir="${CLAUDE_PLUGIN_ROOT:-}/shared/prompts"
+  local tpl_dir="${PLUGIN_ROOT}/shared/prompts"
   [ -f "$tpl_dir/judge.md" ] || { log "judge template missing"; return 1; }
   local finding; finding=$(extract_finding "$(review_file "$ROUND")" "$fp")
   [ -n "$finding" ] || { log "cannot extract finding for judge: $fp"; return 1; }
@@ -673,7 +683,7 @@ prepare_judge() { # $1=fingerprint
 # 1 if there are no ambiguous candidates (caller marks the round matched).
 build_matcher() { # $1=round
   local n="$1" rf; rf=$(review_file "$n")
-  local tpl_dir="${CLAUDE_PLUGIN_ROOT:-}/shared/prompts"
+  local tpl_dir="${PLUGIN_ROOT}/shared/prompts"
   [ -f "$tpl_dir/matcher.md" ] || return 1
   [ -f "$REGISTRY_FILE" ] || return 1
   local existing; existing=$(awk -F'\t' '$5=="open"||$5=="parked"{print $1}' "$REGISTRY_FILE" 2>/dev/null)
