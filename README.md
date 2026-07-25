@@ -5,7 +5,7 @@
 
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: v0.5.0 — splits the plan-to-spar orchestrator into `/spar:ready` (turn a spec into a checkbox plan on a dedicated branch, then stop) and `/spar:fight` (run a single task, or drive a ready plan task-by-task). The Claude-hosted loop includes safe skips, design-intent pointers, a risk-triggered final sweep, and unattended mode.**
+**Status: v0.6.0 — adds the final run report: every finished run writes `reviews/spar-<id>-report.md` (converged or not), shown by `/spar:report`. The Claude-hosted loop includes safe skips, design-intent pointers, a risk-triggered final sweep, and unattended mode; `/spar:ready` turns a spec into a checkbox plan on a dedicated branch and `/spar:fight` runs it task-by-task.**
 
 Phases 1–5 and 8 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar:fight` gives you:
 
@@ -25,7 +25,7 @@ Phases 1–5 and 8 are implemented; the core loop is verified end-to-end against
 
 
 
-Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) lands next. Phases 6–7 (the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
+Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phases 6–7 (the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 
 ## Direction
 
@@ -55,7 +55,7 @@ sparring is inspired by [hamelsmu/claude-review-loop](https://github.com/hamelsm
 
 ## How it works
 
-Everything below runs today, except the steps tagged `(planned Pn)`. `/spar:ready` turns a spec into a checkbox plan; `/spar:fight` then runs each task through the loop independently (or runs a single ad-hoc task on its own).
+Everything below runs today. `/spar:ready` turns a spec into a checkbox plan; `/spar:fight` then runs each task through the loop independently (or runs a single ad-hoc task on its own).
 
 ```
 /spar:fight <task description>

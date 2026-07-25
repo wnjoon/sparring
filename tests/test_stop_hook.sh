@@ -971,5 +971,19 @@ chk "failing generator at cap → block text unchanged" 'unconverged' "$OUT"
 chk "failing generator at cap → outcome still recorded" "reason: cap" \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
 
+# T6. error-bypass gets NO report, by design: an internal-error bailout has no run
+# story worth summarizing, and its state is exactly what could not be trusted.
+# This pins the finish_approve gate — widening it past `converged` would make the
+# documented behavior (policy.md item 10, the spec, the README) false.
+fresh_dir; write_state review 1; mkdir -p reviews
+sed -i '' 's/^reviewer: codex/reviewer: bogus/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^reviewer: codex/reviewer: bogus/' .claude/spar.local.md
+OUT=$(run_hook)
+chk "invalid reviewer → fail-open approve" '"decision":"approve"' "$OUT"
+chk "error-bypass → outcome still recorded" "reason: error-bypass" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+chk "error-bypass → no report by design" "absent" \
+  "$([ -f "$RPT" ] && echo present || echo absent)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
