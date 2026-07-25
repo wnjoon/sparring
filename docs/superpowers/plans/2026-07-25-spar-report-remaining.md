@@ -302,7 +302,7 @@ Input contracts being read:
 - judge files `reviews/spar-<id>-judge-<k>.md` — first line `RULING: UPHELD` or `RULING: DISMISSED` (no fingerprint inside the file; attribution comes from the registry)
 - sweep file `reviews/spar-<id>-sweep.md` — first line `SWEEP: CLEAN|FINDINGS`, findings as `### S-<n> [TAG] <title>`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_spar_report.sh`, before the final PASS/FAIL lines:
 
@@ -379,12 +379,12 @@ bash "$GEN" "$ID" none >/dev/null 2>&1
 chk "unattributed ruling from the judge file" "- UPHELD — (fingerprint unavailable)" "$(cat "$R")"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bash tests/test_spar_report.sh`
 Expected: the new checks FAIL (`want:## Escalations & decisions`, …); earlier checks still PASS.
 
-- [ ] **Step 3: Add the collectors**
+- [x] **Step 3: Add the collectors**
 
 In `plugins/spar/commands/spar-report.sh`, insert this block immediately after the findings-tally block from Task 1 (after the `[ "$tot_unanswered" -ge 0 ] || tot_unanswered=0` line) and before `# ── change surface ──`:
 
@@ -478,7 +478,7 @@ PENDING_OUT=$(pending_lines)
 SWEEP_OUT=$(sweep_lines)
 ```
 
-- [ ] **Step 4: Emit the section**
+- [x] **Step 4: Emit the section**
 
 In the same file, inside the `{ … } > "$tmp"` publish block, insert this between the findings block (Task 1) and `echo "## Changed files"`:
 
@@ -508,12 +508,12 @@ In the same file, inside the `{ … } > "$tmp"` publish block, insert this betwe
   echo
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `bash tests/test_spar_report.sh`
 Expected: `PASS=… FAIL=0`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add plugins/spar/commands/spar-report.sh tests/test_spar_report.sh
