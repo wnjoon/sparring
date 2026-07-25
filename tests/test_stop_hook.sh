@@ -867,14 +867,6 @@ run_hook >/dev/null
 chk "ledger decision captured before cleanup" "#### P1: keep it cohesive" "$(cat "$RPT" 2>/dev/null)"
 chk "ledger itself was cleaned up" "gone" "$([ -f .claude/spar-ledger.md ] && echo present || echo gone)"
 
-# R3. round cap → no report (scope: converged only for now)
-fresh_dir; write_state review 5; mkdir -p reviews
-printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] t\n- file: a.py:1\n- problem: p\n- suggestion: s\n' \
-  > reviews/spar-20260721-120000-abc123-r5.md
-printf '### F5-1: FIXED — done\n' > reviews/spar-20260721-120000-abc123-r5-response.md
-run_hook >/dev/null
-chk "cap → no report (out of scope)" "absent" "$([ -f "$RPT" ] && echo present || echo absent)"
-
 # R4. unattended blocked-pending-user terminal → report generated too
 fresh_dir; write_state review 1; add_unattended; mkdir -p reviews
 printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' \
@@ -914,6 +906,70 @@ chk "missing generator → still approve" '"decision":"approve"' "$OUT"
 chk "missing generator → outcome still recorded" "reason: converged" \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
 chk "missing generator → no report" "absent" "$([ -f "$RPT" ] && echo present || echo absent)"
+
+# ── Phase 5 follow-up: a report at every terminal path, not just converged ──
+
+# T1. round cap → report generated, and it is honest about the reason
+fresh_dir; write_state review 5; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] off by one\n- file: a.py:1\n- problem: p\n- suggestion: s\n' \
+  > reviews/spar-20260721-120000-abc123-r5.md
+printf '### F5-1: REJECTED — intended\n' > reviews/spar-20260721-120000-abc123-r5-response.md
+OUT=$(run_hook)
+chk "cap → still blocks with the unconverged notice" 'unconverged' "$OUT"
+chk_file "cap → report generated" "$RPT"
+chk "cap report names the cap outcome" "outcome: cap" "$(cat "$RPT" 2>/dev/null)"
+chk "cap report carries the round count" "rounds: 5" "$(cat "$RPT" 2>/dev/null)"
+chk "cap report tallies the unresolved finding" "rejected: 1" "$(cat "$RPT" 2>/dev/null)"
+
+# T2. the cap report is written BEFORE cleanup, so the ledger survives into it
+fresh_dir; write_state review 5; mkdir -p reviews
+printf '# decisions\n\n### P1: keep the flag — it is published\n' > .claude/spar-ledger.md
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] off by one\n- file: a.py:1\n- problem: p\n- suggestion: s\n' \
+  > reviews/spar-20260721-120000-abc123-r5.md
+printf '### F5-1: REJECTED — intended\n' > reviews/spar-20260721-120000-abc123-r5-response.md
+run_hook >/dev/null
+chk "cap report captured the ledger decision" "#### P1: keep the flag" "$(cat "$RPT" 2>/dev/null)"
+chk "cap report survives the deactivated-loop cleanup" "present" \
+  "$(run_hook >/dev/null; [ -f "$RPT" ] && echo present || echo absent)"
+
+# T3. sweep findings at the cap → report generated with the sweep recorded
+fresh_dir; write_state review 5; mkdir -p reviews
+sed -i '' 's/^phase: review/phase: sweep/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^phase: review/phase: sweep/' .claude/spar.local.md
+printf 'SWEEP: FINDINGS\n\n### S-1 [MECHANICAL] missing test\n- file: a.py:1\n- problem: p\n- suggestion: s\n' \
+  > reviews/spar-20260721-120000-abc123-sweep.md
+OUT=$(run_hook)
+chk "sweep findings at cap → still blocks" 'at cap' "$OUT"
+chk_file "sweep-findings-at-cap → report generated" "$RPT"
+chk "report names the sweep-findings-at-cap outcome" "outcome: sweep-findings-at-cap" \
+  "$(cat "$RPT" 2>/dev/null)"
+chk "report records the sweep result" "sweep: findings" "$(cat "$RPT" 2>/dev/null)"
+chk "report lists the sweep finding" "S-1 [MECHANICAL] missing test" "$(cat "$RPT" 2>/dev/null)"
+
+# T4. safe skip → report generated (no rounds ran, so the tally is empty but honest)
+# Reuses this file's existing `skip_repo` helper (test 4d): the skip path needs a
+# REAL base_sha, because the change classifier must be able to diff against it —
+# write_state's placeholder base_sha would make the classifier fail and disable
+# the skip entirely. skip_repo also gives the report a usable diff baseline.
+skip_repo
+printf 'safe\n' >> tracked.txt
+OUT=$(run_hook)
+chk "small safe change → skip reported" 'skipped' "$OUT"
+chk_file "skipped → report generated" "$RPT"
+chk "skip report names the skipped outcome" "outcome: skipped" "$(cat "$RPT" 2>/dev/null)"
+chk "skip report has no findings to tally" "No findings were raised." "$(cat "$RPT" 2>/dev/null)"
+chk "skip report lists the changed file" "tracked.txt" "$(cat "$RPT" 2>/dev/null)"
+
+# T5. fail-open at a non-converged path: a failing generator never changes the block
+fresh_dir; write_state review 5; mkdir -p reviews
+ln -s /dev/null "$RPT"
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] off by one\n- file: a.py:1\n- problem: p\n- suggestion: s\n' \
+  > reviews/spar-20260721-120000-abc123-r5.md
+printf '### F5-1: REJECTED — intended\n' > reviews/spar-20260721-120000-abc123-r5-response.md
+OUT=$(run_hook)
+chk "failing generator at cap → block text unchanged" 'unconverged' "$OUT"
+chk "failing generator at cap → outcome still recorded" "reason: cap" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

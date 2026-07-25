@@ -810,6 +810,7 @@ case "$PHASE" in
           C_LINES=$(printf '%s\n' "$CHANGE_CLASS" | sed -n 's/^lines: //p')
           C_PATHS=$(printf '%s\n' "$CHANGE_CLASS" | sed -n 's/^paths: //p')
           record_outcome skipped not-triggered
+          generate_report
           deactivate_state
           block "Review loop skipped: the completed change is small
 (${C_LINES} changed lines across ${C_PATHS} paths) and no risky touched path
@@ -1081,6 +1082,10 @@ as '### P<k>: <decision + basis>'. Then stop again." \
     if [ "$ROUND" -ge "$MAX_ROUNDS" ]; then
       log "round cap ${MAX_ROUNDS} reached — unconverged exit"
       record_outcome cap
+      # An unconverged run is exactly the one a human needs summarized. Safe here:
+      # this path only deactivates and blocks, so cleanup() (and with it the
+      # ledger and registry the report reads) has not run yet.
+      generate_report
       deactivate_state
       block "Round cap (${MAX_ROUNDS}) reached and the reviewer has NOT
 converged. Do not keep fixing. Report to the user: the loop ended
@@ -1154,6 +1159,7 @@ bash ${SWEEP_RUNNER}
       log "sweep findings at round cap $MAX_ROUNDS"
       set_sweep_state true findings
       record_outcome sweep-findings-at-cap findings
+      generate_report
       deactivate_state
       block "The final sweep found unresolved issues, but the loop already used
 all ${MAX_ROUNDS} reviewer rounds. Do not fix them inside this loop. Report

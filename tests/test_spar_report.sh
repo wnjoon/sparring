@@ -395,4 +395,9 @@ printf 'RULING: UPHELD\nreal defect\n' > "reviews/spar-${ID}-judge-1.md"
 bash "$GEN" "$ID" none >/dev/null 2>&1
 chk "unattributed ruling from the judge file" "- UPHELD — (fingerprint unavailable)" "$(cat "$R")"
 
+# ── 25. the generator must stay executable — the hook gates on [ -x ] ──
+chk "generator is executable" "yes" "$([ -x "$GEN" ] && echo yes || echo no)"
+chk "display resolver is executable" "yes" \
+  "$([ -x "$ROOT/plugins/spar/commands/spar-report-show.sh" ] && echo yes || echo no)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
