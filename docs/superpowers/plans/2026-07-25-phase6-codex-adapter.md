@@ -147,7 +147,7 @@ The final sweep is meant to be a *fresh author-family* instance, but it is hardc
 - Consumes: `PLUGIN_ROOT` (Task 1).
 - Produces: state field `author: claude|codex`, defaulting to `claude` when absent or empty; an invalid value is an internal-state error (`error-bypass`), matching how `unattended`, `include_dirty`, and `reviewer` are validated. Later tasks write this field at activation.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_stop_hook.sh`, before the final PASS/FAIL lines:
 
@@ -194,12 +194,12 @@ OUT=$(run_hook)
 chk_absent_hook "same-model review" "$OUT" "codex author + claude reviewer → not called same-model"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: `author codex → codex sweep runner`, the no-claude check, the invalid-author checks, and the notice check FAIL. The default-path check should already PASS.
 
-- [ ] **Step 3: Parse and validate the field**
+- [x] **Step 3: Parse and validate the field**
 
 In `plugins/spar/hooks/stop-hook.sh`, next to the other field reads (after the `UNATTENDED` block around line 152), add:
 
@@ -212,7 +212,7 @@ case "$AUTHOR" in
 esac
 ```
 
-- [ ] **Step 4: Resolve the sweep from it**
+- [x] **Step 4: Resolve the sweep from it**
 
 In `emit_sweep_runner`, the whole **invocation line** must branch by family, not
 just the command name — the two CLIs deliver their output differently. `claude -p`
@@ -260,7 +260,7 @@ Then make the dispatch guard follow the same field (currently `command -v claude
           || { log "author-family CLI not found for sweep: $AUTHOR"; finish_approve error-bypass error; }
 ```
 
-- [ ] **Step 5: Fix the pairing notice**
+- [x] **Step 5: Fix the pairing notice**
 
 Replace the notice at 844-845 so it describes the *pairing*, not the reviewer alone:
 
@@ -270,7 +270,7 @@ Replace the notice at 844-845 so it describes the *pairing*, not the reviewer al
 NOTE: same-model review — reduced cross-vendor blind-spot coverage. Install the other vendor's CLI for cross-model review."
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 ```bash
 bash tests/test_stop_hook.sh
@@ -278,7 +278,7 @@ for t in tests/test_*.sh; do bash "$t" >/dev/null 2>&1 || echo "FAILED: $t"; don
 ```
 Expected: `FAIL=0`, and no suite reports `FAILED`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add plugins/spar/hooks/stop-hook.sh tests/test_stop_hook.sh
