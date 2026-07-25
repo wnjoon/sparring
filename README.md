@@ -7,7 +7,7 @@
 
 **Status: v0.5.0 — splits the plan-to-spar orchestrator into `/spar:ready` (turn a spec into a checkbox plan on a dedicated branch, then stop) and `/spar:fight` (run a single task, or drive a ready plan task-by-task). The Claude-hosted loop includes safe skips, design-intent pointers, a risk-triggered final sweep, and unattended mode.**
 
-Phases 1–4 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar:fight` gives you:
+Phases 1–5 and 8 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar:fight` gives you:
 
 - an **enforced** review loop that iterates until the *reviewer* declares convergence;
 - a **blind judge** that rules factual (`[MECHANICAL]`) stalemates;
@@ -17,7 +17,7 @@ Phases 1–4 are implemented; the core loop is verified end-to-end against real 
 - a reported **safe skip** for changes no larger than 10 lines / 2 paths when no risky path or unsafe change kind is touched;
 - changed-surface **design-intent pointers** on every fresh review;
 - a once-only, fresh Claude **final sweep** after risky, long, or design-bearing loops;
-- a **final run report** — every converged (and every unattended `blocked-pending-user`) run writes `reviews/spar-<id>-report.md`: outcome, rounds, reviewer pairing, sweep result, findings tally, judge rulings, your settled design decisions, anything still pending, and the changed files. `/spar:report [id]` shows it (defaults to the latest run).
+- a **final run report** — converged or not, a finished run writes `reviews/spar-<id>-report.md` (`cap`, `sweep-findings-at-cap`, `skipped`, and unattended `blocked-pending-user` included; an internal-error bypass or an explicit `/spar:cancel` writes none): outcome, rounds, reviewer pairing, sweep result, findings tally, judge rulings, your settled design decisions, anything still pending, and the changed files. `/spar:report [id]` shows it (defaults to the latest run).
 
 <br>
 
@@ -25,7 +25,7 @@ Phases 1–4 are implemented; the core loop is verified end-to-end against real 
 
 
 
-Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5 (unattended mode) ship in v0.5.0. Phases 6–7 (the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
+Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) lands next. Phases 6–7 (the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 
 ## Direction
 

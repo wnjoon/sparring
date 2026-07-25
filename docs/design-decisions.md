@@ -261,15 +261,18 @@ from this future-decisions document after landing.
   the terminal path. Generation MUST run **before `cleanup()`**, because cleanup
   deletes the ledger (`.claude/spar-ledger.md`) and registry that hold the
   settled-decision and finding data; the reviews/ files persist but those do not.
-  No new phase and no extra round-trip. Scope: converged first (generator is
-  terminal-reason-agnostic, so cap/skip/sweep and a /spar:fight roll-up extend easily).
+  No new phase and no extra round-trip. Scope: converged first, then every other
+  hook terminal (generator is terminal-reason-agnostic, so each was one added line).
   Implemented 2026-07-25 (`docs/superpowers/plans/2026-07-25-spar-report.md` for
   the generator, `…-spar-report-remaining.md` for the rest): `spar-report.sh`
   plus a `generate_report()` fail-open call from `finish_approve` for
   `converged` (the unattended `blocked-pending-user` terminal shares it),
   displayed by `/spar:report [id]`. Command spelled `/spar:report` to match the
-  post-refactor namespace. `cap`, `sweep-findings-at-cap`, `skipped`, and a
-  `/spar:fight` roll-up remain deferred.
+  post-refactor namespace. `cap`, `sweep-findings-at-cap`, and `skipped` followed
+  in `docs/superpowers/plans/2026-07-25-report-every-terminal-path.md`. No report
+  for `error-bypass` (a bailout has no run story) or `cancelled` (command-file
+  path, user present by definition). Still deferred: the `/spar:fight` plan-wide
+  roll-up, which needs a per-task review id in the plan state.
 
 ## Phase 6 — Codex-hosted adapter
 

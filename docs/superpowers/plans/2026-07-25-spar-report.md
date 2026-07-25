@@ -4,6 +4,12 @@
 
 **Goal:** Produce a deterministic, human-readable report of a completed sparring run (`reviews/spar-<id>-report.md`) at the run's terminal path, and add a read-only `/spar:report [id]` command that displays it.
 
+> **Status (2026-07-25):** superseded. Task 1 shipped (commits `f9edf97`,
+> `ea2e6b7`) but its fight ended at the round cap, so the checkboxes below were
+> never ticked — do not read them as "nothing was done". Tasks 2-5 were re-issued
+> as Tasks 1-4 of `docs/superpowers/plans/2026-07-25-spar-report-remaining.md`,
+> which completed. This file is kept as the historical record of Task 1's design.
+
 **Architecture:** Generation and display are split. A standalone generator `plugins/spar/commands/spar-report.sh` assembles the report from a run's artifacts (state file, outcome file, per-round reviews/responses, judge files, sweep file, ledger, registry, `git diff --stat`) and publishes it atomically. `stop-hook.sh` gains ONE fail-open helper, `generate_report()`, called from `finish_approve` when the reason is `converged` — before `cleanup()`, because cleanup deletes the ledger and registry the report reads. The already-shipped unattended terminal (`unattended_block_terminal`, which today calls the generator inline) is refactored onto the same helper. Display is a small resolver script plus a `report.md` command file; it only re-reads the frozen report and never re-derives anything.
 
 **Tech Stack:** POSIX-ish bash (Claude Code plugin scripts + hooks), `awk`/`sed` for parsing, `git` for the change surface, `jq` only where hooks already use it, pure-bash test scripts under `tests/`.

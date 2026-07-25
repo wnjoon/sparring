@@ -98,10 +98,12 @@ report can be shown any time). If the file is missing, it says so plainly.
 
 ## Scope
 
-- **This design: converged runs only** (the user's ask). The generator reads
-  artifacts and is terminal-reason-agnostic, so extending to `cap`,
-  `sweep-findings-at-cap`, or `skipped` is a one-line change at those terminal
-  paths — deferred.
+- **v1 shipped converged runs only** (the user's ask). Because the generator reads
+  artifacts and is terminal-reason-agnostic, `cap`, `sweep-findings-at-cap`, and
+  `skipped` were added right after as one `generate_report` line each
+  (`docs/superpowers/plans/2026-07-25-report-every-terminal-path.md`). `cancelled`
+  is excluded: it is written by the `/spar:cancel` command file, not the hook, and
+  the user is present by definition when they cancel.
 - **`/spar:fight` roll-up** (a Phase-8-flow summary aggregating each task's
   per-run report) is a natural follow-on: `/spar:fight` controls its own terminal
   path, so it can call the same generator/command. Deferred.
@@ -129,7 +131,7 @@ report can be shown any time). If the file is missing, it says so plainly.
   the existing `tests/test_*.sh` style.
 - Smoke test of `/spar:report` selecting the newest report and printing it.
 
-## Open questions for the writing-plans stage
+## Open questions for the writing-plans stage — all settled (see Status)
 
 - Exact markdown layout of `reviews/spar-<id>-report.md`.
 - Whether to add the one-line `STATUS: CONVERGED` prompt hint, or leave discovery
@@ -141,6 +143,11 @@ report can be shown any time). If the file is missing, it says so plainly.
 
 ## Terminal state
 
-Implemented. Scope as designed: converged runs (plus the unattended
-`blocked-pending-user` terminal, which shares the same call). `cap`,
-`sweep-findings-at-cap`, `skipped`, and the `/spar:fight` roll-up stay deferred.
+Implemented, and extended past the original v1 scope: a report is generated for
+every terminal that ends a real review — `converged`, `blocked-pending-user`,
+`cap`, `sweep-findings-at-cap`, and `skipped`. Two reasons produce none by design:
+`error-bypass` (an internal-error bailout has no run story, and its state is what
+could not be trusted) and `cancelled` (written by the `/spar:cancel` command file,
+with the user present by definition). The `/spar:fight` plan-wide roll-up stays
+deferred — it needs the plan state to retain a review id per task, which is a
+separate contract change.

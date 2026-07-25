@@ -121,7 +121,9 @@ sparring Stop hook takes over from there.
 2. Read the review file.
    - First line `STATUS: CONVERGED` → stop again; the hook releases the session.
      A summary of the whole run is written to `reviews/spar-<id>-report.md` —
-     mention it, or run `/spar:report` to show it.
+     mention it, or run `/spar:report` to show it. Non-converged endings (round
+     cap, sweep findings at the cap, safe skip) get the same report; use it when
+     you report an unconverged result honestly.
    - First line `STATUS: FINDINGS` → handle EVERY finding:
      - `[MECHANICAL]` → fix it now. Do not ask the user.
      - `[DESIGN]` → decide on the merits; implement it if you agree.

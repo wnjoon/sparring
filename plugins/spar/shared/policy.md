@@ -78,9 +78,12 @@ explicitly documented.
    at least `converged`, `cap`, `error-bypass`, `cancelled`, `skipped`,
    `blocked-pending-user`, or `sweep-findings-at-cap`. Only `converged` asserts
    a clean review result.
-10. A run that converges (and an unattended run that stops at
-    `blocked-pending-user`) also gets an informational report,
-    `reviews/spar-<id>-report.md`: outcome, rounds, reviewer pairing, sweep
+10. Every terminal that ends a real review — `converged`, `blocked-pending-user`,
+    `cap`, `sweep-findings-at-cap`, and `skipped` — also gets an informational
+    report, `reviews/spar-<id>-report.md`, since an unconverged run is exactly the
+    one a human needs summarized. (`error-bypass` and `cancelled` get none: a
+    bailout has no run story, and a cancelling user is already present.) It
+    carries: outcome, rounds, reviewer pairing, sweep
     result, findings tally, judge rulings, the user's settled decisions, still
     pending decisions, and the changed files. It is generated deterministically
     BEFORE cleanup (the ledger and registry it reads are deleted there), is
@@ -98,12 +101,12 @@ explicitly documented.
 
 ## Phase roadmap
 
-Phases 1–4 (implemented): core loop; design findings, blind judge, gate,
+Phases 1–5 (implemented): core loop; design findings, blind judge, gate,
 decision ledger, semantic matcher; same-family Claude review; safe skip,
-changed-surface intent harvest, durable outcomes, and final sweep.
-Phase 5: unattended mode + final report. Phase 6: Codex-hosted adapter (git
-pre-commit enforcement). Phase 7: model economics (reviewer/effort config,
-tiered fix writers).
+changed-surface intent harvest, durable outcomes, and final sweep; unattended
+mode and the final run report (`/spar:report`).
+Phase 6: Codex-hosted adapter (git pre-commit enforcement). Phase 7: model
+economics (reviewer/effort config, tiered fix writers).
 Phase 8 (orchestration): `/spar:ready` + `/spar:fight` — a plan-to-fight
 workflow layered ABOVE the loop. `/spar:ready` runs writing-plans → dedicated
 branch → task table, then stops; `/spar:fight` runs the plan (per-task by
