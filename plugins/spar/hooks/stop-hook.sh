@@ -68,8 +68,26 @@ record_outcome() { # $1=reason $2=sweep result (optional); best-effort
   fi
   return 0
 }
+# Best-effort informational report. MUST run BEFORE cleanup(): the generator
+# reads .claude/spar-ledger.md and .claude/spar-registry.tsv, which cleanup()
+# deletes. Enforcement is not involved — a failure only means "no report".
+generate_report() {
+  [ -n "${REVIEW_ID:-}" ] || return 0
+  if [ -x "$REPORT_GEN" ]; then
+    "$REPORT_GEN" "$REVIEW_ID" "${BASE:-none}" 2>>"$LOG_FILE" \
+      || log "report generation failed"
+  else
+    log "report generator missing: $REPORT_GEN"
+  fi
+  return 0
+}
+
 finish_approve() { # $1=reason $2=sweep result (optional)
   record_outcome "$1" "${2:-not-run}"
+  # Converged runs get an informational report, generated while the ledger and
+  # registry still exist. Other reasons are deliberately out of scope for now
+  # (the generator itself is reason-agnostic, so adding one is a one-liner).
+  if [ "$1" = converged ]; then generate_report; fi
   cleanup
   approve
 }
@@ -99,9 +117,7 @@ unattended_block_terminal() { # $1=round
     rm -f "$ptxt"
   done < <(parked_fingerprints)
   record_outcome blocked-pending-user
-  if [ -x "$REPORT_GEN" ]; then
-    "$REPORT_GEN" "$REVIEW_ID" "$BASE" 2>>"$LOG_FILE" || log "report generation failed"
-  fi
+  generate_report
   cleanup
   approve
 }

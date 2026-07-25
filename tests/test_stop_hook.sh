@@ -832,5 +832,88 @@ chk "terminal-round finding B body preserved" "B-BODY-UNCLEAR" "$(cat reviews/sp
 chk "earlier-round finding A body preserved (not empty)" "A-BODY-BIG" "$(cat reviews/spar-pending.md)"
 chk "both parked findings queued" "2" "$(grep -c '^## ' reviews/spar-pending.md)"
 
+# ── Phase 5: final report at the terminal path ──
+RPT="reviews/spar-20260721-120000-abc123-report.md"
+
+# Converge with the sweep already accounted for, so these tests exercise the
+# terminal path itself instead of the sweep dispatch (mirrors test 6 above —
+# without this, should_sweep() fires and the hook blocks for the sweep first).
+converged_no_sweep() {
+  printf 'STATUS: CONVERGED\n\nAll good.\n' > reviews/spar-20260721-120000-abc123-r1.md
+  sed -i '' 's/^sweep_done: false/sweep_done: true/; s/^sweep_result: not-run/sweep_result: clean/' \
+    .claude/spar.local.md 2>/dev/null \
+    || sed -i 's/^sweep_done: false/sweep_done: true/; s/^sweep_result: not-run/sweep_result: clean/' \
+      .claude/spar.local.md
+}
+
+# R1. converged → report generated before cleanup
+fresh_dir; write_state review 1; mkdir -p reviews
+converged_no_sweep
+OUT=$(run_hook)
+chk "converged → approve" '"decision":"approve"' "$OUT"
+chk_file "converged → report generated" "$RPT"
+chk "report records the converged outcome" "outcome: converged" "$(cat "$RPT" 2>/dev/null)"
+chk "report has the result section" "## Result" "$(cat "$RPT" 2>/dev/null)"
+chk "report has the findings section" "## Findings" "$(cat "$RPT" 2>/dev/null)"
+chk "report has the changed-files section" "## Changed files" "$(cat "$RPT" 2>/dev/null)"
+chk "report survives cleanup" "gone" "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
+
+# R2. the report reads the ledger, which cleanup() would have deleted
+fresh_dir; write_state review 1; mkdir -p reviews
+printf '# decisions\n\n### P1: keep it cohesive — splitting duplicates the parser\n' \
+  > .claude/spar-ledger.md
+converged_no_sweep
+run_hook >/dev/null
+chk "ledger decision captured before cleanup" "#### P1: keep it cohesive" "$(cat "$RPT" 2>/dev/null)"
+chk "ledger itself was cleaned up" "gone" "$([ -f .claude/spar-ledger.md ] && echo present || echo gone)"
+
+# R3. round cap → no report (scope: converged only for now)
+fresh_dir; write_state review 5; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] t\n- file: a.py:1\n- problem: p\n- suggestion: s\n' \
+  > reviews/spar-20260721-120000-abc123-r5.md
+printf '### F5-1: FIXED — done\n' > reviews/spar-20260721-120000-abc123-r5-response.md
+run_hook >/dev/null
+chk "cap → no report (out of scope)" "absent" "$([ -f "$RPT" ] && echo present || echo absent)"
+
+# R4. unattended blocked-pending-user terminal → report generated too
+fresh_dir; write_state review 1; add_unattended; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' \
+  > reviews/spar-20260721-120000-abc123-r1.md
+printf '### F1-1: REJECTED — cohesive on purpose\n' \
+  > reviews/spar-20260721-120000-abc123-r1-response.md
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' \
+  > reviews/spar-20260721-120000-abc123-r2.md
+printf '### F2-1: REJECTED — still cohesive\n' \
+  > reviews/spar-20260721-120000-abc123-r2-response.md
+run_hook >/dev/null
+chk_file "unattended terminal → report generated" "$RPT"
+chk "report is honest about the blocked outcome" "outcome: blocked-pending-user" \
+  "$(cat "$RPT" 2>/dev/null)"
+chk "report lists the parked decision" "mod.py | split the module" "$(cat "$RPT" 2>/dev/null)"
+
+# R5. fail-open: a failing generator (symlinked report path) never traps the session
+fresh_dir; write_state review 1; mkdir -p reviews
+ln -s /dev/null "$RPT"
+converged_no_sweep
+OUT=$(run_hook)
+chk "failing generator → still approve" '"decision":"approve"' "$OUT"
+chk "failing generator → outcome still recorded" "reason: converged" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+chk "failing generator → still cleaned up" "gone" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
+
+# R6. fail-open: a missing generator never traps the session
+fresh_dir; write_state review 1; mkdir -p reviews
+FAKE_ROOT=$(mktemp -d)
+cp -R "$ROOT/plugins/spar/." "$FAKE_ROOT/"
+rm -f "$FAKE_ROOT/commands/spar-report.sh"
+converged_no_sweep
+OUT=$(CLAUDE_PLUGIN_ROOT="$FAKE_ROOT" bash "$HOOK" <<< '{}')
+chk "missing generator → still approve" '"decision":"approve"' "$OUT"
+chk "missing generator → outcome still recorded" "reason: converged" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+chk "missing generator → no report" "absent" "$([ -f "$RPT" ] && echo present || echo absent)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
