@@ -1044,5 +1044,57 @@ env -u CLAUDE_PLUGIN_ROOT bash "$HOOK" <<< '{}' >/dev/null
 chk "no plugin root → outcome still recorded" "reason: converged" \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
 
+# ── author family: the sweep must follow the AUTHOR, not always claude ──
+add_author() { # $1=value
+  sed -i '' "s/^reviewer: /author: $1\nreviewer: /" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^reviewer: /author: $1\nreviewer: /" .claude/spar.local.md
+}
+sweep_fixture() { # a converged round that triggers the sweep (3+ rounds does it)
+  fresh_dir; write_state review 3; mkdir -p reviews
+  printf 'STATUS: CONVERGED\n\nAll good.\n' > reviews/spar-20260721-120000-abc123-r3.md
+}
+chk_absent_hook() { # $1=unwanted $2=haystack $3=desc
+  if printf '%s' "$2" | grep -qF "$1"; then echo "FAIL: $3"; FAIL=$((FAIL+1))
+  else echo "PASS: $3"; PASS=$((PASS+1)); fi
+}
+
+# default (no author field) → claude sweep runner, exactly as today
+sweep_fixture
+run_hook >/dev/null
+chk "no author field → claude sweep runner" "claude -p --safe-mode" \
+  "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+
+# author: codex → codex sweep runner
+sweep_fixture; add_author codex
+run_hook >/dev/null
+chk "author codex → codex sweep runner" "codex exec" "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+chk "author codex → sweep stays read-only" "read-only" "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+# codex writes its own output file from inside the snapshot subshell, so the path
+# must be absolute — a relative $tmp would land in the throwaway snapshot.
+chk "author codex → absolute output path" 'output-last-message "$source_root/$tmp"' \
+  "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+chk_absent_hook "claude -p" "$(cat .claude/spar-run-sweep.sh 2>/dev/null)" \
+  "author codex → no claude in the sweep runner"
+
+# invalid author → internal-state error, fail open, never silently claude
+sweep_fixture; add_author bogus
+chk "invalid author → approve (fail open)" '"decision":"approve"' "$(run_hook)"
+chk "invalid author → error-bypass outcome" "reason: error-bypass" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+
+# the cross-model notice must key off the pairing, not the reviewer alone
+fresh_dir; write_state task 0; mkdir -p reviews; add_author codex
+sed -i '' 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md
+OUT=$(run_hook)
+chk_absent_hook "same-model review" "$OUT" \
+  "codex author + claude reviewer → not called same-model"
+
+# and a genuinely same-family pairing still gets the notice
+fresh_dir; write_state task 0; mkdir -p reviews; add_author claude
+sed -i '' 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md
+chk "claude author + claude reviewer → same-model notice" "same-model review" "$(run_hook)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

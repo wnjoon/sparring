@@ -165,6 +165,15 @@ case "$UNATTENDED" in
   true) ;;
   *) log "invalid unattended: $UNATTENDED"; finish_approve error-bypass;;
 esac
+# Which family occupies the AUTHOR seat. The final sweep is a fresh author-family
+# instance (policy §Protocol 8), so it must follow this rather than the reviewer.
+# Absent → claude, which is every pre-existing run: the Claude-hosted adapter.
+AUTHOR=$(field author)
+case "$AUTHOR" in
+  ''|claude) AUTHOR=claude ;;
+  codex) ;;
+  *) log "invalid author: $AUTHOR"; finish_approve error-bypass ;;
+esac
 case "$SWEEP_DONE" in ''|false) SWEEP_DONE=false;; true) ;; *)
   log "invalid sweep_done: $SWEEP_DONE"; finish_approve error-bypass;;
 esac
@@ -447,14 +456,27 @@ EOF
   chmod +x "$runner"
 }
 
-emit_sweep_runner() { # fresh author-family Claude, always read-only
+emit_sweep_runner() { # fresh author-family instance, always read-only
   local out; out=$(sweep_file)
+  # The generated runner receives this verbatim. Single quotes keep $snapshot,
+  # $tmp and $source_root as literal text for the runner's own runtime.
+  # The two CLIs differ in how they deliver output: claude writes stdout, so the
+  # redirect sits OUTSIDE the (cd "$snapshot" …) subshell and a relative $tmp
+  # resolves against the original cwd; codex writes the file itself via
+  # --output-last-message, evaluated INSIDE the subshell after the cd, so that
+  # path must be absolute or the result lands in the throwaway snapshot.
+  local sweep_invoke
+  if [ "$AUTHOR" = codex ]; then
+    sweep_invoke='(cd "$snapshot" && codex exec --sandbox read-only --skip-git-repo-check --output-last-message "$source_root/$tmp")'
+  else
+    sweep_invoke='(cd "$snapshot" && claude -p --safe-mode --tools Read Grep Glob) > "$tmp"'
+  fi
   { echo "# Changes under closure sweep (git diff ${BASE}):"; git diff "${BASE}" 2>/dev/null;
     echo; echo "# Untracked files:"; git status --porcelain --untracked-files=all 2>/dev/null; } \
     > "$DIFF_SURFACE_FILE"
   cat > "$SWEEP_RUNNER" <<EOF
 #!/usr/bin/env bash
-# sparring final sweep — fresh Claude author-family instance (generated)
+# sparring final sweep — fresh author-family instance (generated)
 set -uo pipefail
 if [ -e reviews ] || [ -L reviews ]; then
   [ -d reviews ] && [ ! -L reviews ] || exit 1
@@ -502,7 +524,7 @@ while IFS= read -r -d '' path; do
 done < "\$manifest"
 
 { cat "\$source_root/${SWEEP_PROMPT_FILE}"; echo; echo '--- Changes under sweep ---'; cat "\$source_root/${DIFF_SURFACE_FILE}"; } | \\
-  (cd "\$snapshot" && claude -p --safe-mode --tools Read Grep Glob) > "\$tmp"
+  ${sweep_invoke}
 [ -s "\$tmp" ] || exit 1
 ln "\$tmp" "${out}" || exit 1
 EOF
@@ -841,8 +863,8 @@ reviewer convergence judgment." \
     set_state review 1
     rm -f "$RETRY_FILE"
     NOTE=""
-    [ "$REVIEWER" = "claude" ] && NOTE="
-NOTE: same-model review — reduced cross-vendor blind-spot coverage. Install the Codex CLI for cross-model review."
+    [ "$REVIEWER" = "$AUTHOR" ] && NOTE="
+NOTE: same-model review — reduced cross-vendor blind-spot coverage. Install the other vendor's CLI for cross-model review."
     block "Implementation phase done. Round 1 independent review is required.
 
 Run (use a 600000ms timeout — reviews take minutes):
@@ -891,8 +913,8 @@ bash ${RUNNER}
       if [ "$SWEEP_DONE" = true ]; then
         log "converged at round $ROUND after sweep"; finish_approve converged "$SWEEP_RESULT"
       elif should_sweep; then
-        command -v claude >/dev/null 2>&1 \
-          || { log "author-family CLI not found for sweep"; finish_approve error-bypass error; }
+        command -v "$AUTHOR" >/dev/null 2>&1 \
+          || { log "author-family CLI not found for sweep: $AUTHOR"; finish_approve error-bypass error; }
         set_sweep_state true pending
         set_state sweep "$ROUND"
         prepare_sweep
