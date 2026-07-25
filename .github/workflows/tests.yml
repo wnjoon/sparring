@@ -1,0 +1,65 @@
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  suites:
+    name: suites (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # The suites are pure bash. They need git, jq and the standard POSIX
+      # tools — and deliberately no-reviewer-cli: no codex, no claude. The hook
+      # only checks that the CLI exists, and the stop-hook suite provides its
+      # own stubs, so CI never installs or calls a model CLI.
+      - name: Check prerequisites
+        run: |
+          set -eu
+          for tool in bash git jq awk sed; do
+            command -v "$tool" >/dev/null 2>&1 || { echo "missing required tool: $tool"; exit 1; }
+          done
+          bash --version | head -1
+          jq --version
+
+      # The tests create their own repositories under mktemp, and some commit,
+      # so git needs an identity on a fresh runner.
+      - name: Configure git identity
+        run: |
+          git config --global user.email sparring@example.invalid
+          git config --global user.name sparring-ci
+
+      - name: Syntax-check every script
+        run: |
+          set -eu
+          rc=0
+          for f in plugins/spar/hooks/*.sh plugins/spar/commands/*.sh tests/test_*.sh; do
+            bash -n "$f" || { echo "SYNTAX: $f"; rc=1; }
+          done
+          [ "$rc" -eq 0 ] || exit 1
+
+      - name: Run every suite
+        run: |
+          set -u
+          rc=0
+          for t in tests/test_*.sh; do
+            echo "::group::$t"
+            if bash "$t"; then
+              echo "OK   $t"
+            else
+              echo "FAIL $t"
+              rc=1
+            fi
+            echo "::endgroup::"
+          done
+          [ "$rc" -eq 0 ] || exit 1

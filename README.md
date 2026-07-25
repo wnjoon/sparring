@@ -152,6 +152,7 @@ bench/                   effect benchmark (living report + tasks/oracles)
 ## Development
 
 - `main` — releases only. `dev` — integration. `task/<n>-<name>` — one branch per plan task, merged into `dev`.
+- Tests are pure bash: `bash tests/test_<name>.sh`, or all of them with `for t in tests/test_*.sh; do bash "$t"; done`. CI ([.github/workflows/tests.yml](.github/workflows/tests.yml)) runs every suite on Linux and macOS for each push and pull request — no reviewer CLI required, since the suites stub it.
 - The plan is the spec: [docs/superpowers/plans/](docs/superpowers/plans/). This README is updated in the same change whenever implementation diverges from it.
 - Decisions agreed for phases not yet implemented live in [docs/design-decisions.md](docs/design-decisions.md) — each phase's plan document starts from its section there.
 
