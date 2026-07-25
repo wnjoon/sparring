@@ -85,6 +85,68 @@ esac
 sweep=$(field sweep "$OUTCOME"); [ -n "$sweep" ] || sweep=$(field sweep_result "$STATE")
 case "$sweep" in not-run|not-triggered|pending|clean|findings|error) ;; *) sweep=not-run ;; esac
 
+# ── findings tally ──────────────────────────────────────────────────────────
+# Independent lightweight parse of the same heading contract stop-hook.sh uses.
+# The report is best-effort, so it never sources the hook.
+count_findings() { # $1=review file → "raised<TAB>mechanical<TAB>design"
+  awk '
+    /^### F[0-9]+-[0-9]+/ {
+      r++
+      if (/\[MECHANICAL\]/) m++
+      else if (/\[DESIGN\]/) d++
+    }
+    END { printf "%d\t%d\t%d\n", r+0, m+0, d+0 }
+  ' "$1" 2>/dev/null
+}
+
+count_responses() { # $1=response file → "fixed<TAB>rejected"
+  [ -f "$1" ] || { printf '0\t0\n'; return 0; }
+  awk '
+    /^### F[0-9]+-[0-9]+:/ {
+      if (/:[ ]*FIXED/) f++
+      else if (/:[ ]*REJECTED/) x++
+    }
+    END { printf "%d\t%d\n", f+0, x+0 }
+  ' "$1" 2>/dev/null
+}
+
+# Round numbers that actually have a review file, numerically sorted. The glob
+# excludes "-r<N>-response.md" (its suffix is not numeric) and any set-aside
+# ".invalid-<n>" file (it does not end in .md).
+round_numbers() {
+  local f n nums=""
+  for f in "${rev_dir}/spar-${review_id}-r"*.md; do
+    [ -f "$f" ] || continue
+    n=${f##*-r}; n=${n%.md}
+    case "$n" in ''|*[!0-9]*) continue ;; esac
+    nums="${nums}${n}
+"
+  done
+  [ -n "$nums" ] || return 0
+  printf '%s' "$nums" | sort -n
+}
+
+tot_raised=0; tot_mech=0; tot_design=0; tot_fixed=0; tot_rej=0
+round_lines=""
+while IFS= read -r n; do
+  [ -n "$n" ] || continue
+  IFS=$'\t' read -r r m d <<EOF
+$(count_findings "${rev_dir}/spar-${review_id}-r${n}.md")
+EOF
+  IFS=$'\t' read -r f x <<EOF
+$(count_responses "${rev_dir}/spar-${review_id}-r${n}-response.md")
+EOF
+  tot_raised=$((tot_raised + r)); tot_mech=$((tot_mech + m)); tot_design=$((tot_design + d))
+  tot_fixed=$((tot_fixed + f)); tot_rej=$((tot_rej + x))
+  [ "$r" -gt 0 ] || continue
+  round_lines="${round_lines}- round ${n}: raised ${r}, fixed ${f}, rejected ${x}
+"
+done <<EOF
+$(round_numbers)
+EOF
+tot_unanswered=$((tot_raised - tot_fixed - tot_rej))
+[ "$tot_unanswered" -ge 0 ] || tot_unanswered=0
+
 # ── change surface ──────────────────────────────────────────────────────────
 changed_files() {
   command -v git >/dev/null 2>&1 || { echo "(git unavailable)"; return 0; }
@@ -196,6 +258,21 @@ trap 'rm -f "$tmp"' EXIT
   echo "- sweep: ${sweep}"
   echo "- base_sha: ${base}"
   echo "- generated_at: $(date -u +%FT%TZ)"
+  echo
+  echo "## Findings"
+  echo
+  echo "- raised: ${tot_raised} (MECHANICAL ${tot_mech}, DESIGN ${tot_design})"
+  echo "- fixed: ${tot_fixed}"
+  echo "- rejected: ${tot_rej}"
+  echo "- unanswered: ${tot_unanswered}"
+  echo
+  if [ -n "$round_lines" ]; then
+    echo "Per round:"
+    echo
+    printf '%s' "$round_lines"
+  else
+    echo "No findings were raised."
+  fi
   echo
   echo "## Changed files"
   echo

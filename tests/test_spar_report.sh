@@ -265,4 +265,63 @@ chk_absent "outcome filtered" "outcome.md" "$OUT"
 chk_absent "report filtered" "report.md" "$OUT"
 chk_absent "temp file filtered" ".spar-report-" "$OUT"
 
+# ── 17. findings tally across rounds ──
+fresh; outcome converged 2 codex not-triggered; state 2 codex not-triggered
+{
+  printf 'STATUS: FINDINGS\n\n'
+  printf '### F1-1 [MECHANICAL] off-by-one in the paginator\n- file: page.py:10\n- problem: last page dropped\n- suggestion: use <=\n\n'
+  printf '### F1-2 [DESIGN] split the module\n- file: mod.py:3\n- problem: two responsibilities\n- suggestion: split\n\n'
+  printf '### F1-3 [MECHANICAL] missing test for empty input\n- file: page.py:40\n- problem: untested\n- suggestion: add a test\n'
+} > "reviews/spar-${ID}-r1.md"
+{
+  printf '### F1-1: FIXED — use <= in the bound check\n'
+  printf '### F1-2: REJECTED — cohesive on purpose\n'
+  printf '### F1-3: FIXED — added the empty-input test\n'
+} > "reviews/spar-${ID}-r1-response.md"
+{
+  printf 'STATUS: FINDINGS\n\n'
+  printf '### F2-1 [MECHANICAL] stale docstring\n- file: page.py:8\n- problem: says 1-indexed\n- suggestion: fix the wording\n'
+} > "reviews/spar-${ID}-r2.md"
+printf '### F2-1: FIXED — docstring corrected\n' > "reviews/spar-${ID}-r2-response.md"
+bash "$GEN" "$ID" none >/dev/null 2>&1
+OUT="$(cat "$R")"
+chk "findings section present" "## Findings" "$OUT"
+chk "total raised with tag split" "- raised: 4 (MECHANICAL 3, DESIGN 1)" "$OUT"
+chk "total fixed" "- fixed: 3" "$OUT"
+chk "total rejected" "- rejected: 1" "$OUT"
+chk "nothing unanswered" "- unanswered: 0" "$OUT"
+chk "per-round line for round 1" "- round 1: raised 3, fixed 2, rejected 1" "$OUT"
+chk "per-round line for round 2" "- round 2: raised 1, fixed 1, rejected 0" "$OUT"
+chk "findings precede changed files" "## Findings" "$(sed -n '/## Findings/,/## Changed files/p' "$R")"
+
+# ── 18. a round with no response file → counted as unanswered, never crashed ──
+fresh; outcome cap 1 codex not-run; state 1 codex not-run
+{
+  printf 'STATUS: FINDINGS\n\n'
+  printf '### F1-1 [DESIGN] rename the flag\n- file: cli.py:2\n- problem: unclear\n- suggestion: rename\n'
+} > "reviews/spar-${ID}-r1.md"
+bash "$GEN" "$ID" none >/dev/null 2>&1
+OUT="$(cat "$R")"
+chk "unanswered finding counted" "- unanswered: 1" "$OUT"
+chk "unanswered round line" "- round 1: raised 1, fixed 0, rejected 0" "$OUT"
+
+# ── 19. converged run with zero findings → explicit none line, no round list ──
+fresh; outcome converged 1 codex not-triggered; state 1 codex not-triggered
+printf 'STATUS: CONVERGED\n\nNothing to raise.\n' > "reviews/spar-${ID}-r1.md"
+bash "$GEN" "$ID" none >/dev/null 2>&1
+OUT="$(cat "$R")"
+chk "zero findings raised" "- raised: 0 (MECHANICAL 0, DESIGN 0)" "$OUT"
+chk "no findings note" "No findings were raised." "$OUT"
+
+# ── 20. rounds beyond 9 sort numerically, not lexicographically ──
+fresh; outcome cap 10 codex not-run; state 10 codex not-run
+for n in 2 10; do
+  printf 'STATUS: FINDINGS\n\n### F%s-1 [MECHANICAL] t%s\n- file: a.py:1\n- problem: p\n- suggestion: s\n' "$n" "$n" \
+    > "reviews/spar-${ID}-r${n}.md"
+  printf '### F%s-1: FIXED — done\n' "$n" > "reviews/spar-${ID}-r${n}-response.md"
+done
+bash "$GEN" "$ID" none >/dev/null 2>&1
+chk "round 2 listed before round 10" "- round 2: raised 1, fixed 1, rejected 0
+- round 10: raised 1, fixed 1, rejected 0" "$(cat "$R")"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
