@@ -324,4 +324,75 @@ bash "$GEN" "$ID" none >/dev/null 2>&1
 chk "round 2 listed before round 10" "- round 2: raised 1, fixed 1, rejected 0
 - round 10: raised 1, fixed 1, rejected 0" "$(cat "$R")"
 
+# ── 21. judge rulings, ledger decisions, parked items, sweep findings ──
+fresh; outcome converged 3 codex findings; state 3 codex findings
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] null deref\n- file: mod.py:4\n- problem: p\n- suggestion: s\n' \
+  > "reviews/spar-${ID}-r1.md"
+printf '### F1-1: FIXED — guarded\n' > "reviews/spar-${ID}-r1-response.md"
+printf 'RULING: UPHELD\nIt is a real defect.\n' > "reviews/spar-${ID}-judge-1.md"
+printf 'RULING: DISMISSED\nNot a defect.\n' > "reviews/spar-${ID}-judge-2.md"
+printf '%s\t%s\t%s\t%s\t%s\n' \
+  'mod.py | null deref' MECHANICAL 2 2 upheld \
+  > .claude/spar-registry.tsv
+printf '%s\t%s\t%s\t%s\t%s\n' \
+  'page.py | inline the helper' MECHANICAL 2 2 dismissed \
+  >> .claude/spar-registry.tsv
+printf '%s\t%s\t%s\t%s\t%s\n' \
+  'cli.py | rename the flag' DESIGN 3 2 settled \
+  >> .claude/spar-registry.tsv
+printf '%s\t%s\t%s\t%s\t%s\n' \
+  'mod.py | split the module' DESIGN 3 2 parked \
+  >> .claude/spar-registry.tsv
+{
+  printf '# decisions\n\n'
+  printf '### P1: keep the flag name — the CLI is published and renaming breaks callers\n'
+  printf 'Basis: the flag appears in the released docs.\n'
+} > .claude/spar-ledger.md
+{
+  printf 'SWEEP: FINDINGS\n\n'
+  printf '### S-1 [MECHANICAL] missing test for empty input\n- file: page.py:40\n- problem: untested\n- suggestion: add a test\n'
+} > "reviews/spar-${ID}-sweep.md"
+bash "$GEN" "$ID" none >/dev/null 2>&1
+OUT="$(cat "$R")"
+chk "escalations section present" "## Escalations & decisions" "$OUT"
+chk "judge rulings heading" "### Judge rulings" "$OUT"
+chk "upheld ruling attributed" "- UPHELD — mod.py | null deref" "$OUT"
+chk "dismissed ruling attributed" "- DISMISSED — page.py | inline the helper" "$OUT"
+chk "settled decisions heading" "### Decisions you settled" "$OUT"
+chk "ledger decision demoted to h4" "#### P1: keep the flag name" "$OUT"
+chk "ledger basis carried verbatim" "Basis: the flag appears in the released docs." "$OUT"
+chk "pending heading" "### Pending design decisions" "$OUT"
+chk "parked item listed" "- parked (no decision recorded) — mod.py | split the module" "$OUT"
+chk "sweep heading" "### Sweep findings" "$OUT"
+chk "sweep status carried" "- SWEEP: FINDINGS" "$OUT"
+chk "sweep finding listed" "- S-1 [MECHANICAL] missing test for empty input" "$OUT"
+
+# ── 22. nothing escalated → explicit empty markers, never a blank section ──
+fresh; outcome converged 1 codex not-triggered; state 1 codex not-triggered
+printf 'STATUS: CONVERGED\n\nclean\n' > "reviews/spar-${ID}-r1.md"
+bash "$GEN" "$ID" none >/dev/null 2>&1
+OUT="$(cat "$R")"
+chk "no judge rulings marker" "- (no escalations)" "$OUT"
+chk "no ledger decisions marker" "- (none recorded)" "$OUT"
+chk "no pending items marker" "- (none)" "$OUT"
+chk "no sweep marker" "- (no sweep findings)" "$OUT"
+
+# ── 23. blocked-pending-user → parked items plus the durable-queue pointer ──
+fresh; outcome blocked-pending-user 2 codex not-run; state 2 codex not-run
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:3\n- problem: p\n- suggestion: s\n' \
+  > "reviews/spar-${ID}-r2.md"
+printf '%s\t%s\t%s\t%s\t%s\n' 'mod.py | split the module' DESIGN 2 2 parked \
+  > .claude/spar-registry.tsv
+bash "$GEN" "$ID" none >/dev/null 2>&1
+OUT="$(cat "$R")"
+chk "blocked outcome reported honestly" "- outcome: blocked-pending-user" "$OUT"
+chk "parked item listed" "- parked (no decision recorded) — mod.py | split the module" "$OUT"
+chk "queue pointer for the next session" "reviews/spar-pending.md" "$OUT"
+
+# ── 24. judge ruling with no registry attribution → still reported by file ──
+fresh; outcome converged 2 codex not-run; state 2 codex not-run
+printf 'RULING: UPHELD\nreal defect\n' > "reviews/spar-${ID}-judge-1.md"
+bash "$GEN" "$ID" none >/dev/null 2>&1
+chk "unattributed ruling from the judge file" "- UPHELD — (fingerprint unavailable)" "$(cat "$R")"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

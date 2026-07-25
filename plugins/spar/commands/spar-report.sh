@@ -147,6 +147,94 @@ EOF
 tot_unanswered=$((tot_raised - tot_fixed - tot_rej))
 [ "$tot_unanswered" -ge 0 ] || tot_unanswered=0
 
+# ── escalations & decisions ─────────────────────────────────────────────────
+# The registry and ledger only exist before stop-hook.sh's cleanup(), which is
+# exactly why generation runs at the terminal path.
+registry_by_status() { # $1=status → one fingerprint per line
+  [ -f "$REGISTRY" ] || return 0
+  awk -F'\t' -v s="$1" '$5==s {print $1}' "$REGISTRY" 2>/dev/null
+}
+
+judge_lines() {
+  local fp out=""
+  while IFS= read -r fp; do
+    [ -n "$fp" ] || continue
+    out="${out}- UPHELD — ${fp}
+"
+  done <<EOF
+$(registry_by_status upheld)
+EOF
+  while IFS= read -r fp; do
+    [ -n "$fp" ] || continue
+    out="${out}- DISMISSED — ${fp}
+"
+  done <<EOF
+$(registry_by_status dismissed)
+EOF
+  while IFS= read -r fp; do
+    [ -n "$fp" ] || continue
+    out="${out}- ESCALATED to the user (judge unavailable) — ${fp}
+"
+  done <<EOF
+$(registry_by_status escalated)
+EOF
+  # Fall back to the judge files when the registry carries no attribution (a
+  # ruling file always exists per dispatch, the registry may be gone or stale).
+  if [ -z "$out" ]; then
+    local jf line
+    for jf in "${rev_dir}/spar-${review_id}-judge-"*.md; do
+      [ -f "$jf" ] || continue
+      line=$(head -1 "$jf" | tr -d '\r' | sed 's/[[:space:]]*$//')
+      case "$line" in
+        "RULING: UPHELD")    out="${out}- UPHELD — (fingerprint unavailable)
+" ;;
+        "RULING: DISMISSED") out="${out}- DISMISSED — (fingerprint unavailable)
+" ;;
+      esac
+    done
+  fi
+  printf '%s' "$out"
+}
+
+# Ledger sections verbatim, with '### P<k>:' demoted to '#### P<k>:' so the
+# report keeps one heading hierarchy. Everything else is copied untouched.
+ledger_lines() {
+  [ -f "$LEDGER" ] || return 0
+  awk '
+    /^### P[0-9]+:/ { inside=1; sub(/^### /, "#### "); print; next }
+    /^#/ && !/^#### P[0-9]+:/ { if (inside) inside=0 }
+    inside { print }
+  ' "$LEDGER" 2>/dev/null
+}
+
+pending_lines() {
+  local fp out=""
+  while IFS= read -r fp; do
+    [ -n "$fp" ] || continue
+    out="${out}- parked (no decision recorded) — ${fp}
+"
+  done <<EOF
+$(registry_by_status parked)
+EOF
+  printf '%s' "$out"
+}
+
+sweep_lines() {
+  [ -f "$SWEEP" ] || return 0
+  local first
+  first=$(head -1 "$SWEEP" | tr -d '\r' | sed 's/[[:space:]]*$//')
+  case "$first" in
+    "SWEEP: CLEAN"|"SWEEP: FINDINGS") echo "- ${first}" ;;
+    *) echo "- (sweep output unreadable)" ;;
+  esac
+  awk '/^### S-[0-9]+/ { sub(/^### /, "- "); print }' "$SWEEP" 2>/dev/null
+}
+
+JUDGE_OUT=$(judge_lines)
+LEDGER_OUT=$(ledger_lines)
+PENDING_OUT=$(pending_lines)
+SWEEP_OUT=$(sweep_lines)
+
 # ── change surface ──────────────────────────────────────────────────────────
 changed_files() {
   command -v git >/dev/null 2>&1 || { echo "(git unavailable)"; return 0; }
@@ -273,6 +361,29 @@ trap 'rm -f "$tmp"' EXIT
   else
     echo "No findings were raised."
   fi
+  echo
+  echo "## Escalations & decisions"
+  echo
+  echo "### Judge rulings"
+  echo
+  if [ -n "$JUDGE_OUT" ]; then printf '%s\n' "$JUDGE_OUT"; else echo "- (no escalations)"; fi
+  echo
+  echo "### Decisions you settled"
+  echo
+  if [ -n "$LEDGER_OUT" ]; then printf '%s\n' "$LEDGER_OUT"; else echo "- (none recorded)"; fi
+  echo
+  echo "### Pending design decisions"
+  echo
+  if [ -n "$PENDING_OUT" ]; then printf '%s\n' "$PENDING_OUT"; else echo "- (none)"; fi
+  if [ "$reason" = blocked-pending-user ]; then
+    echo
+    echo "This run stopped on an essential design decision, so the work is INCOMPLETE."
+    echo "The pending item(s) are queued for the next session in \`reviews/spar-pending.md\`."
+  fi
+  echo
+  echo "### Sweep findings"
+  echo
+  if [ -n "$SWEEP_OUT" ]; then printf '%s\n' "$SWEEP_OUT"; else echo "- (no sweep findings)"; fi
   echo
   echo "## Changed files"
   echo
