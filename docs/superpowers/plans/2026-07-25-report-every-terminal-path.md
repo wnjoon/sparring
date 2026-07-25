@@ -242,7 +242,7 @@ Every doc that scopes the report to `converged`, or still calls Phase 5 unimplem
 
 **Interfaces:** documentation only. No code, no tests. The claims below must match Task 1's behavior exactly: a report is written for `converged`, `blocked-pending-user`, `cap`, `sweep-findings-at-cap`, and `skipped`; `cancelled` has none.
 
-- [ ] **Step 1: Update `policy.md`**
+- [x] **Step 1: Update `policy.md`**
 
 In `plugins/spar/shared/policy.md` §Protocol, replace item 10's opening:
 
@@ -285,7 +285,7 @@ Phase 6: Codex-hosted adapter (git pre-commit enforcement). Phase 7: model
 economics (reviewer/effort config, tiered fix writers).
 ```
 
-- [ ] **Step 2: Update `README.md`**
+- [x] **Step 2: Update `README.md`**
 
 Replace the implemented-phases sentence:
 
@@ -323,7 +323,7 @@ with:
 Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) lands next. Phases 6–7 (the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 ```
 
-- [ ] **Step 3: Update the `fight.md` hint**
+- [x] **Step 3: Update the `fight.md` hint**
 
 In `plugins/spar/commands/fight.md`, replace:
 
@@ -341,7 +341,7 @@ with:
      you report an unconverged result honestly.
 ```
 
-- [ ] **Step 4: Update the report spec**
+- [x] **Step 4: Update the report spec**
 
 In `docs/superpowers/specs/2026-07-24-spar-report-design.md`, replace the §Scope first bullet:
 
@@ -396,7 +396,7 @@ deferred — it needs the plan state to retain a review id per task, which is a
 separate contract change.
 ```
 
-- [ ] **Step 5: Update `docs/design-decisions.md`**
+- [x] **Step 5: Update `docs/design-decisions.md`**
 
 In §"Phase 5 — unattended + final report", replace:
 
@@ -428,7 +428,7 @@ with:
   `/spar:fight` plan-wide roll-up (needs a per-task review id in the plan state).
 ```
 
-- [ ] **Step 6: Mark the superseded plan honestly**
+- [x] **Step 6: Mark the superseded plan honestly**
 
 `docs/superpowers/plans/2026-07-25-spar-report.md` still shows all 35 steps unchecked even though its Task 1 shipped — its fight ended at the round cap, so nothing checked the boxes. Insert this note directly beneath that document's `**Goal:**` line:
 
@@ -440,7 +440,7 @@ with:
 > which completed. This file is kept as the historical record of Task 1's design.
 ```
 
-- [ ] **Step 7: Verify no stale claim is left**
+- [x] **Step 7: Verify no stale claim is left**
 
 ```bash
 grep -rn 'converged run\|Phases 1–4\|planned P5' README.md docs plugins | grep -v 'docs/superpowers/plans/'
@@ -449,7 +449,7 @@ for t in tests/test_*.sh; do bash "$t" >/dev/null 2>&1 || echo "FAILED: $t"; don
 ```
 Expected: the first two greps print nothing (or only the intentional rename note), and no suite reports `FAILED`. Docs-only changes must not affect tests — if one fails, a doc string a test asserts on was changed; fix the doc wording rather than the test unless the test's expectation is itself now wrong.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add plugins/spar/shared/policy.md README.md plugins/spar/commands/fight.md \

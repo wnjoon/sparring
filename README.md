@@ -72,19 +72,26 @@ Everything below runs today, except the steps tagged `(planned Pn)`. `/spar:read
       ├─ STATUS: FINDINGS
       │    ├─ [MECHANICAL] → author fixes immediately, no questions asked
       │    ├─ [DESIGN]     → debate-first; parked, then batched at the gate
+      │    │                 (unattended: no gate → blocked-pending-user exit)
       │    ├─ stalemate (2 rounds on the same finding)
       │    │    ├─ factual → blind judge (code + finding, never the
       │    │    │            debate); UPHELD / DISMISSED is binding
       │    │    └─ design  → batched user gate + decision ledger at loop end
-      │    └─ author writes a per-finding response → round N+1 (cap: 5)
+      │    ├─ author writes a per-finding response → round N+1
+      │    └─ round cap (5) with no convergence → cap exit
       │
       └─ STATUS: CONVERGED
               ├─ risky repo/path · 3+ rounds · design finding?
-              │    → final sweep: fresh blind Claude subagent
-              │      re-verifies diff + requirements → clean ? exit : round N+1
-              ├─ otherwise → exit
-              └─ detailed final report → reviews/spar-<id>-report.md
-                 (show it with /spar:report)
+              │    → final sweep: fresh blind Claude subagent re-verifies
+              │      diff + requirements
+              │        ├─ clean            → converged exit
+              │        └─ findings at cap  → sweep-findings-at-cap exit
+              └─ otherwise → converged exit
+
+  every exit above — converged · blocked-pending-user · cap ·
+  sweep-findings-at-cap · skipped — writes the detailed final report
+  to reviews/spar-<id>-report.md, shown by /spar:report.
+  An internal-error bypass or an explicit /spar:cancel writes none.
 ```
 
 The reviewer / judge / matcher run as **Codex** (`codex exec --sandbox read-only`, the default cross-model setup) or **Claude** (`claude -p`, read-only + isolated — single-agent mode); the protocol and invariants are identical either way.
