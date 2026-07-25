@@ -16,7 +16,7 @@ Phases 1–5 and 8 are implemented; the core loop is verified end-to-end against
 - **single-agent mode** — auto-detects the reviewer (Codex if installed → cross-model, the recommended default; otherwise Claude), so `/spar:fight` works with no second vendor. `--reviewer codex|claude` overrides;
 - a reported **safe skip** for changes no larger than 10 lines / 2 paths when no risky path or unsafe change kind is touched;
 - changed-surface **design-intent pointers** on every fresh review;
-- a once-only, fresh Claude **final sweep** after risky, long, or design-bearing loops;
+- a once-only, fresh author-family **final sweep** after risky, long, or design-bearing loops;
 - a **final run report** — converged or not, a finished run writes `reviews/spar-<id>-report.md` (`cap`, `sweep-findings-at-cap`, `skipped`, and unattended `blocked-pending-user` included; an internal-error bypass or an explicit `/spar:cancel` writes none): outcome, rounds, reviewer pairing, sweep result, findings tally, judge rulings, your settled design decisions, anything still pending, and the changed files. `/spar:report [id]` shows it (defaults to the latest run).
 
 <br>

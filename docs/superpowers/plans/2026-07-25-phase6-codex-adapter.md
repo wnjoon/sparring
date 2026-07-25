@@ -625,6 +625,13 @@ The author seat needs its command surface as Codex skills, and activation must r
 - Modify: `tests/test_session_start.sh`, `tests/test_codex_adapter.sh`
 - Modify: `README.md` (seat table: Codex column becomes real), `docs/design-decisions.md` (§Phase 6 → implemented)
 
+**Already done in Task 2** (the sweep's family resolution created the drift, so it
+was corrected there rather than left for this pass): `policy.md` §Protocol 8 and
+`README.md`'s feature bullet no longer call the sweep a *Claude* instance, and
+`spar-report.sh` now derives the pairing label from both seats instead of assuming
+a claude author — otherwise a codex↔codex run would have been reported as
+cross-model. `tests/test_spar_report.sh` covers all four pairings.
+
 **Interfaces:**
 - Consumes: `install.sh` (Task 4), the `author` and `owner_session` fields (Tasks 2-3).
 - Produces: marker file `reviews/.spar-hook-live` containing the current `session_id`, written by `session-start.sh` on every session start; the skills' activation step requires it and writes `author: codex` plus `owner_session: <id>` into the state file.

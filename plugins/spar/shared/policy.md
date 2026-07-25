@@ -69,7 +69,7 @@ gatekeeper implementation.
    keeps raising it, bounded by the round cap).
 8. After reviewer convergence, a final sweep fires for a risky touched
    surface or risky repository, 3+ reviewer rounds, or any reviewer design
-   finding. It is one fresh, read-only Claude author-family instance, blind to
+   finding. It is one fresh, read-only author-family instance, blind to
    the ledger and all loop history but allowed repository intent pointers.
    It uses `SWEEP: CLEAN|FINDINGS`, never `STATUS: CONVERGED`, and runs at
    most once. The sweep itself is not a reviewer round. Findings below the cap

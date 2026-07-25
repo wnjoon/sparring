@@ -74,6 +74,30 @@ fresh; outcome converged 2 claude not-triggered; state 2 claude not-triggered
 bash "$GEN" "$ID" none >/dev/null 2>&1
 chk "claude → same-model pairing" "- reviewer: claude — same-model" "$(cat "$R")"
 
+# ── 2b. the pairing follows BOTH seats, not the reviewer alone ──
+# Hardcoding "claude author" inverted the label once a Codex author seat existed:
+# a codex↔codex loop would have been reported as cross-model.
+author_outcome() { # $1=author $2=reviewer
+  printf -- '---\nreason: converged\nreview_id: %s\nrounds: 1\nreviewer: %s\nauthor: %s\nsweep: not-run\n---\n' \
+    "$ID" "$2" "$1" > "reviews/spar-${ID}-outcome.md"
+}
+fresh; author_outcome codex codex
+bash "$GEN" "$ID" none >/dev/null 2>&1
+chk "codex author + codex reviewer → same-model" "- reviewer: codex — same-model (codex author ↔ codex reviewer)" "$(cat "$R")"
+
+fresh; author_outcome codex claude
+bash "$GEN" "$ID" none >/dev/null 2>&1
+chk "codex author + claude reviewer → cross-model" "- reviewer: claude — cross-model (codex author ↔ claude reviewer)" "$(cat "$R")"
+
+fresh; author_outcome claude codex
+bash "$GEN" "$ID" none >/dev/null 2>&1
+chk "claude author + codex reviewer → cross-model" "- reviewer: codex — cross-model (claude author ↔ codex reviewer)" "$(cat "$R")"
+
+# an unknown author is never silently treated as claude
+fresh; author_outcome bogus codex
+bash "$GEN" "$ID" none >/dev/null 2>&1
+chk "unknown author → unknown pairing" "unknown pairing" "$(cat "$R")"
+
 # ── 3. no outcome file → falls back to the state file, reason unknown ──
 fresh; state 4 codex findings
 bash "$GEN" "$ID" none >/dev/null 2>&1
