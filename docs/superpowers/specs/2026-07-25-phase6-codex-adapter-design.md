@@ -89,11 +89,11 @@ scripts on the same two events, and adds:
 | `adapters/codex/skills/spar-ready/SKILL.md`, `spar-cancel`, `spar-report` | The rest of the command surface, mirroring `plugins/spar/commands/*.md` |
 | `adapters/codex/install.sh` | Idempotent installer: places the skills and merges the hook registration, never clobbering an existing `hooks.json` |
 
-### 2.1 Four shared-hook changes the Codex seat requires
+### 2.1 Three shared-hook changes the Codex seat requires
 
-The first draft claimed the engine needed no changes. That was wrong. Each item
-below is small, keeps Claude-side behavior identical, and is covered by new tests
-(§7).
+The first draft claimed the engine needed no changes. That was wrong. Items (a)-(c)
+are each small, keep Claude-side behavior identical, and are covered by new tests
+(§7); (d) is recorded as a retraction so the mistake is not re-made.
 
 **(a) The sweep is hardcoded to `claude`, not family-resolved.**
 `emit_sweep_runner` calls `claude -p --safe-mode` (`stop-hook.sh:495`) and the
@@ -127,16 +127,22 @@ Claude-side loop would pull it into that run and advance the state machine.
 approves immediately when the current session is not the owner. On the Claude
 side the field is absent → no behavior change.
 
-**(d) The `.codex` enforcement path is not classified as risky.**
-`spar-classify-change.sh:66` marks `*/.claude/hooks/*`, `*/.git/hooks/*`,
-`*/.husky/*`, `*/hooks.json/*`, `*stop-hook*`, `*pre-commit*` as risky. A change to
-`.codex/hooks.json` matches none of them, so editing the enforcement registration
-itself could be classified small-and-safe and skip review entirely
-(`stop-hook.sh:810-823`). **Decision:** add `.codex/hooks.json` and
-`.codex/hooks/*` to the risky set. Note for the implementer: `*/hooks.json/*`
-looks malformed (it matches a *directory* named `hooks.json`, and repo-relative
-paths have no leading segment), so verify how paths reach that `case` before
-extending it — the existing Claude patterns may have the same gap.
+**(d) Risky-path coverage for `.codex` — already sufficient, no change needed.**
+The cross-review reported that `spar-classify-change.sh:66` misses
+`.codex/hooks.json`, and this spec's first revision accepted it. **That was wrong,
+and so was the adjudication that confirmed it** — both re-implemented the `case`
+without the slash-wrapping the script applies (`spar-classify-change.sh:52`:
+`lower="/$path/"`), which changes what the patterns match. Measured with the real
+classifier: a change touching `.codex/hooks.json` reports
+`touched_risk: true, touched_reasons: hooks-enforcement` via the existing
+`*/hooks.json/*` pattern, which is correctly written for the wrapped form, not
+malformed. The enforcement registration is therefore already protected from the
+safe-skip path.
+
+The one genuine gap is `.codex/hooks/*` — a *directory* of hook scripts is not
+matched — but this design puts no scripts there: only `hooks.json` lands in
+`.codex/`, and the scripts stay in the plugin directory. Optional hardening at
+most; out of scope.
 
 ### 2.2 Seat mapping
 
@@ -280,8 +286,7 @@ until then — never claiming coverage it has not observed.
   Codex-specific additions" is retracted, since §2.1 changes the engine:
   author-family sweep selection (`author: codex` → codex runner; absent → claude,
   unchanged); self-location when `CLAUDE_PLUGIN_ROOT` is unset (must not silently
-  approve without an outcome); owner-session mismatch → immediate approve; and
-  `.codex/hooks.json` classified risky in `tests/test_classify_change.sh`.
+  approve without an outcome); and owner-session mismatch → immediate approve.
 - **Spike note** `docs/superpowers/notes/codex-hooks-spike.md` — written alongside
   this spec, with the reproduction, so §1 stays auditable when Codex changes.
 - **Manual end-to-end once:** a planted-bug task authored by Codex, reviewed by
@@ -298,7 +303,7 @@ until then — never claiming coverage it has not observed.
   `author` exists, but is not designed or tested here.
 - **Shipping the adapter through a Codex plugin.** Impossible today —
   `plugin_hooks` is removed.
-- **Broad Claude-side change.** The four engine changes in §2.1 are the entire
+- **Broad Claude-side change.** The three engine changes in §2.1 are the entire
   permitted surface, each defaults to today's behavior, and all 19 suites must stay
   green.
 
@@ -321,9 +326,12 @@ returned **conditional agreement on §2 and §4 and full agreement on §5**, and
 independently found the same high-severity error: the draft registered
 `stop-hook.sh` rather than `stop-fight.sh`, which would have dropped plan mode from
 the Codex seat. Both also found the hardcoded sweep and the unimplementable
-liveness check. Single-source findings — the risky-path gap (§2.1d), session
-hijacking (§2.1c), the silent `CLAUDE_PLUGIN_ROOT` failure (§2.1b), and the missing
-`SessionStart` port — were adjudicated against the code before being accepted here.
+liveness check. Single-source findings — session hijacking (§2.1c), the silent
+`CLAUDE_PLUGIN_ROOT` failure (§2.1b), and the missing `SessionStart` port — were
+adjudicated against the code before being accepted. One single-source finding, the
+risky-path gap, survived a first adjudication and was then **rejected** on
+re-measurement with the real classifier (§2.1d) — the adjudication had repeated the
+reviewer's own modelling error.
 The corrected reference counts in §5 came from the same pass.
 
 ## Open questions for writing-plans
