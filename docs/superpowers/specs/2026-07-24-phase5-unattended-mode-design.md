@@ -13,11 +13,12 @@ The unattended terminal, durable queue, and SessionStart surfacing shipped; the
 
 Phase 5 has **two halves**:
 
-1. **Final report** — already designed in
-   `docs/superpowers/specs/2026-07-24-spar-report-design.md` (deterministic
-   `spar-report.sh` generates `reviews/spar-<id>-report.md` before cleanup; a
-   `/spar-report [id]` command displays it). This document does not re-specify it;
-   it only notes how unattended mode feeds it (parked / blocked-pending-user).
+1. **Final report** — designed in
+   `docs/superpowers/specs/2026-07-24-spar-report-design.md` and **implemented
+   2026-07-25** (deterministic `spar-report.sh` generates
+   `reviews/spar-<id>-report.md` before cleanup; `/spar:report [id]` displays
+   it). This document does not re-specify it; it only notes how unattended mode
+   feeds it (parked / blocked-pending-user).
 2. **Unattended mode** — the subject of this document.
 
 ## Context & goal

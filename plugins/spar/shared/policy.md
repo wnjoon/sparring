@@ -75,8 +75,17 @@ explicitly documented.
    receive a separate response and re-enter at reviewer round `r+1`; findings
    at the cap terminate honestly as `sweep-findings-at-cap`.
 9. Every terminal path atomically writes one immutable outcome before cleanup:
-   at least `converged`, `cap`, `error-bypass`, `cancelled`, `skipped`, or
-   `sweep-findings-at-cap`. Only `converged` asserts a clean review result.
+   at least `converged`, `cap`, `error-bypass`, `cancelled`, `skipped`,
+   `blocked-pending-user`, or `sweep-findings-at-cap`. Only `converged` asserts
+   a clean review result.
+10. A run that converges (and an unattended run that stops at
+    `blocked-pending-user`) also gets an informational report,
+    `reviews/spar-<id>-report.md`: outcome, rounds, reviewer pairing, sweep
+    result, findings tally, judge rulings, the user's settled decisions, still
+    pending decisions, and the changed files. It is generated deterministically
+    BEFORE cleanup (the ledger and registry it reads are deleted there), is
+    fail-open (a failure only means "no report"), and is never part of
+    enforcement. `/spar:report [id]` displays it.
 
 ## Invariants
 

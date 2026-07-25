@@ -2,9 +2,12 @@
 
 > _Command names updated post-refactor: `/spar` → `/spar:fight`; `/spar-weighin` → `/spar:ready` (plan) + `/spar:fight` (execute)._
 
-**Status:** design, prepared for **Phase 5**. NOT yet implemented. This refines
-the "Final report" half of Phase 5 (the other half is unattended mode); see
-`docs/design-decisions.md` §Phase 5.
+**Status:** **implemented** 2026-07-25. The three open questions below were
+settled during planning: (1) the report layout is fixed by the generator; (2) the
+discovery hint lives in `fight.md` and the README, not in the hook's block texts;
+(3) findings parsing is an independent lightweight parse inside `spar-report.sh`,
+not a refactor of the hook's parsers. The display command is `/spar:report`
+(post-refactor namespace).
 
 ## Context & goal
 
@@ -138,5 +141,6 @@ report can be shown any time). If the file is missing, it says so plainly.
 
 ## Terminal state
 
-Prepared for Phase 5. Do NOT implement now — this document is the starting point
-for the Phase 5 plan.
+Implemented. Scope as designed: converged runs (plus the unattended
+`blocked-pending-user` terminal, which shares the same call). `cap`,
+`sweep-findings-at-cap`, `skipped`, and the `/spar:fight` roll-up stay deferred.

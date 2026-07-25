@@ -120,6 +120,8 @@ sparring Stop hook takes over from there.
    lands in `reviews/spar-<id>-r<N>.md`.
 2. Read the review file.
    - First line `STATUS: CONVERGED` → stop again; the hook releases the session.
+     A summary of the whole run is written to `reviews/spar-<id>-report.md` —
+     mention it, or run `/spar:report` to show it.
    - First line `STATUS: FINDINGS` → handle EVERY finding:
      - `[MECHANICAL]` → fix it now. Do not ask the user.
      - `[DESIGN]` → decide on the merits; implement it if you agree.

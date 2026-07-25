@@ -16,7 +16,8 @@ Phases 1–4 are implemented; the core loop is verified end-to-end against real 
 - **single-agent mode** — auto-detects the reviewer (Codex if installed → cross-model, the recommended default; otherwise Claude), so `/spar:fight` works with no second vendor. `--reviewer codex|claude` overrides;
 - a reported **safe skip** for changes no larger than 10 lines / 2 paths when no risky path or unsafe change kind is touched;
 - changed-surface **design-intent pointers** on every fresh review;
-- a once-only, fresh Claude **final sweep** after risky, long, or design-bearing loops.
+- a once-only, fresh Claude **final sweep** after risky, long, or design-bearing loops;
+- a **final run report** — every converged (and every unattended `blocked-pending-user`) run writes `reviews/spar-<id>-report.md`: outcome, rounds, reviewer pairing, sweep result, findings tally, judge rulings, your settled design decisions, anything still pending, and the changed files. `/spar:report [id]` shows it (defaults to the latest run).
 
 <br>
 
@@ -110,7 +111,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 2 | `[DESIGN]` debate-first (conveyance boundary + decision ledger) · stalemate blind judge · batched end-of-loop gate · cross-round semantic finding matcher | ✅ done |
 | 3 | Single-agent mode: same-family sparring (Claude reviewer/judge/matcher) so `/spar:fight` works without Codex — auto-detect + explicit override; cross-model stays the default | ✅ done |
 | 4 | Safe skip + changed-surface intent harvest + risk-triggered final sweep + durable exit reason | ✅ done |
-| 5 | Unattended mode + final report | planned |
+| 5 | Unattended mode + final report (`/spar:report`) | ✅ done |
 | 6 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
 | 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
 | 8 | `/spar:ready` + `/spar:fight` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) fight loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | ✅ done |
@@ -132,7 +133,7 @@ skip.
 
 ```
 plugins/spar/            Claude Code plugin (commands, Stop hook)
-  commands/              /spar:ready, /spar:fight, /spar:cancel, setup guards + surface helpers
+  commands/              /spar:ready, /spar:fight, /spar:cancel, /spar:report, setup guards + surface helpers
   shared/policy.md       loop policy — source of truth for both adapters
   shared/prompts/        reviewer / judge / matcher / sweeper templates
 docs/superpowers/        specs, plans, and design-decisions per phase

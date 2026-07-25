@@ -263,6 +263,13 @@ from this future-decisions document after landing.
   settled-decision and finding data; the reviews/ files persist but those do not.
   No new phase and no extra round-trip. Scope: converged first (generator is
   terminal-reason-agnostic, so cap/skip/sweep and a /spar:fight roll-up extend easily).
+  Implemented 2026-07-25 (`docs/superpowers/plans/2026-07-25-spar-report.md` for
+  the generator, `…-spar-report-remaining.md` for the rest): `spar-report.sh`
+  plus a `generate_report()` fail-open call from `finish_approve` for
+  `converged` (the unattended `blocked-pending-user` terminal shares it),
+  displayed by `/spar:report [id]`. Command spelled `/spar:report` to match the
+  post-refactor namespace. `cap`, `sweep-findings-at-cap`, `skipped`, and a
+  `/spar:fight` roll-up remain deferred.
 
 ## Phase 6 — Codex-hosted adapter
 
