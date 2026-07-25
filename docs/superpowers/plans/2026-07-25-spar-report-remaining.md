@@ -534,7 +534,7 @@ Route report generation through a single `generate_report()` helper in `stop-hoo
 - Consumes: `spar-report.sh <review-id> <base-sha>` (both directory defaults are correct here — the hook always runs at the repo root).
 - Produces: `generate_report()`, a fail-open no-argument helper using the hook's `REVIEW_ID` and `BASE`; safe to call from any terminal path. Later extension to `cap` / `sweep-findings-at-cap` is a one-line change at those paths (deliberately not done here).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_stop_hook.sh`, immediately before the final `echo; echo "PASS=$PASS FAIL=$FAIL"` and `exit "$FAIL"` lines. It reuses that file's existing `chk`, `chk_file`, `fresh_dir`, `write_state`, `run_hook`, and `add_unattended` helpers. Note its `chk` calls `grep -qF "$2"` **without** `--`, so no expectation here may start with `-`:
 
@@ -623,12 +623,12 @@ chk "missing generator → outcome still recorded" "reason: converged" \
 chk "missing generator → no report" "absent" "$([ -f "$RPT" ] && echo present || echo absent)"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: the new `R1`, `R2`, and `R4` checks FAIL (no report is produced — `finish_approve` never calls the generator, and R4's inline call is currently the only one). `R3`, `R5`, `R6` may already pass; that is fine.
 
-- [ ] **Step 3: Add `generate_report()`**
+- [x] **Step 3: Add `generate_report()`**
 
 In `plugins/spar/hooks/stop-hook.sh`, insert this immediately after the closing `}` of `record_outcome()` and before `finish_approve()`:
 
@@ -648,7 +648,7 @@ generate_report() {
 }
 ```
 
-- [ ] **Step 4: Call it from the converged terminal**
+- [x] **Step 4: Call it from the converged terminal**
 
 Replace `finish_approve()` with:
 
@@ -678,7 +678,7 @@ with the shared helper:
   generate_report
 ```
 
-- [ ] **Step 5: Run both test suites to verify they pass**
+- [x] **Step 5: Run both test suites to verify they pass**
 
 ```bash
 bash tests/test_stop_hook.sh
@@ -686,7 +686,7 @@ bash tests/test_spar_report.sh
 ```
 Expected: `FAIL=0` for both.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add plugins/spar/hooks/stop-hook.sh tests/test_stop_hook.sh
