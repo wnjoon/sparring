@@ -151,7 +151,7 @@ git commit -m "test: make the stop-hook suite hermetic (stub reviewer CLIs + abs
 
 **Why both platforms:** the project is developed on macOS, and its scripts straddle BSD/GNU differences — `sed -i ''` vs `sed -i`, `date -u`, and awk dialects. A real example from this repo's history: an `awk -v` value containing newlines works under GNU awk but errors under macOS BWK awk ("newline in string"), which silently emptied a report section. A single-platform matrix would have missed the inverse case.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_ci_workflow.sh`:
 
@@ -200,12 +200,12 @@ chk "at least the suites known today are present" "1" \
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bash tests/test_ci_workflow.sh`
 Expected: `FAIL: workflow missing (.github/workflows/tests.yml)` and exit 1.
 
-- [ ] **Step 3: Write the workflow**
+- [x] **Step 3: Write the workflow**
 
 Create `.github/workflows/tests.yml`:
 
@@ -277,12 +277,12 @@ jobs:
           [ "$rc" -eq 0 ] || exit 1
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `bash tests/test_ci_workflow.sh`
 Expected: `FAIL=0`.
 
-- [ ] **Step 5: Prove the workflow's own commands work locally**
+- [x] **Step 5: Prove the workflow's own commands work locally**
 
 The workflow body cannot be executed by GitHub from here, so run the two loops it uses, exactly as written, and confirm they behave:
 
@@ -299,7 +299,7 @@ echo "suites rc=$rc"
 ```
 Expected: `syntax rc=0`, every suite `OK`, `suites rc=0`. If a suite fails only under the hermetic `PATH` from Task 1 Step 5, fix the suite — not the workflow.
 
-- [ ] **Step 6: Note it in the README**
+- [x] **Step 6: Note it in the README**
 
 In `README.md`'s Development section, after the `main` / `dev` branches bullet, add:
 
@@ -307,14 +307,14 @@ In `README.md`'s Development section, after the `main` / `dev` branches bullet, 
 - Tests are pure bash: `bash tests/test_<name>.sh`, or all of them with `for t in tests/test_*.sh; do bash "$t"; done`. CI ([.github/workflows/tests.yml](.github/workflows/tests.yml)) runs every suite on Linux and macOS for each push and pull request — no reviewer CLI required, since the suites stub it.
 ```
 
-- [ ] **Step 7: Run the whole suite**
+- [x] **Step 7: Run the whole suite**
 
 ```bash
 for t in tests/test_*.sh; do printf '%-34s ' "$t"; bash "$t" >/dev/null 2>&1 && echo OK || echo FAILED; done
 ```
 Expected: every line `OK` (19 suites now, including `test_ci_workflow.sh`).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add .github/workflows/tests.yml tests/test_ci_workflow.sh README.md
@@ -348,7 +348,8 @@ both with the real CLIs on `PATH` and under
 it fails with `workflow missing` when `.github/workflows/tests.yml` is absent and
 reports `PASS=9 FAIL=0` once it exists. The workflow YAML parses (`ruby -ryaml`:
 one job `suites`, matrix `[ubuntu-latest, macos-latest]`), and the syntax loop from
-Task 2 Step 5 exits 0 over all 21 scripts. Prose-only steps (Task 2 Step 6) were
+Task 2 Step 5 exits 0 over every script its three globs cover (35 files: 16 under
+`plugins/spar/`, 19 suites). Prose-only steps (Task 2 Step 6) were
 not executed.
 
 **Risk the plan carries knowingly:** the workflow's YAML cannot be validated by GitHub from here. Task 2 Step 5 compensates by running the exact shell loops the workflow uses, so only the YAML wrapper is unverified; `tests/test_ci_workflow.sh` then pins the keys that matter (`push`, `pull_request`, both runners, the glob, the non-tolerance of failures). The first push to GitHub is the real check.

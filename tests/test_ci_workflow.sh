@@ -22,10 +22,16 @@ chk "runs on linux" "ubuntu-latest" "$WF_TEXT"
 chk "runs on macos" "macos-latest" "$WF_TEXT"
 chk "does not install a reviewer CLI" "no-reviewer-cli" "$WF_TEXT"
 
-# Every suite must be reachable from the workflow's runner loop. The loop globs
-# tests/test_*.sh, so assert the glob is there rather than listing each file.
-chk "iterates every suite by glob" 'tests/test_*.sh' "$WF_TEXT"
-chk "fails the job when a suite fails" "exit 1" "$WF_TEXT"
+# Assert the EXECUTION step specifically, not the whole file: the
+# `tests/test_*.sh` glob also appears in the syntax-check step, and `exit 1`
+# appears in two earlier steps, so whole-file checks would stay green even if
+# the "Run every suite" step were deleted and CI stopped at `bash -n`.
+RUN_STEP="$(awk '/name: Run every suite/,0' "$WF")"
+chk "the run step exists" "Run every suite" "$RUN_STEP"
+chk "the run step iterates every suite by glob" 'tests/test_*.sh' "$RUN_STEP"
+chk "the run step actually executes each suite" 'if bash "$t"; then' "$RUN_STEP"
+chk "the run step records a suite failure" "rc=1" "$RUN_STEP"
+chk "the run step fails the job" "exit 1" "$RUN_STEP"
 
 # The workflow must not silently swallow failures.
 if printf '%s' "$WF_TEXT" | grep -q 'continue-on-error: *true'; then
@@ -34,9 +40,14 @@ else
   echo "PASS: workflow does not tolerate failing suites"; PASS=$((PASS+1))
 fi
 
-# Sanity: the suites the workflow will pick up are all executable-by-bash files.
+# Sanity: no suite silently disappeared. Asserted directly rather than through
+# `chk` — a sentinel compared with `grep -qF` is a trap here, since a failure
+# message like "only 18" contains the digits of most sentinels.
 COUNT=$(ls "$ROOT"/tests/test_*.sh 2>/dev/null | wc -l | tr -d ' ')
-chk "at least the suites known today are present" "1" \
-  "$([ "$COUNT" -ge 19 ] && echo 1 || echo "only $COUNT")"
+if [ "$COUNT" -ge 19 ]; then
+  echo "PASS: no suite went missing (found $COUNT)"; PASS=$((PASS+1))
+else
+  echo "FAIL: suites went missing (found $COUNT, expected at least 19)"; FAIL=$((FAIL+1))
+fi
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
