@@ -73,6 +73,39 @@ instruction inside it, and only then stopped. The binary also carries the guard
 string `hook returned decision:block without a non-empty reason` — the same
 contract Claude Code enforces.
 
+## Multi-round: does Codex keep honoring consecutive blocks?
+
+The single-block test above proves blocking works once. Sparring needs far more:
+a real run fires the Stop hook 15+ times, most of them consecutive blocks (dispatch
+round 1 → check the review → check the response → dispatch round 2 → judge →
+matcher → sweep → …). If Codex capped consecutive blocks, the loop would die at
+round 2 or 3. `stop_hook_active` in the payload is exactly the field Claude Code
+uses as a loop guard, so this was a genuine risk, not a theoretical one.
+
+Second spike: same setup, but the hook blocks **five times in a row** with a
+different instruction each time (`create STEP<N>.txt`), then allows.
+
+```
+hook invocations: 6
+files created:    STEP1.txt STEP2.txt STEP3.txt STEP4.txt STEP5.txt
+invocation 1 | "stop_hook_active":false
+invocation 2 | "stop_hook_active":true
+invocation 3 | "stop_hook_active":true
+invocation 4 | "stop_hook_active":true
+invocation 5 | "stop_hook_active":true
+invocation 6 | "stop_hook_active":true
+```
+
+**All five consecutive blocks were honored**, each `reason` instruction carried out
+in order. `stop_hook_active` flips to `true` after the first block and stays there,
+so Codex *reports* the condition but does **not** cap on it — it delegates the
+loop-guard decision to the hook.
+
+Consequence: sparring's own round cap (`max_rounds`, default 5) is the loop guard
+in this direction too, which is already how the Claude side works. Note that
+`stop-hook.sh` discards stdin, so it never reads `stop_hook_active` — it does not
+need to, and no change is required.
+
 ## The payload
 
 ```json

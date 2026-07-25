@@ -37,6 +37,14 @@ enforcement had to move to a **git pre-commit hook**, explicitly accepting a
   `reason` (it created the requested file), then stop on the second pass. The
   binary also carries the guard string `hook returned decision:block without a
   non-empty reason`, matching Claude's contract.
+- **Consecutive blocks are honored, so a real multi-round loop is possible.** A
+  second spike blocked five times in a row with a different instruction each time:
+  the hook fired six times and all five instructions were carried out in order.
+  `stop_hook_active` flips to `true` after the first block and stays true — Codex
+  reports the condition but does not cap on it, delegating the loop guard to the
+  hook. Sparring's `max_rounds` remains the circuit breaker, exactly as on the
+  Claude side. This was the load-bearing risk: a run fires the Stop hook 15+ times,
+  mostly as consecutive blocks, so a cap at 2-3 would have killed the design.
 
 **Decision:** enforcement for the Codex seat is the **Codex Stop hook**, not a git
 pre-commit hook. The strong guarantee — *a session cannot end unconverged* — is
