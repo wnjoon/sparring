@@ -1,8 +1,9 @@
 # sparring loop policy (SoT)
 
 The Claude-hosted adapter implements this policy. The planned Codex-hosted
-adapter must mirror it except where its weaker pre-commit enforcement is
-explicitly documented.
+adapter mirrors it exactly, including enforcement strength: Codex has a Stop hook
+that honors `decision:block`, so both directions share this policy and one
+gatekeeper implementation.
 
 ## Roles
 
@@ -105,7 +106,8 @@ Phases 1–5 (implemented): core loop; design findings, blind judge, gate,
 decision ledger, semantic matcher; same-family Claude review; safe skip,
 changed-surface intent harvest, durable outcomes, and final sweep; unattended
 mode and the final run report (`/spar:report`).
-Phase 6: Codex-hosted adapter (git pre-commit enforcement). Phase 7: model
+Phase 6: Codex-hosted adapter (mirrored seats, same Stop-hook enforcement via
+Codex's own `Stop` hook). Phase 7: model
 economics (reviewer/effort config, tiered fix writers).
 Phase 8 (orchestration): `/spar:ready` + `/spar:fight` — a plan-to-fight
 workflow layered ABOVE the loop. `/spar:ready` runs writing-plans → dedicated

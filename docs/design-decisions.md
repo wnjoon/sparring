@@ -276,14 +276,24 @@ from this future-decisions document after landing.
 
 ## Phase 6 — Codex-hosted adapter
 
-- Seats mirror; policy identical. Enforcement moves from the Stop hook to a
-  **git pre-commit hook**: an active unconverged loop blocks commits. This is
-  a **weaker guarantee** than Claude's Stop hook and must be stated as such —
-  a pre-commit hook gates *landing* the work, not *ending the session*, so a
-  Codex author can walk away without converging (only without committing).
-  Enforcement contract here is explicit: "you cannot commit unconverged
-  work", NOT "you cannot stop". Closing the walk-away gap, if needed, is a
-  separate mechanism — never assumed from the pre-commit hook alone.
+- Seats mirror; policy identical. **Enforcement stays a Stop hook** — Codex has
+  one. Superseded 2026-07-25: this section previously specified a **git
+  pre-commit hook** and accepted a weaker guarantee ("you cannot commit
+  unconverged work", not "you cannot stop"), because Codex was believed to have
+  no session-exit hook. `codex-cli 0.144.1` does: hooks are stable and default-on,
+  the event set includes `stop`, and a Stop hook returning
+  `{"decision":"block","reason":…}` forces another turn — verified by spike
+  (`docs/superpowers/notes/codex-hooks-spike.md`). The pre-commit hook is
+  therefore dropped: it is bypassable with `git commit --no-verify`, it gates the
+  wrong event, and it is unnecessary. Both adapters now have identical enforcement
+  strength, and both share one gatekeeper — `stop-hook.sh` already discards its
+  stdin and decides only from the state file and artifacts. Full design:
+  `docs/superpowers/specs/2026-07-25-phase6-codex-adapter-design.md`.
+- Entry point for the author seat is a **Codex skill**
+  (`~/.codex/skills/spar-fight/SKILL.md`), not `~/.codex/prompts/` (no such
+  mechanism in 0.144.1). Hook registration is a standalone `hooks.json` installed
+  once — a Codex plugin cannot carry it (`plugin_hooks` is a removed feature), and
+  rewriting the file per run would reset Codex's hook trust every loop.
 - Reviewer = `claude -p` restricted to read-only tools; declares CONVERGED.
   Reuses the read-only blind Claude reviewer built in Phase 3, and Codex-Codex
   same-family sparring falls out of this direction for free (Phase 3's family

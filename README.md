@@ -102,7 +102,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 |---|---|---|
 | Author (sole writer) | Claude Code session | Codex CLI session |
 | Reviewer (declares `CONVERGED`) | `codex exec --sandbox read-only` (default) or `claude -p` (single-agent) | `claude -p` (read-only tools) |
-| Enforcement | Stop hook blocks exit | git pre-commit hook blocks commit (gates landing, not session exit) |
+| Enforcement | Stop hook blocks exit | Codex `Stop` hook blocks exit — same guarantee, same gatekeeper script |
 
 ## Invariants
 
@@ -120,7 +120,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 3 | Single-agent mode: same-family sparring (Claude reviewer/judge/matcher) so `/spar:fight` works without Codex — auto-detect + explicit override; cross-model stays the default | ✅ done |
 | 4 | Safe skip + changed-surface intent harvest + risk-triggered final sweep + durable exit reason | ✅ done |
 | 5 | Unattended mode + final report (`/spar:report`) | ✅ done |
-| 6 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
+| 6 | Codex-hosted adapter: mirror the seats (Codex authors, `claude -p` reviews) and reuse the same Stop-hook gatekeeper via Codex's own `Stop` hook | planned |
 | 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
 | 8 | `/spar:ready` + `/spar:fight` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) fight loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | ✅ done |
 
