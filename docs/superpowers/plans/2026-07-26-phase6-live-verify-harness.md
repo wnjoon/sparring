@@ -34,7 +34,7 @@
   - `<dir>/repo/` — scratch git repository, one commit, containing `sum_to.py` with the planted bug and `TASK.md`
   - `<dir>/checklist.md` — the printed checklist, also saved
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_verify_live.sh`:
 
@@ -116,12 +116,12 @@ chk "clean refuses a directory that is not ours" "3" "$RC"
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `bash tests/test_verify_live.sh`
 Expected: every check FAILs (the script does not exist yet).
 
-- [ ] **Step 3: Write `adapters/codex/verify-live.sh` — setup and clean**
+- [x] **Step 3: Write `adapters/codex/verify-live.sh` — setup and clean**
 
 The script begins with a self-locating root and the refusals, then builds the workspace:
 
@@ -213,7 +213,7 @@ TASK
     bash "$REPO_ROOT/adapters/codex/install.sh" --scope user >/dev/null || exit 3
 ```
 
-- [ ] **Step 4: Write the checklist**
+- [x] **Step 4: Write the checklist**
 
 Still inside the `setup` branch, generate `checklist.md` and print it. Each item
 names what to do and what to write down, and says which ones the harness can
@@ -258,12 +258,12 @@ CHECK
 fi
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `bash tests/test_verify_live.sh`
 Expected: `PASS=<n> FAIL=0`.
 
-- [ ] **Step 6: Prove the refusals actually refuse**
+- [x] **Step 6: Prove the refusals actually refuse**
 
 Revert each guard in a scratch copy and confirm the matching checks fail:
 
@@ -283,7 +283,7 @@ cd /; rm -rf "$SC"
 Expected: the two "inside the real CODEX_HOME" checks fail. Repeat for the
 `is_ours` guard in `setup` and expect the "non-workspace dir" checks to fail.
 
-- [ ] **Step 7: Run the whole suite and commit**
+- [x] **Step 7: Run the whole suite and commit**
 
 ```bash
 for t in tests/test_*.sh; do bash "$t" >/dev/null || echo "FAILED: $t"; done

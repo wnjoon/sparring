@@ -30,22 +30,93 @@ done
 # the real Codex home or lives inside it — a harness that can clobber the
 # developer's actual configuration is worse than no harness.
 real_home="${CODEX_HOME:-$HOME/.codex}"
-abs() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s' "$PWD/${1#./}" ;; esac; }
-want="$(abs "$dir")"; real="$(abs "$real_home")"
-case "$want/" in
-  "$real"/*|"$real"/)
-    echo "error: refusing to use $want — it is inside the real CODEX_HOME ($real)" >&2
-    exit 3 ;;
-esac
 
-is_ours() { [ -f "$1/$MARKER_NAME" ] && grep -qxF "$MARKER_TEXT" "$1/$MARKER_NAME" 2>/dev/null; }
+# A string prefix test is not a containment test. "/tmp/x/../real/ws" does not
+# start with "/tmp/real" and neither does a path reaching the same place through
+# a symlink, yet both land inside it — and this script removes what it is given.
+# So both sides are canonicalised first: `..` and `.` collapsed, and symlinks
+# resolved on the deepest part that already exists (the rest cannot be a symlink,
+# because it does not exist yet). python3 is already required by install.sh,
+# which this script calls, so it adds no new dependency.
+# A newline in either path would shift the fields of the line-delimited result
+# below, so that `want` became a prefix of what was asked for — and this script
+# deletes what it resolves. Rather than teach the transfer to carry newlines,
+# refuse them: a newline in a workspace path or a CODEX_HOME is never intentional,
+# and refusing is the direction that cannot destroy anything.
+case "$dir" in *"
+"*) echo "error: --dir must not contain a newline" >&2; exit 3 ;; esac
+case "$real_home" in *"
+"*) echo "error: CODEX_HOME must not contain a newline" >&2; exit 3 ;; esac
+
+# Containment is decided here too, not by a shell glob afterwards. The glob had
+# an edge it could not express: with CODEX_HOME resolving to "/", the pattern
+# becomes "//*", which matches nothing, so every absolute path would have been
+# allowed even though all of them are inside it. commonpath has no such corner.
+command -v python3 >/dev/null 2>&1 \
+  || { echo "error: python3 is required to resolve paths safely" >&2; exit 3; }
+resolved="$(WANT="$dir" REAL="$real_home" python3 -c '
+import os, sys
+
+def canon(p):
+    p = os.path.abspath(p)
+    head, tail = p, []
+    while not os.path.exists(head) and head != os.path.dirname(head):
+        head, t = os.path.split(head)
+        tail.append(t)
+    return os.path.join(os.path.realpath(head), *reversed(tail))
+
+try:
+    want, real = canon(os.environ["WANT"]), canon(os.environ["REAL"])
+except Exception as exc:
+    sys.stderr.write("error: could not resolve a path: %s\n" % exc)
+    sys.exit(3)
+
+# Checked HERE, not only on the inputs: realpath can introduce a newline that the
+# input never had, by resolving a symlink whose target contains one. The result
+# is transferred as three lines, so a newline anywhere in it silently reassigns
+# the fields — and the field it corrupts is the directory this script deletes.
+for label, p in (("--dir", want), ("CODEX_HOME", real)):
+    if "\n" in p:
+        sys.stderr.write(
+            "error: the resolved %s path contains a newline; refusing\n" % label)
+        sys.exit(3)
+
+try:
+    inside = os.path.commonpath([want, real]) == real
+except ValueError:            # different drives / unrelated roots
+    inside = False
+print(want); print(real); print("INSIDE" if inside else "OUTSIDE")
+')" || resolved=""
+want="$(printf '%s\n' "$resolved" | sed -n 1p)"
+real="$(printf '%s\n' "$resolved" | sed -n 2p)"
+verdict="$(printf '%s\n' "$resolved" | sed -n 3p)"
+{ [ -n "$want" ] && [ -n "$real" ] && [ -n "$verdict" ]; } \
+  || { echo "error: could not resolve the workspace path" >&2; exit 3; }
+if [ "$verdict" = INSIDE ]; then
+  echo "error: refusing to use $want — it is inside the real CODEX_HOME ($real)" >&2
+  exit 3
+fi
+
+# The marker is what stands between `rm -rf` and someone else's directory, so it
+# has to be a real file we could have written — not a symlink pointing at a
+# genuine marker elsewhere, which `-f` alone would happily accept.
+is_ours() {
+  [ -f "$1/$MARKER_NAME" ] && [ ! -L "$1/$MARKER_NAME" ] \
+    && grep -qxF "$MARKER_TEXT" "$1/$MARKER_NAME" 2>/dev/null
+}
 
 # ── clean ────────────────────────────────────────────────────────────────────
 if [ "$cmd" = clean ]; then
-  [ -e "$want" ] || { echo "nothing to clean at $want"; exit 0; }
+  # -e is false for a DANGLING symlink, so it has to be asked about separately or
+  # a planted link would be reported as "nothing to clean" while still sitting
+  # there. Whatever it points at, it is not something this script wrote.
+  if [ ! -e "$want" ] && [ ! -L "$want" ]; then
+    echo "nothing to clean at $want"; exit 0
+  fi
   is_ours "$want" \
     || { echo "error: $want is not a harness workspace; refusing to remove it" >&2; exit 3; }
-  rm -rf "$want" && echo "removed $want"
+  rm -rf "$want" || { echo "error: could not remove $want" >&2; exit 3; }
+  echo "removed $want"
   exit 0
 fi
 
@@ -54,7 +125,11 @@ if [ "$cmd" = setup ]; then
   # Rebuilt from scratch every time, so a second run is a clean slate rather than
   # a merge with whatever the last one left. That is only safe because the marker
   # proves the directory is ours before anything is removed.
-  if [ -e "$want" ] && ! is_ours "$want"; then
+  # Same -e blind spot, and here it is destructive: a dangling symlink would skip
+  # the ownership guard entirely, and the rm -rf below would delete the user's
+  # link and put a workspace in its place. An entry we did not write is refused
+  # whether or not it resolves to anything.
+  if { [ -e "$want" ] || [ -L "$want" ]; } && ! is_ours "$want"; then
     echo "error: $want already exists and is not a harness workspace; refusing to overwrite it" >&2
     exit 3
   fi
@@ -64,7 +139,7 @@ if [ "$cmd" = setup ]; then
 
   # Scratch repository with a planted bug. Off-by-one, small enough that a review
   # cannot miss it and a fix cannot be mistaken for a rewrite.
-  cat > "$want/repo/sum_to.py" <<'PY'
+  cat > "$want/repo/sum_to.py" <<'PY' || exit 3
 def sum_to(n):
     """Return the sum of every integer from 1 to n inclusive."""
     total = 0
@@ -72,7 +147,7 @@ def sum_to(n):
         total += i
     return total
 PY
-  cat > "$want/repo/TASK.md" <<'TASK'
+  cat > "$want/repo/TASK.md" <<'TASK' || exit 3
 Fix `sum_to` so it returns the sum of every integer from 1 to n INCLUSIVE, and
 add a test that would fail against the current implementation.
 TASK
@@ -87,25 +162,32 @@ TASK
   # Written with a quoted heredoc and the two paths substituted afterwards: the
   # checklist is prose the human reads, and an unquoted heredoc would let a stray
   # backtick or $ in it run as shell.
-  cat > "$want/checklist.md" <<'CHECK'
+  cat > "$want/checklist.md" <<'CHECK' || exit 3
 # Phase 6 live verification — your part
 
 Everything below needs a real interactive Codex session. Run it from:
 
-    cd @@WS@@/repo
-    CODEX_HOME=@@WS@@/home codex
+    cd @@REPOQ@@
+    CODEX_HOME=@@HOMEQ@@ codex
 
 Nothing here touches your real Codex configuration.
 
 1. TRUST PATH. On the first turn Codex should ask you to trust sparring's hooks.
-   Accept. The check step reads that decision back out of the isolated
-   config.toml, so you do not have to report it — but do write down what the
-   prompt actually said, since the wording is what a new user has to understand.
+   Accept.
+   WRITE DOWN: (a) were you asked at all? (b) what did the prompt say, word for
+   word or close to it?
+   Why both: if no trust record turns up afterwards, the artifacts cannot tell
+   "never prompted" from "prompted and declined" — only you can. And the wording
+   is what a new user has to understand, which nothing automated can judge.
 
 2. HOOK SCOPE. The hooks above are installed at USER scope, inside the isolated
-   home. Start the session in @@WS@@/repo, which has no .codex/ of its own. The
-   check step tells trust apart from scope: a trusted registration that left no
-   liveness marker means user scope did not fire here.
+   home. Start the session in @@WS@@/repo, which has no .codex/ of its own.
+   WRITE DOWN: did the hooks fire for this directory? Anything Codex printed
+   about them?
+   The check step can tell trust apart from scope afterwards — a trusted
+   registration that left no liveness marker means user scope did not fire here
+   — but your observation is the cross-check on that inference, not a duplicate
+   of it.
 
 3. SESSIONSTART ORDERING. Immediately, before anything else, run the spar-fight
    skill. If SessionStart fired first, activation succeeds; if it did not, the
@@ -119,16 +201,45 @@ Nothing here touches your real Codex configuration.
 
 When the session is over:
 
-    bash @@ROOT@@/adapters/codex/verify-live.sh check --dir @@WS@@
+    bash @@SELFQ@@ check --dir @@WSQ@@
 
 CHECK
+  # Two kinds of substitution, deliberately. Prose gets the bare path because it
+  # is read, not run. Anything the human is meant to TYPE is shell-quoted: a
+  # workspace under a directory with a space would otherwise produce commands
+  # that do not work, and one containing $(...) would produce commands that do
+  # something else entirely.
   WS="$want" RT="$REPO_ROOT" python3 - "$want/checklist.md" <<'PY' || exit 3
-import os, sys
+import os, re, shlex, sys
+ws, rt = os.environ["WS"], os.environ["RT"]
 p = sys.argv[1]
 t = open(p, encoding="utf-8").read()
-t = t.replace("@@WS@@", os.environ["WS"]).replace("@@ROOT@@", os.environ["RT"])
+values = {
+    "@@REPOQ@@": shlex.quote(os.path.join(ws, "repo")),
+    "@@HOMEQ@@": shlex.quote(os.path.join(ws, "home")),
+    "@@SELFQ@@": shlex.quote(os.path.join(rt, "adapters", "codex", "verify-live.sh")),
+    "@@WSQ@@": shlex.quote(ws),
+    "@@WS@@": ws,
+}
+# Validate the TEMPLATE, then substitute in ONE pass. Both halves matter and both
+# are about the same thing: the workspace path is user-controlled, so it must
+# never be treated as template. Scanning the rendered text for a leftover "@@"
+# would reject a perfectly good path like /tmp/project@@copy, and substituting
+# key by key would let a path containing the literal text of a later placeholder
+# be rewritten by that later pass. A single re.sub inserts values without ever
+# rescanning what it inserted.
+unknown = sorted(set(re.findall(r"@@[A-Z]+@@", t)) - set(values))
+if unknown:
+    sys.stderr.write("error: unknown placeholder(s) in the checklist template: %s\n"
+                     % ", ".join(unknown))
+    sys.exit(3)
+t = re.sub(r"@@[A-Z]+@@", lambda m: values[m.group(0)], t)
 open(p, "w", encoding="utf-8").write(t)
 PY
-  cat "$want/checklist.md"
+  # The printed checklist IS the deliverable of setup — a run that wrote it but
+  # could not show it has not done its job, and saying nothing while exiting 0
+  # would leave the user believing they saw everything there was.
+  cat "$want/checklist.md" \
+    || { echo "error: could not print the checklist (it is saved at $want/checklist.md)" >&2; exit 3; }
   exit 0
 fi
