@@ -149,7 +149,6 @@ INCLUDE_DIRTY=$(field include_dirty)
 SWEEP_DONE=$(field sweep_done)
 SWEEP_RESULT=$(field sweep_result)
 
-[ "$ACTIVE" = "true" ] || { record_outcome cap; cleanup; approve; }
 echo "$REVIEW_ID" | grep -qE '^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$' \
   || { log "invalid review_id: $REVIEW_ID"; finish_approve error-bypass; }
 case "$ROUND" in ''|*[!0-9]*) log "invalid round: $ROUND"; finish_approve error-bypass;; esac
@@ -189,21 +188,52 @@ case "$REVIEWER" in
   *) log "invalid reviewer: $REVIEWER"; finish_approve error-bypass;;
 esac
 
-# A user-scope hook registration fires in EVERY session of that host, so a run
-# claims its session and the engine ignores everyone else. Absent field → no
-# gating, which is every pre-existing run. Parsing is best-effort: no id while an
-# owner is set means "not the owner", and the answer is always approve — this
-# gate never blocks, so a foreign session is released rather than trapped.
+# Anything that is not a verified match — malformed payload, missing session id,
+# or jq unavailable — resolves to "no session id" and takes the same exit as any
+# other foreign session: approve, mutate nothing. This branch must never terminate
+# the run, because the session it cannot identify may not own it: recording an
+# outcome and running cleanup() would delete a live loop's state from a session
+# that has no claim to it, which is precisely what the gate exists to prevent. The
+# loop state therefore survives, nothing is reported as finished, and the log says
+# why. jq is a declared requirement (README §Install, enforced in CI), and only
+# runs that opted into gating reach this branch at all — a Claude-hosted run has no
+# owner_session field, so no jq dependency is added for existing users.
+#
+# Placement is deliberate and sits between two failure modes. It is AFTER the field
+# validations, because a state file we cannot parse cannot be trusted to say who
+# owns it either — corruption is handled by whoever observes it, so a broken run
+# self-heals instead of sitting inert until someone runs /spar:cancel. It is BEFORE
+# the `active != true` teardown, because that path records an outcome and runs
+# cleanup(): a session that cannot prove ownership must not perform another run's
+# teardown.
 OWNER_SESSION=$(field owner_session)
 if [ -n "$OWNER_SESSION" ]; then
-  THIS_SESSION=$(printf '%s' "$HOOK_INPUT" \
-    | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  THIS_SESSION=""
+  if command -v jq >/dev/null 2>&1; then
+    THIS_SESSION=$(printf '%s' "$HOOK_INPUT" \
+      | jq -r 'if type == "object" and (.session_id | type) == "string"
+               then .session_id else empty end' 2>/dev/null) || THIS_SESSION=""
+  else
+    log "jq unavailable — cannot verify session ownership; treating as foreign"
+  fi
   if [ "$THIS_SESSION" != "$OWNER_SESSION" ]; then
     log "foreign session (${THIS_SESSION:-none}) — this run belongs to ${OWNER_SESSION}"
     approve
   fi
 fi
 
+[ "$ACTIVE" = "true" ] || { record_outcome cap; cleanup; approve; }
+
+# A user-scope hook registration fires in EVERY session of that host, so a run
+# claims its session and the engine ignores everyone else. Absent field → no
+# gating, which is every pre-existing run. The answer is always approve — this
+# gate never blocks, so a foreign session is released rather than trapped.
+#
+# Ownership is decided only from a strict parse. A truncated payload such as
+# '{"session_id":"sess-aaa"' is not a session claim, and a regex would read one
+# out of it — so there is no regex path here at all. jq also rejects non-object
+# payloads and a non-string session_id.
+#
 BASE=$(field base_sha)
 echo "$BASE" | grep -qE '^([0-9a-f]{7,40}|none)$' || BASE="HEAD"
 

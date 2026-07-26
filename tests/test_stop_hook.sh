@@ -1132,6 +1132,104 @@ chk "no session id in payload → approve" '"decision":"approve"' "$(run_hook)"
 chk "no session id in payload → state untouched" "phase: task" \
   "$(cat .claude/spar.local.md 2>/dev/null)"
 
+# malformed JSON is NOT a session claim, even when the owner's id appears in it
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+OUT=$(printf '{"session_id":"sess-aaa"' | bash "$HOOK")
+chk "truncated payload → approve" '"decision":"approve"' "$OUT"
+chk "truncated payload → state untouched" "phase: task" "$(cat .claude/spar.local.md 2>/dev/null)"
+chk "truncated payload → no runner written" "absent" \
+  "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
+
+# a non-object payload carrying the id is not a claim either
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+chk "array payload → approve" '"decision":"approve"' "$(printf '["sess-aaa"]' | bash "$HOOK")"
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+chk "non-string session_id → approve" '"decision":"approve"' \
+  "$(printf '{"session_id":123}' | bash "$HOOK")"
+
+# with jq unavailable, ownership is unverifiable → treated as foreign: approve and
+# mutate NOTHING. Terminating here would delete a live run's state from a session
+# that may not own it, which is what the gate exists to prevent. A malformed
+# payload carrying the owner's id must not impersonate it either.
+nojq_path() { # → a PATH with everything except jq
+  local d; d=$(mktemp -d) || return 1
+  local dir f b
+  for dir in /bin /usr/bin; do
+    for f in "$dir"/*; do
+      b=${f##*/}; [ "$b" = jq ] && continue
+      [ -e "$d/$b" ] || ln -sf "$f" "$d/$b" 2>/dev/null
+    done
+  done
+  for b in codex claude; do printf '#!/bin/sh\nexit 0\n' > "$d/$b"; chmod +x "$d/$b"; done
+  printf '%s' "$d"
+}
+NOJQ=$(nojq_path)
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+OUT=$(printf '{"session_id":"sess-aaa"' \
+  | env -i PATH="$NOJQ" HOME="$HOME" CLAUDE_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" bash "$HOOK")
+chk "no jq + malformed owner payload → approve" '"decision":"approve"' "$OUT"
+chk "no jq → no round dispatched" "absent" \
+  "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
+chk "no jq → the run survives, state untouched" "phase: task" \
+  "$(cat .claude/spar.local.md 2>/dev/null)"
+chk "no jq → nothing recorded as an outcome" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-outcome.md ] && echo present || echo absent)"
+
+# a well-formed owning payload is treated the same while jq is missing —
+# unverifiable is unverifiable — but still without destroying the run
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+OUT=$(printf '{"session_id":"sess-aaa"}' \
+  | env -i PATH="$NOJQ" HOME="$HOME" CLAUDE_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" bash "$HOOK")
+chk "no jq + valid owner payload → approve" '"decision":"approve"' "$OUT"
+chk "no jq + valid owner payload → state survives" "phase: task" \
+  "$(cat .claude/spar.local.md 2>/dev/null)"
+chk "no jq + valid owner payload → no outcome written" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-outcome.md ] && echo present || echo absent)"
+
+# a run WITHOUT owner gating never needs jq — existing Claude-hosted runs.
+# Assert on effects, not on the block text: with jq missing, block() falls back to
+# a printf JSON that carries only the reason's first line, so the runner path is
+# not in stdout even though the round was dispatched.
+fresh_dir; write_state task 0; mkdir -p reviews
+OUT=$(printf '{}' | env -i PATH="$NOJQ" HOME="$HOME" CLAUDE_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" bash "$HOOK")
+chk "no owner field + no jq → still blocks for the review" '"decision":"block"' "$OUT"
+chk_file "no owner field + no jq → runner written" ".claude/spar-run-reviewer.sh"
+chk "no owner field + no jq → state advanced" "phase: review" "$(cat .claude/spar.local.md 2>/dev/null)"
+rm -rf "$NOJQ"
+
+# a DEACTIVATED owner-scoped run must survive a foreign session too. The
+# `active != true` path records an outcome and runs cleanup(), so the gate has to
+# sit ahead of it — otherwise a session that cannot prove ownership performs the
+# owner's teardown.
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+sed -i '' 's/^active: true/active: false/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^active: true/active: false/' .claude/spar.local.md
+OUT=$(payload sess-zzz | bash "$HOOK")
+chk "foreign session + inactive run → approve" '"decision":"approve"' "$OUT"
+chk "foreign session + inactive run → state NOT cleaned up" "present" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+chk "foreign session + inactive run → no outcome written" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-outcome.md ] && echo present || echo absent)"
+
+# the owner still gets its own teardown when it stops
+OUT=$(payload sess-aaa | bash "$HOOK")
+chk "owner + inactive run → approve" '"decision":"approve"' "$OUT"
+chk "owner + inactive run → state cleaned up" "gone" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
+chk "owner + inactive run → outcome recorded" "reason: cap" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+
+# corruption, unlike teardown, is handled by whoever observes it: a state file we
+# cannot parse cannot be trusted to name its owner, so the gate must not run first
+# and leave a broken run inert until someone runs /spar:cancel.
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+sed -i '' 's/^review_id: .*/review_id: ..\/..\/evil/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^review_id: .*/review_id: ..\/..\/evil/' .claude/spar.local.md
+OUT=$(payload sess-zzz | bash "$HOOK")
+chk "foreign session + corrupt state → approve (fail open)" '"decision":"approve"' "$OUT"
+chk "foreign session + corrupt state → corruption still handled" "gone" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
+
 # the gate must never block — a foreign session is released, not trapped
 fresh_dir; write_state review 1; mkdir -p reviews; add_owner sess-aaa
 printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] x\n- file: a.py:1\n- problem: p\n- suggestion: s\n' \
