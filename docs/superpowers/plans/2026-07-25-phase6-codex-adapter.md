@@ -298,7 +298,7 @@ A user-scope Codex registration means the hook runs in **every** Codex session o
 **Interfaces:**
 - Consumes: `PLUGIN_ROOT` (Task 1), `AUTHOR` (Task 2).
 - Produces: optional state field `owner_session: <id>`. Absent → no gating (today's behavior, and every Claude run until an activation writes it). Present → the engine approves immediately unless the payload's `session_id` matches.
-- This is the first time the engine reads stdin. It stays tolerant: unparseable or absent JSON means "no session id", which with a present `owner_session` means *not the owner* → approve. Never block on it.
+- This is the first time the engine reads stdin. Ownership is decided **only** from a strict `jq` parse — no regex path, because a regex reads a session id out of a truncated payload such as `{"session_id":"x"`. Everything unverified (malformed, non-object, non-string id, or `jq` unavailable) resolves to "no session id", which with a present `owner_session` means *not the owner* → approve, mutating nothing. It must never block, and must never terminate the run: the session it cannot identify may not own it, so recording an outcome or running `cleanup()` there would destroy a live loop from a stranger.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -363,7 +363,34 @@ if [ -n "$OWNER_SESSION" ]; then
 fi
 ```
 
-Place it **after** the `ACTIVE`/`REVIEW_ID` validation so a corrupt state file is still handled as an internal error, and **before** any state mutation.
+**Placement — this is the part that cost Task 3 its round budget.** The original
+instruction here said "after the `ACTIVE`/`REVIEW_ID` validation … and before any
+state mutation", which is **unsatisfiable**: the `active != true` branch *is* a
+mutation (`record_outcome cap; cleanup; approve`). Three of five rounds were spent
+oscillating between the two halves. The order that satisfies both, and the one now
+in the code, is:
+
+```
+read fields
+  → validate review_id / round / include_dirty / unattended / author / sweep_* / reviewer
+  → OWNER GATE (approve if the session cannot prove ownership)
+  → `active != true` teardown
+  → BASE, TASK, and the state machine
+```
+
+Two different rules, for two genuinely different cases:
+
+- **After the validations.** A state file we cannot parse cannot be trusted to name
+  its owner either, so gating on an `owner_session` read out of it would mean
+  trusting a field from a file we just declared unparseable — and it would leave a
+  broken run inert until someone ran `/spar:cancel`. Corruption is handled by
+  whoever observes it.
+- **Before the teardown.** There the file is well-formed and *does* name an owner,
+  and finishing someone else's run is not a stranger's business.
+
+Both directions are pinned by tests (`foreign session + inactive run → state NOT
+cleaned up` and `foreign session + corrupt state → corruption still handled`);
+moving the gate either way turns one pair red.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -777,6 +804,20 @@ git commit -m "feat: codex skills, hook-liveness marker, and Phase 6 docs"
 - **Risky-path changes** — `.codex/hooks.json` is already covered; measured, not assumed (spec §2.1d).
 - **Codex-Codex same-family sparring** — falls out of the `author` field but is not designed or tested here.
 - **Version bump, release, or plugin reinstall.**
+
+## Task 3 status (2026-07-26)
+
+Task 3 shipped in commit `41009b7` but its loop **ended at the round cap, not on
+convergence** — the reviewer never re-checked the final fix. All five findings were
+fixed and none rejected; the five rounds were spent on one question, the gate's
+payload parsing and its placement, and the unsatisfiable placement instruction that
+used to be in this task is what set that up (corrected above).
+
+What is unverified is specifically the **last** change: moving the gate to sit
+between the validations and the `active != true` teardown. 287 checks and all 19
+suites pass locally, and both directions of the ordering are pinned by tests, but
+that is the author's word, not an independent review. Re-run Task 3 through a fresh
+loop before treating it as done.
 
 ## Verification this plan cannot do
 
