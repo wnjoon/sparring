@@ -1,11 +1,16 @@
 {
   "name": "spar",
-  "version": "0.6.0",
-  "description": "Enforced review sparring with blind rounds, safe skips, intent pointers, a risk-triggered final sweep, unattended mode, a final run report (/spar:report), and a /spar:ready plan → /spar:fight execute workflow",
+  "version": "0.7.0",
+  "description": "Enforced review sparring with blind rounds, safe skips, intent pointers, a risk-triggered final sweep, unattended mode, a final run report (/spar:report), a productive-round cap that separates a deadlock from a review still finding work, and a /spar:ready plan → /spar:fight execute workflow",
   "author": {
     "name": "wnjoon"
   },
   "repository": "https://github.com/wnjoon/sparring",
   "license": "MIT",
-  "keywords": ["code-review", "codex", "convergence", "quality"]
+  "keywords": [
+    "code-review",
+    "codex",
+    "convergence",
+    "quality"
+  ]
 }

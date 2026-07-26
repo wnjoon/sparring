@@ -5,7 +5,7 @@
 
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: v0.6.0 — adds the final run report: every finished run writes `reviews/spar-<id>-report.md` (converged or not), shown by `/spar:report`. The Claude-hosted loop includes safe skips, design-intent pointers, a risk-triggered final sweep, and unattended mode; `/spar:ready` turns a spec into a checkbox plan on a dedicated branch and `/spar:fight` runs it task-by-task.**
+**Status: v0.7.0 — the round cap now tells a deadlock from a review that is still finding real work. `max_rounds` (5) is a soft cap, passed while rounds stay productive; `hard_cap` (2 × max_rounds) always ends the run. Also ships the Codex-hosted author seat: `adapters/codex/install.sh` registers the same two hooks with Codex and installs the `spar-fight` / `spar-ready` / `spar-cancel` / `spar-report` skills — code complete, not yet run end to end with live models.**
 
 Phases 1–5 and 8 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar:fight` gives you:
 
@@ -25,7 +25,7 @@ Phases 1–5 and 8 are implemented; the core loop is verified end-to-end against
 
 
 
-Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phase 6 (the Codex-hosted mirror) is code complete — `adapters/codex/install.sh` registers the same two hooks with Codex and installs the author-seat skills — but it has not yet been run end to end with live models, so it is not claimed as done. Phase 7 (model economics) is design only. The [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
+Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phase 6 (the Codex-hosted mirror) is code complete — `adapters/codex/install.sh` registers the same two hooks with Codex and installs the author-seat skills — but it has not yet been run end to end with live models, so it is not claimed as done. Phase 7 (model economics) is design only. The two-level round cap arrived in v0.7.0 after three dogfooding runs ended at the cap with nothing contested — see [the design note](docs/superpowers/specs/2026-07-26-productive-round-extension-design.md). The [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 
 ## Direction
 
@@ -131,7 +131,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Core loop: `/spar:fight`, Stop hook, round machinery, per-finding response enforcement, round cap, read-only reviewer | ✅ done |
+| 1 | Core loop: `/spar:fight`, Stop hook, round machinery, per-finding response enforcement, two-level round cap, read-only reviewer | ✅ done |
 | 2 | `[DESIGN]` debate-first (conveyance boundary + decision ledger) · stalemate blind judge · batched end-of-loop gate · cross-round semantic finding matcher | ✅ done |
 | 3 | Single-agent mode: same-family sparring (Claude reviewer/judge/matcher) so `/spar:fight` works without Codex — auto-detect + explicit override; cross-model stays the default | ✅ done |
 | 4 | Safe skip + changed-surface intent harvest + risk-triggered final sweep + durable exit reason | ✅ done |
