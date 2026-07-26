@@ -44,7 +44,7 @@ This task adds the coverage that would have caught the whole class in one go, an
 - Consumes: the landed gate in `plugins/spar/hooks/stop-hook.sh` (fields → validations → gate → teardown).
 - Produces: no new interface. If the review finds the ordering wrong, the fix belongs here too.
 
-- [ ] **Step 1: Write the consolidated contract test**
+- [x] **Step 1: Write the consolidated contract test**
 
 The existing cases check each rule separately, which is how the contradictory instruction survived three rounds. Append one case that walks a single foreign session through every state the gate must distinguish, before the final PASS/FAIL lines:
 
@@ -87,14 +87,14 @@ OUT=$(payload sess-aaa | bash "$HOOK")
 chk "contract: healthy+owner → round dispatched" "spar-run-reviewer.sh" "$OUT"
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 ```bash
 bash tests/test_stop_hook.sh
 ```
 Expected: `FAIL=0` — the contract already holds; this case documents it as one unit.
 
-- [ ] **Step 3: Prove each row is load-bearing**
+- [x] **Step 3: Prove each row is load-bearing**
 
 Move the gate in a scratch copy and confirm the rows disagree, so the case is a real guard rather than a restatement:
 
@@ -115,14 +115,14 @@ rm -rf "$SC"
 ```
 Expected: a non-zero count, and the failures name the `inactive+foreign` rows.
 
-- [ ] **Step 4: Run the whole suite**
+- [x] **Step 4: Run the whole suite**
 
 ```bash
 for t in tests/test_*.sh; do printf '%-34s ' "$t"; bash "$t" >/dev/null 2>&1 && echo OK || echo FAILED; done
 ```
 Expected: every line `OK`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_stop_hook.sh
