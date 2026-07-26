@@ -289,6 +289,16 @@ from this future-decisions document after landing.
   strength, and both share one gatekeeper — `stop-hook.sh` already discards its
   stdin and decides only from the state file and artifacts. Full design:
   `docs/superpowers/specs/2026-07-25-phase6-codex-adapter-design.md`.
+- **Implementation status (2026-07-26):** code complete on the Phase 6 branch —
+  `adapters/codex/{hooks.json.template,install.sh,skills/}` register both hooks and
+  install four author-seat skills, and the shared engine gained the three seat-aware
+  changes (self-locating plugin root, `author` field driving the sweep,
+  `owner_session` gating). **Not yet run end to end with live models**, so the
+  roadmap does not mark it done. The four things only a real session can settle:
+  the hook trust path, user-vs-project hook scope, whether `SessionStart` fires
+  before a skill's first action, and a planted-bug run going FINDINGS → fix →
+  re-review → CONVERGED. Plan:
+  `docs/superpowers/plans/2026-07-26-phase6-remaining.md`.
 - Entry point for the author seat is a **Codex skill**
   (`~/.codex/skills/spar-fight/SKILL.md`), not `~/.codex/prompts/` (no such
   mechanism in 0.144.1). Hook registration is a standalone `hooks.json` installed

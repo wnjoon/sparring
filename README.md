@@ -25,7 +25,7 @@ Phases 1–5 and 8 are implemented; the core loop is verified end-to-end against
 
 
 
-Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phases 6–7 (the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
+Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phase 6 (the Codex-hosted mirror) is code complete — `adapters/codex/install.sh` registers the same two hooks with Codex and installs the author-seat skills — but it has not yet been run end to end with live models, so it is not claimed as done. Phase 7 (model economics) is design only. The [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 
 ## Direction
 
@@ -98,7 +98,7 @@ The reviewer / judge / matcher run as **Codex** (`codex exec --sandbox read-only
 
 The same structure runs in both directions. The seats swap; the invariants don't:
 
-| Seat | Claude-hosted (`/spar:fight`) | Codex-hosted (planned) |
+| Seat | Claude-hosted (`/spar:fight`) | Codex-hosted (`spar-fight` skill) |
 |---|---|---|
 | Author (sole writer) | Claude Code session | Codex CLI session |
 | Reviewer (declares `CONVERGED`) | `codex exec --sandbox read-only` (default) or `claude -p` (single-agent) | `claude -p` (read-only tools) |
@@ -120,7 +120,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 3 | Single-agent mode: same-family sparring (Claude reviewer/judge/matcher) so `/spar:fight` works without Codex — auto-detect + explicit override; cross-model stays the default | ✅ done |
 | 4 | Safe skip + changed-surface intent harvest + risk-triggered final sweep + durable exit reason | ✅ done |
 | 5 | Unattended mode + final report (`/spar:report`) | ✅ done |
-| 6 | Codex-hosted adapter: mirror the seats (Codex authors, `claude -p` reviews) and reuse the same Stop-hook gatekeeper via Codex's own `Stop` hook | planned |
+| 6 | Codex-hosted adapter: mirror the seats (Codex authors, `claude -p` reviews) and reuse the same Stop-hook gatekeeper via Codex's own `Stop` hook | 🔨 code complete, pending a live end-to-end run |
 | 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
 | 8 | `/spar:ready` + `/spar:fight` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) fight loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | ✅ done |
 
@@ -142,6 +142,7 @@ skip.
 ```
 plugins/spar/            Claude Code plugin (commands, Stop hook)
   commands/              /spar:ready, /spar:fight, /spar:cancel, /spar:report, setup guards + surface helpers
+adapters/codex/          Codex-hosted seat: hooks.json template, installer, skills
   shared/policy.md       loop policy — source of truth for both adapters
   shared/prompts/        reviewer / judge / matcher / sweeper templates
 docs/superpowers/        specs, plans, and design-decisions per phase

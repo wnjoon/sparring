@@ -209,9 +209,42 @@ except Exception as exc:
 print(f"sparring hooks installed in {target}")
 PY
 
+# Skills — the author-seat command surface. They live beside the hooks: user scope
+# under CODEX_HOME/HOME, project scope in the working tree. Copied only when the
+# content differs, so a re-run is a genuine no-op.
+SKILLS_SRC="$SELF_DIR/skills"
+if [ -d "$SKILLS_SRC" ]; then
+  case "$scope" in
+    user)    SKILLS_DEST="${CODEX_HOME:-$HOME/.codex}/skills" ;;
+    project) SKILLS_DEST=".codex/skills" ;;
+  esac
+  # An explicit --target overrides the scope default, so place the skills beside it.
+  [ "$target_given" = 1 ] && SKILLS_DEST="$(dirname "$target")/skills"
+  installed=0
+  for src in "$SKILLS_SRC"/*/SKILL.md; do
+    [ -f "$src" ] || continue
+    name="$(basename "$(dirname "$src")")"
+    dest="$SKILLS_DEST/$name/SKILL.md"
+    if [ -L "$dest" ] || { [ -e "$dest" ] && [ ! -f "$dest" ]; }; then
+      echo "warning: skipping $dest (not a regular file)" >&2
+      continue
+    fi
+    if [ -f "$dest" ] && cmp -s "$src" "$dest"; then continue; fi
+    mkdir -p "$(dirname "$dest")" || exit 3
+    cp "$src" "$dest" || exit 3
+    installed=$((installed + 1))
+  done
+  if [ "$installed" -gt 0 ]; then
+    echo "sparring skills installed in $SKILLS_DEST ($installed updated)"
+  else
+    echo "sparring skills already current in $SKILLS_DEST"
+  fi
+fi
+
 cat <<EOF
 Codex asks you to trust a hook the first time it runs after a change. Accept it
 once; the registration is not rewritten per run, so it will not ask again.
 Choosing "Continue without trusting" means the hooks do not run and the review
-loop is NOT enforced for that session.
+loop is NOT enforced for that session — the spar-fight skill refuses to start in
+that case rather than running an unenforced loop.
 EOF

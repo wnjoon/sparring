@@ -5,7 +5,19 @@ set -uo pipefail
 QUEUE="reviews/spar-pending.md"
 
 trap 'exit 0' ERR      # any failure → stay silent, fail open
-cat >/dev/null 2>&1 || true   # consume the hook JSON on stdin
+IN=$(cat 2>/dev/null || true)  # consume the hook JSON on stdin
+
+# Liveness marker: the only way an activation step can prove that THIS session's
+# hooks actually run. Codex makes hook trust a per-session choice ("Continue
+# without trusting (hooks won't run)") and exposes no CLI that reports hook state,
+# so no amount of inspecting configuration can answer it — only the hook having
+# fired can. Written under reviews/, which already exists for a real run, and
+# never created here: an unrelated session must leave no trace.
+SESSION_ID=$(printf '%s' "$IN" \
+  | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+if [ -n "$SESSION_ID" ] && [ -d reviews ] && [ ! -L reviews ]; then
+  printf '%s\n' "$SESSION_ID" > reviews/.spar-hook-live 2>/dev/null || true
+fi
 
 # Only read a real regular file (never follow a symlink).
 [ -f "$QUEUE" ] && [ ! -L "$QUEUE" ] || exit 0

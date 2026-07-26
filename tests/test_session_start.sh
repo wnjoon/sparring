@@ -43,4 +43,41 @@ jq -e . "$J" >/dev/null && { echo "PASS: hooks.json valid"; PASS=$((PASS+1)); } 
 chk "SessionStart command registered" "session-start.sh" "$(jq -r '.hooks.SessionStart[].hooks[].command' "$J")"
 chk "Stop hook untouched" "stop-fight.sh" "$(jq -r '.hooks.Stop[].hooks[].command' "$J")"
 
+# 6. the hook leaves a liveness marker so activation can prove it ran
+fresh
+run '{"source":"startup","session_id":"sess-live-1"}' >/dev/null
+chk "marker written" "sess-live-1" "$(cat reviews/.spar-hook-live 2>/dev/null)"
+
+# 7. a second session overwrites it — the marker names the CURRENT session only
+run '{"source":"startup","session_id":"sess-live-2"}' >/dev/null
+chk "marker names the current session" "sess-live-2" "$(cat reviews/.spar-hook-live 2>/dev/null)"
+
+# 8. no session id → no marker, and still silent
+fresh
+OUT="$(run '{"source":"startup"}')"
+chk_empty "no session id → still silent" "" "$OUT"
+chk "no session id → no marker" "absent" \
+  "$([ -f reviews/.spar-hook-live ] && echo present || echo absent)"
+
+# 9. the marker never resurrects a symlinked reviews/ and never creates one
+fresh
+rm -rf reviews
+run '{"source":"startup","session_id":"sess-live-3"}' >/dev/null
+chk "no reviews/ → marker skipped, directory not created" "absent" \
+  "$([ -d reviews ] && echo present || echo absent)"
+
+fresh
+outside=$(mktemp -d); rm -rf reviews; ln -s "$outside" reviews
+run '{"source":"startup","session_id":"sess-live-4"}' >/dev/null
+chk "symlinked reviews/ → marker not written through it" "absent" \
+  "$([ -f "$outside/.spar-hook-live" ] && echo present || echo absent)"
+rm -rf "$outside"
+
+# 10. the marker does not disturb the pending-queue announcement
+fresh
+printf '# sparring — pending\n\n## id-a :: f | one\ntext\n' > reviews/spar-pending.md
+OUT="$(run '{"source":"startup","session_id":"sess-live-5"}')"
+chk "queue still announced alongside the marker" "1 design decision" "$OUT"
+chk "marker still written" "sess-live-5" "$(cat reviews/.spar-hook-live 2>/dev/null)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

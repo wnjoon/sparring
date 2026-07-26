@@ -221,4 +221,29 @@ chk "absolute target under a symlinked parent → installs" "stop-fight.sh" \
   "$(cat "$real/hooks.json" 2>/dev/null)"
 rm -rf "$real"
 
+# 19. the skills exist and carry the load-bearing loop rules
+for sk in spar-fight spar-ready spar-cancel spar-report; do
+  F="$ROOT/adapters/codex/skills/$sk/SKILL.md"
+  chk "$sk skill exists" "present" "$([ -f "$F" ] && echo present || echo absent)"
+done
+FIGHT="$(cat "$ROOT/adapters/codex/skills/spar-fight/SKILL.md" 2>/dev/null)"
+chk "fight skill forbids self-declared convergence" "Never write" "$FIGHT"
+chk "fight skill states the response format" "FIXED" "$FIGHT"
+chk "fight skill requires the liveness check" ".spar-hook-live" "$FIGHT"
+chk "fight skill claims the session" "owner_session" "$FIGHT"
+chk "fight skill sets the author seat" "author: codex" "$FIGHT"
+chk "fight skill refuses when enforcement is unproven" "NOT be enforced" "$FIGHT"
+
+# 20. the installer places the skills, idempotently
+fresh
+HOME="$PWD/fakehome" CODEX_HOME="$PWD/fakecodex" bash "$INSTALL" >/dev/null 2>&1
+chk "installer places the fight skill" "present" \
+  "$([ -f "$PWD/fakecodex/skills/spar-fight/SKILL.md" ] && echo present || echo absent)"
+chk "installer places the report skill" "present" \
+  "$([ -f "$PWD/fakecodex/skills/spar-report/SKILL.md" ] && echo present || echo absent)"
+BEFORE="$(cat "$PWD/fakecodex/skills/spar-fight/SKILL.md")"
+HOME="$PWD/fakehome" CODEX_HOME="$PWD/fakecodex" bash "$INSTALL" >/dev/null 2>&1
+chk "re-install leaves skills byte-identical" "$BEFORE" \
+  "$(cat "$PWD/fakecodex/skills/spar-fight/SKILL.md")"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
