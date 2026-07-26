@@ -1237,5 +1237,45 @@ printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] x\n- file: a.py:1\n- problem: 
 OUT=$(payload sess-zzz | bash "$HOOK")
 chk_absent_hook '"decision":"block"' "$OUT" "foreign session mid-round → never blocks"
 
+# ── the gate's full ordering contract, in one place ──
+# fields → validations → gate → teardown. Each row below fails if the gate moves
+# in one direction, and the pair together pins it from both sides. The separate
+# cases above check each rule alone, which is how a self-contradictory placement
+# instruction ("after the validations AND before any mutation" — the `active`
+# branch IS a mutation) survived three review rounds.
+owner_state() { # $1=extra sed expression applied to the state file
+  fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+  [ -n "${1:-}" ] && { sed -i '' "$1" .claude/spar.local.md 2>/dev/null \
+    || sed -i "$1" .claude/spar.local.md; }
+  return 0
+}
+
+# 1. healthy + foreign → untouched (gate is before the teardown)
+owner_state
+OUT=$(payload sess-zzz | bash "$HOOK")
+chk "contract: healthy+foreign → approve" '"decision":"approve"' "$OUT"
+chk "contract: healthy+foreign → state kept" "present" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+
+# 2. inactive + foreign → untouched (the teardown is a mutation; strangers skip it)
+owner_state 's/^active: true/active: false/'
+payload sess-zzz | bash "$HOOK" >/dev/null
+chk "contract: inactive+foreign → state kept" "present" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+chk "contract: inactive+foreign → no outcome" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-outcome.md ] && echo present || echo absent)"
+
+# 3. corrupt + foreign → HANDLED (validations run first; a file we cannot parse
+#    cannot be trusted to name its owner, and must not sit inert)
+owner_state 's/^review_id: .*/review_id: ..\/..\/evil/'
+payload sess-zzz | bash "$HOOK" >/dev/null
+chk "contract: corrupt+foreign → cleaned up" "gone" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
+
+# 4. healthy + owner → proceeds normally
+owner_state
+OUT=$(payload sess-aaa | bash "$HOOK")
+chk "contract: healthy+owner → round dispatched" "spar-run-reviewer.sh" "$OUT"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
