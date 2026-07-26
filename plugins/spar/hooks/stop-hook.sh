@@ -151,8 +151,61 @@ SWEEP_RESULT=$(field sweep_result)
 
 echo "$REVIEW_ID" | grep -qE '^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$' \
   || { log "invalid review_id: $REVIEW_ID"; finish_approve error-bypass; }
+# Digits alone are not a usable number here, and neither is arithmetic on them.
+# "08" is octal to bash and raises an error mid-expansion. Worse, bash wraps at 64
+# bits, so 18446744073709551617 evaluates to 1 — an absurd value that arrives
+# looking like a perfectly ordinary budget. A range check placed AFTER the
+# conversion cannot see the difference, so the bound is enforced on the digit
+# STRING first and arithmetic only ever runs on a value already known to be safe.
+#
+# The bound is arithmetic safety, NOT a view about sensible budgets. 18 digits
+# keeps every value below 10^18, so doubling one stays well inside a signed 64-bit
+# range and nothing here can overflow. What counts as a reasonable cap is the
+# user's call: rejecting max_rounds: 101 because someone here picked 100 would be
+# reshaping an intent they stated plainly, which is the thing this parse is
+# supposed to avoid.
+SAFE_DIGITS=999999999999999999      # 18 nines: 2x this still cannot overflow
+# Callers must absorb the failure (|| VAR=""): a rejected value is expected input,
+# not an internal error, and an unhandled non-zero status would trip the ERR trap
+# and fail the whole hook open on a typo in the state file.
+bounded_int() {                     # $1=digits $2=inclusive bound → echo value, or fail
+  local v="$1" b="$2"
+  v="${v#"${v%%[!0]*}"}"; [ -n "$v" ] || v=0     # strip leading zeros
+  [ "${#v}" -le "${#b}" ] || return 1            # too many digits: out of range, no math
+  v=$((10#$v))
+  [ "$v" -le "$b" ] || return 1
+  printf '%s' "$v"
+}
+
 case "$ROUND" in ''|*[!0-9]*) log "invalid round: $ROUND"; finish_approve error-bypass;; esac
-case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=5;; esac
+ROUND_OK=$(bounded_int "$ROUND" "$SAFE_DIGITS") \
+  || { log "round out of range: $ROUND"; finish_approve error-bypass; }
+ROUND="$ROUND_OK"
+
+case "$MAX_ROUNDS" in
+  ''|*[!0-9]*) MAX_ROUNDS=5 ;;
+  *) MAX_ROUNDS_OK=$(bounded_int "$MAX_ROUNDS" "$SAFE_DIGITS") || MAX_ROUNDS_OK=""
+     if [ -z "$MAX_ROUNDS_OK" ] || [ "$MAX_ROUNDS_OK" -lt 1 ]; then
+       log "max_rounds unusable: $MAX_ROUNDS — using 5"; MAX_ROUNDS=5
+     else MAX_ROUNDS="$MAX_ROUNDS_OK"; fi ;;
+esac
+# The soft cap guards against DEADLOCK; the hard cap is the only thing that
+# guarantees termination. See the extension logic at the end of the review phase
+# for why the two differ. Defaults to double the soft cap, so it stays
+# proportional to whatever budget the run actually asked for rather than jumping
+# to a constant a user who set max_rounds: 3 never agreed to. An explicit value is
+# honoured as written; the only adjustment is that it can never sit below the soft
+# cap, where it would mean "extend to less than we already allow".
+HARD_CAP=$(field hard_cap)
+case "$HARD_CAP" in
+  ''|*[!0-9]*) HARD_CAP=$((MAX_ROUNDS * 2)) ;;
+  *) HARD_CAP_OK=$(bounded_int "$HARD_CAP" "$SAFE_DIGITS") || HARD_CAP_OK=""
+     if [ -z "$HARD_CAP_OK" ]; then
+       log "hard_cap unusable: $HARD_CAP — using 2x max_rounds"
+       HARD_CAP=$((MAX_ROUNDS * 2))
+     else HARD_CAP="$HARD_CAP_OK"; fi ;;
+esac
+[ "$HARD_CAP" -lt "$MAX_ROUNDS" ] && HARD_CAP="$MAX_ROUNDS"
 case "$INCLUDE_DIRTY" in
   ''|false) INCLUDE_DIRTY=false ;;
   true) ;;
@@ -376,6 +429,70 @@ resolve_alias() { # $1=fp
 parked_fingerprints() {
   [ -f "$REGISTRY_FILE" ] || return 0
   awk -F'\t' '$5=="parked"{print $1}' "$REGISTRY_FILE" 2>/dev/null
+}
+
+# True when a round moved the work forward without anyone digging in.
+#
+# The three ways a round can mean "the two sides disagree" are all visible here:
+# the author REJECTED a finding, the author wrote a section that says neither
+# FIXED nor REJECTED (ambiguous — treated as dispute, never as progress), or the
+# round escalated to the blind judge. A round with none of those is one where the
+# reviewer raised real work and the author did it.
+#
+# Deliberately NOT part of the test: whether a finding is a repeat of an earlier
+# one. A finding that recurs is either fixed again — which is still progress — or
+# rejected, which this already catches. Adding recurrence would only make the
+# signal harder to reason about.
+# Driven from the REVIEW's findings, not the response's sections. The gate before
+# this only checks that a response file exists, so a response that omits a finding
+# — or names none at all — reaches here; reading only what the author wrote would
+# score those silences as agreement and hand the run extra rounds on the strength
+# of an unanswered finding. Same rule fold_registry already applies: a finding
+# with no disposition is UNKNOWN.
+# Findings answered exactly once, with FIXED standing on its own after the colon.
+#
+# Stricter than parse_responses on purpose, and separate from it on purpose. That
+# parser is deliberately permissive so the registry keeps working when an author
+# writes "FIXED (see the note below)" — but it also reads "FIXEDLY" as FIXED and
+# keeps only the first section when a finding is answered twice. Permissive is
+# right for bookkeeping and wrong here: this is the only disposition that buys
+# extra rounds, so anything short of an unambiguous answer must not qualify. A
+# finding answered FIXED and then REJECTED is a conflict, not an answer.
+#
+# "FIXED" must be followed by whitespace or end the line — the documented grammar
+# is `FIXED — <what you did>`. Any other character makes a different word or a
+# hedge: FIXED?, FIXED-ish and FIXED/REJECTED are all things an author might write
+# when they are not sure, and "not sure" is the state the soft cap exists to stop
+# on. Being strict here only ever withholds extra rounds, never grants them.
+strict_fixed_ids() { # $1 = response file
+  awk '
+    /^### F[0-9]+-[0-9]+:/ {
+      id=$2; sub(/:$/, "", id)
+      seen[id]++
+      rest=$0; sub(/^### F[0-9]+-[0-9]+:[ \t]*/, "", rest)
+      if (rest ~ /^FIXED([ \t]|$)/) ok[id]++
+      next
+    }
+    END { for (i in seen) if (seen[i] == 1 && ok[i] == 1) print i }
+  ' "$1" 2>/dev/null
+}
+
+round_was_productive() { # $1 = round
+  local rf resp; rf=$(review_file "$1"); resp=$(response_file "$1")
+  [ -f "$rf" ] && [ -f "$resp" ] || return 1
+  [ -f "$JUDGE_PENDING" ] && return 1
+  [ -n "$(parked_fingerprints)" ] && return 1
+  local fixed; fixed=$(mktemp) || return 1
+  strict_fixed_ids "$resp" > "$fixed"
+  local id tag file nt any=0 ok=1
+  while IFS=$'\t' read -r id tag file nt; do
+    [ -n "$id" ] || continue
+    any=1
+    grep -qxF -- "$id" "$fixed" || { ok=0; break; }
+  done < <(parse_findings "$rf")
+  rm -f "$fixed"
+  # A round with no parseable finding is not evidence of progress either.
+  [ "$any" = 1 ] && [ "$ok" = 1 ]
 }
 
 # True if the round's review raised ≥1 finding and EVERY raised finding is parked.
@@ -1159,19 +1276,44 @@ as '### P<k>: <decision + basis>'. Then stop again." \
         "sparring [${REVIEW_ID}] round ${ROUND}: design gate"
     fi
 
+    # The soft cap exists to stop a DEADLOCK — two sides that will not agree, where
+    # more rounds buy nothing. It counts elapsed rounds, which also catches a very
+    # different case: a review that is still surfacing real work the author keeps
+    # fixing. Stopping that one discards progress and protects no one, and there is
+    # no cheap way to resume it afterwards — a fresh run re-bases on the committed
+    # work, so the reviewer would be handed an empty diff. Whatever rounds this run
+    # needs, it has to get inside this run.
+    #
+    # So: extend past the soft cap while rounds stay productive, and stop at the
+    # hard cap regardless. The hard cap is what makes this terminate — a reviewer
+    # that invents one fresh nitpick per round would otherwise never stop, and every
+    # such round is a full re-review of the whole diff.
     if [ "$ROUND" -ge "$MAX_ROUNDS" ]; then
-      log "round cap ${MAX_ROUNDS} reached — unconverged exit"
-      record_outcome cap
-      # An unconverged run is exactly the one a human needs summarized. Safe here:
-      # this path only deactivates and blocks, so cleanup() (and with it the
-      # ledger and registry the report reads) has not run yet.
-      generate_report
-      deactivate_state
-      block "Round cap (${MAX_ROUNDS}) reached and the reviewer has NOT
+      if [ "$ROUND" -lt "$HARD_CAP" ] && round_was_productive "$ROUND"; then
+        log "round ${ROUND} productive (nothing rejected, nothing escalated) — extending past the soft cap ${MAX_ROUNDS}, hard cap ${HARD_CAP}"
+      else
+        if [ "$ROUND" -ge "$HARD_CAP" ]; then
+          CAP_KIND="Hard round cap (${HARD_CAP})"
+          log "hard cap ${HARD_CAP} reached — unconverged exit"
+        else
+          CAP_KIND="Round cap (${MAX_ROUNDS})"
+          log "round cap ${MAX_ROUNDS} reached on a non-productive round — unconverged exit"
+        fi
+        record_outcome cap
+        # An unconverged run is exactly the one a human needs summarized. Safe here:
+        # this path only deactivates and blocks, so cleanup() (and with it the
+        # ledger and registry the report reads) has not run yet.
+        generate_report
+        deactivate_state
+        block "${CAP_KIND} reached and the reviewer has NOT
 converged. Do not keep fixing. Report to the user: the loop ended
-unconverged — summarize the unresolved findings from ${RF} honestly, then
-stop. The loop is now deactivated; your next stop will be released." \
-        "sparring [${REVIEW_ID}]: round cap — unconverged"
+unconverged — summarize the unresolved findings from ${RF} honestly, and say
+plainly which fixes were never re-reviewed. Do NOT suggest committing and
+re-running to continue: a new run re-bases on the commit, so the reviewer
+would see an empty diff. The loop is now deactivated; your next stop will be
+released." \
+          "sparring [${REVIEW_ID}]: round cap — unconverged"
+      fi
     fi
 
     NEXT=$((ROUND + 1))

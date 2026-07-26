@@ -196,6 +196,8 @@ chk "prompt resolves intent slot" "absent" \
 in_review() { fresh_dir; write_state review "$1"; mkdir -p reviews; }
 RF1="reviews/spar-20260721-120000-abc123-r1.md"
 RP1="reviews/spar-20260721-120000-abc123-r1-response.md"
+RF5X="reviews/spar-20260721-120000-abc123-r5.md"
+RP5X="reviews/spar-20260721-120000-abc123-r5-response.md"
 
 # ── 5. review file missing → block (retry), 3rd miss → fail-open ──
 in_review 1
@@ -1276,6 +1278,328 @@ chk "contract: corrupt+foreign → cleaned up" "gone" \
 owner_state
 OUT=$(payload sess-aaa | bash "$HOOK")
 chk "contract: healthy+owner → round dispatched" "spar-run-reviewer.sh" "$OUT"
+
+# ── X. the soft cap extends while rounds stay PRODUCTIVE ─────────────────────
+# The cap counts elapsed rounds, which conflates a deadlock with a review that is
+# still finding real work. A round where nothing was rejected and nothing
+# escalated is the second case; it must not end the run.
+set_field() { # $1=key $2=value
+  sed -i '' "s/^$1: .*/$1: $2/" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^$1: .*/$1: $2/" .claude/spar.local.md
+}
+round_files() { # $1=round  → writes a FINDINGS review + an all-FIXED response
+  printf 'STATUS: FINDINGS\n\n### F%s-1 [MECHANICAL] a real defect\n' "$1" \
+    > "reviews/spar-20260721-120000-abc123-r$1.md"
+  printf '### F%s-1: FIXED — corrected it\n' "$1" \
+    > "reviews/spar-20260721-120000-abc123-r$1-response.md"
+}
+
+in_review 5
+round_files 5
+OUT=$(run_hook)
+chk "productive round 5 → extends instead of capping" 'Round 6 verification review' "$OUT"
+chk "productive round 5 → still active" 'active: true' "$(cat .claude/spar.local.md)"
+chk "productive round 5 → round advanced" 'round: 6' "$(cat .claude/spar.local.md)"
+chk "productive round 5 → no cap outcome recorded" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-outcome.md ] && echo present || echo absent)"
+
+# A rejection is a dispute, and a dispute is exactly what the soft cap is for.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] a real defect\n' > "$RF5X"
+printf '### F5-1: REJECTED — grounded reason\n' > "$RP5X"
+OUT=$(run_hook)
+chk "rejection at the soft cap → caps, does not extend" 'Round cap (5) reached' "$OUT"
+chk "rejection at the soft cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+
+# An ambiguous response is treated as dispute, never as progress.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] a real defect\n' > "$RF5X"
+printf '### F5-1: looked at it\n' > "$RP5X"
+OUT=$(run_hook)
+chk "ambiguous response at the soft cap → caps" 'Round cap (5) reached' "$OUT"
+
+# The hard cap terminates a run that stays productive forever.
+in_review 10
+round_files 10
+OUT=$(run_hook)
+chk "hard cap → stops even on a productive round" 'Hard round cap (10) reached' "$OUT"
+chk "hard cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+chk "hard cap → durable cap outcome" "reason: cap" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+chk "hard cap → report carries the real round count" "rounds: 10" \
+  "$(cat reviews/spar-20260721-120000-abc123-report.md 2>/dev/null)"
+
+# Rounds between the two caps keep extending.
+in_review 8
+round_files 8
+OUT=$(run_hook)
+chk "productive round 8 → still extends below the hard cap" 'Round 9 verification review' "$OUT"
+
+# The hard cap is proportional to the budget the run asked for, not a constant:
+# max_rounds 3 doubles to 6, so a deliberately cheap run stays cheap.
+in_review 3
+set_field max_rounds 3
+round_files 3
+OUT=$(run_hook)
+chk "max_rounds 3 → extends past 3" 'Round 4 verification review' "$OUT"
+in_review 6
+set_field max_rounds 3
+round_files 6
+OUT=$(run_hook)
+chk "max_rounds 3 → hard cap is 6, not 10" 'Hard round cap (6) reached' "$OUT"
+
+# An explicit hard_cap overrides the doubling.
+in_review 5
+set_field max_rounds 5
+printf 'hard_cap: 5\n' >> /dev/null
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md
+round_files 5
+OUT=$(run_hook)
+chk "explicit hard_cap 5 → no extension at all" 'Hard round cap (5) reached' "$OUT"
+
+# A response that omits a finding is silence, not agreement. The gate before the
+# productivity test only checks that a response FILE exists, so these reach it.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n\n### F5-2 [MECHANICAL] two\n' > "$RF5X"
+printf '### F5-1: FIXED — did it\n' > "$RP5X"
+OUT=$(run_hook)
+chk "omitted response at the soft cap → caps, does not extend" 'Round cap (5) reached' "$OUT"
+
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+printf 'I looked at everything and it is fine.\n' > "$RP5X"
+OUT=$(run_hook)
+chk "unrecognised response at the soft cap → caps" 'Round cap (5) reached' "$OUT"
+
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+: > "$RP5X"
+OUT=$(run_hook)
+chk "empty response at the soft cap → caps" 'Round cap (5) reached' "$OUT"
+
+# A FINDINGS review with nothing parseable is not evidence of progress either.
+in_review 5
+printf 'STATUS: FINDINGS\n\nno structured findings here\n' > "$RF5X"
+printf '### F5-1: FIXED — did it\n' > "$RP5X"
+OUT=$(run_hook)
+chk "unparseable review at the soft cap → caps" 'Round cap (5) reached' "$OUT"
+
+# Several findings, all answered FIXED, still extends.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n\n### F5-2 [MECHANICAL] two\n' > "$RF5X"
+printf '### F5-1: FIXED — a\n\n### F5-2: FIXED — b\n' > "$RP5X"
+OUT=$(run_hook)
+chk "all findings answered FIXED → extends" 'Round 6 verification review' "$OUT"
+
+# Digit-only is not the same as usable. A leading zero is octal to bash's
+# arithmetic, and a twenty-digit value wraps — doubling it can come out negative.
+# Neither may reach a comparison that decides whether the loop keeps running.
+in_review 5
+set_field max_rounds 08
+round_files 5
+OUT=$(run_hook 2>&1)
+chk "leading-zero max_rounds → no arithmetic error on stderr" "clean" \
+  "$(printf '%s' "$OUT" | grep -q 'value too great for base' && echo dirty || echo clean)"
+chk "leading-zero max_rounds → read as decimal 8, so round 5 extends" \
+  'Round 6 verification review' "$OUT"
+
+in_review 8
+set_field max_rounds 08
+round_files 8
+OUT=$(run_hook 2>&1)
+chk "leading-zero max_rounds → 8 means 8, so round 8 still extends" \
+  'Round 9 verification review' "$OUT"
+in_review 16
+set_field max_rounds 08
+round_files 16
+OUT=$(run_hook 2>&1)
+chk "leading-zero max_rounds → hard cap is 16, not 0 or a wrap" \
+  'Hard round cap (16) reached' "$OUT"
+
+in_review 5
+set_field max_rounds 99999999999999999999
+round_files 5
+OUT=$(run_hook 2>&1)
+chk "absurd max_rounds → falls back to the default, no wraparound" \
+  'Round 6 verification review' "$OUT"
+chk "absurd max_rounds → recorded in the log" 'max_rounds unusable' "$(cat .claude/spar.log 2>/dev/null)"
+
+in_review 10
+set_field max_rounds 99999999999999999999
+round_files 10
+OUT=$(run_hook 2>&1)
+chk "absurd max_rounds → the run still terminates" 'Hard round cap (10) reached' "$OUT"
+
+in_review 5
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 99999999999999999999/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 99999999999999999999/' .claude/spar.local.md
+round_files 5
+OUT=$(run_hook 2>&1)
+chk "absurd hard_cap → falls back to 2x max_rounds" 'Round 6 verification review' "$OUT"
+in_review 10
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 99999999999999999999/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 99999999999999999999/' .claude/spar.local.md
+round_files 10
+OUT=$(run_hook 2>&1)
+chk "absurd hard_cap → the run still terminates at 2x" 'Hard round cap (10) reached' "$OUT"
+
+in_review 5
+set_field max_rounds 0
+round_files 5
+OUT=$(run_hook 2>&1)
+chk "max_rounds 0 → treated as invalid, default applies" 'Round 6 verification review' "$OUT"
+
+# Bash wraps at 64 bits, so an absurd value can arrive looking ordinary:
+# 2^64+1 = 18446744073709551617 evaluates to 1. A range check after the conversion
+# cannot tell that from a genuine "1", so the bound must hold on the digit string.
+WRAP1=18446744073709551617      # wraps to 1
+WRAP7=18446744073709551623      # wraps to 7
+in_review 5
+set_field max_rounds $WRAP1
+round_files 5
+OUT=$(run_hook 2>&1)
+chk "max_rounds wrapping to a small value → rejected, not accepted as 1" \
+  'Round 6 verification review' "$OUT"
+chk "max_rounds wrapping to a small value → logged as unusable" 'max_rounds unusable' \
+  "$(cat .claude/spar.log 2>/dev/null)"
+
+in_review 5
+sed -i '' "s/^max_rounds: 5/max_rounds: 5\nhard_cap: $WRAP1/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^max_rounds: 5/max_rounds: 5\nhard_cap: $WRAP1/" .claude/spar.local.md
+round_files 5
+OUT=$(run_hook 2>&1)
+chk "hard_cap wrapping to a small value → rejected, falls back to 2x" \
+  'Round 6 verification review' "$OUT"
+
+# A corrupt round must fail OPEN, not silently consume another round's artifacts.
+in_review 5
+set_field round $WRAP7
+printf 'STATUS: FINDINGS\n\n### F7-1 [MECHANICAL] planted\n' \
+  > reviews/spar-20260721-120000-abc123-r7.md
+chk "round wrapping to a small value → fails open, does not adopt round 7" \
+  '"decision":"approve"' "$(run_hook 2>&1)"
+
+# The hard cap's bound is twice the soft cap's, so doubling holds at every legal
+# max_rounds and an explicit override in that range is honoured, not shrunk.
+in_review 100
+set_field max_rounds 60
+round_files 100
+OUT=$(run_hook 2>&1)
+chk "max_rounds 60 → hard cap is 120, so round 100 extends" \
+  'Round 101 verification review' "$OUT"
+in_review 120
+set_field max_rounds 60
+round_files 120
+OUT=$(run_hook 2>&1)
+chk "max_rounds 60 → hard cap really is 120" 'Hard round cap (120) reached' "$OUT"
+
+in_review 100
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 120/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 120/' .claude/spar.local.md
+round_files 100
+OUT=$(run_hook 2>&1)
+chk "explicit hard_cap 120 → honoured, not shrunk to 100" \
+  'Round 101 verification review' "$OUT"
+
+# The soft cap is a budget, not a policy about sensible budgets. A value the user
+# stated plainly is honoured; only values arithmetic cannot carry are rejected.
+in_review 101
+set_field max_rounds 101
+round_files 101
+OUT=$(run_hook 2>&1)
+chk "max_rounds 101 → honoured, not shrunk to a built-in limit" \
+  'Round 102 verification review' "$OUT"
+in_review 202
+set_field max_rounds 101
+round_files 202
+OUT=$(run_hook 2>&1)
+chk "max_rounds 101 → its hard cap really is 202" 'Hard round cap (202) reached' "$OUT"
+in_review 240
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 250/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 250/' .claude/spar.local.md
+round_files 240
+OUT=$(run_hook 2>&1)
+chk "explicit hard_cap 250 → honoured" 'Round 241 verification review' "$OUT"
+
+# Only an UNAMBIGUOUS FIXED buys extra rounds. The shared response parser is
+# permissive by design; permissive is wrong for the one disposition that extends.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+printf '### F5-1: FIXEDLY — a word that merely starts with it\n' > "$RP5X"
+OUT=$(run_hook 2>&1)
+chk "FIXEDLY is not FIXED → caps" 'Round cap (5) reached' "$OUT"
+
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+printf '### F5-1: FIXED — did it\n\n### F5-1: REJECTED — actually no\n' > "$RP5X"
+OUT=$(run_hook 2>&1)
+chk "a finding answered twice is a conflict → caps" 'Round cap (5) reached' "$OUT"
+
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+printf '### F5-1: FIXED\n' > "$RP5X"
+OUT=$(run_hook 2>&1)
+chk "bare FIXED with no prose still counts → extends" 'Round 6 verification review' "$OUT"
+
+# A hedge is not an answer. Anything other than whitespace or end-of-line after
+# FIXED is a different word or a qualification, and both mean "not sure" — which
+# is the state the soft cap exists to stop on.
+for hedge in 'FIXED?' 'FIXED/REJECTED' 'FIXED-ish' 'FIXED.REJECTED'; do
+  in_review 5
+  printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+  printf '### F5-1: %s — not committing to it\n' "$hedge" > "$RP5X"
+  chk "hedged disposition '$hedge' → caps" 'Round cap (5) reached' "$(run_hook 2>&1)"
+done
+# ...while the documented grammar keeps working.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+printf '### F5-1: FIXED — did the thing\n' > "$RP5X"
+chk "the documented 'FIXED — prose' form still extends" \
+  'Round 6 verification review' "$(run_hook 2>&1)"
+
+# Requirement (2) names judged and parked explicitly. A round carrying either is
+# a dispute, so the soft cap must behave exactly as it did before this change.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] a.py fixed one\n\n### F5-2 [DESIGN] mod.py split it\n' > "$RF5X"
+printf '### F5-1: FIXED — did it\n\n### F5-2: REJECTED — cohesive on purpose\n' > "$RP5X"
+printf 'mod.py | split it\tDESIGN\t4\t2\tparked\n' > .claude/spar-registry.tsv
+OUT=$(run_hook 2>&1)
+chk "a parked finding in a mixed round → caps, never extends" 'Round cap (5) reached' "$OUT"
+chk "parked at the cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+chk "parked at the cap → durable cap outcome" "reason: cap" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+chk_file "parked at the cap → report generated" \
+  reviews/spar-20260721-120000-abc123-report.md
+
+# The parked guard must bite on its own. Here THIS round is spotless — every
+# finding answered FIXED — but a design question parked in an earlier round is
+# still outstanding, and an unresolved parked decision is not a converging run.
+in_review 5
+round_files 5
+printf 'mod.py | split it\tDESIGN\t3\t2\tparked\n' > .claude/spar-registry.tsv
+OUT=$(run_hook 2>&1)
+chk "an earlier parked finding blocks extension even on a clean round" \
+  'Round cap (5) reached' "$OUT"
+
+# A pending judge dispatch must never be scored as progress. The judge branch
+# runs first, so assert what matters: the run does not advance past the cap.
+in_review 5
+round_files 5
+printf 'a.py | fixed one\treviews/spar-20260721-120000-abc123-judge-1.md\n' > .claude/spar-judge-pending
+OUT=$(run_hook 2>&1)
+chk "judge pending at the soft cap → does not extend" "absent" \
+  "$(printf '%s' "$OUT" | grep -q 'Round 6 verification review' && echo present || echo absent)"
+
+# The cap message must not send the user down the commit-and-re-run path: a new
+# run re-bases on the commit, so its reviewer would be handed an empty diff.
+in_review 5
+round_files 5
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md
+CAPOUT=$(run_hook)
+chk "cap message warns against commit-and-re-run" 'empty diff' "$CAPOUT"
+chk "cap message asks what was never re-reviewed" 'never re-reviewed' "$CAPOUT"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

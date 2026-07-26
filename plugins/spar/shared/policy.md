@@ -43,8 +43,13 @@ gatekeeper implementation.
 4. Author must fix every MECHANICAL finding, decide DESIGN findings on the
    merits, and write a response file (`FIXED — ...` / `REJECTED — <grounded
    reason>` per finding) before the hook prepares the next round.
-5. Exit is released only by reviewer convergence, the round cap (default 5,
-   exits with an honest "unconverged" summary), or explicit cancel.
+5. Exit is released only by reviewer convergence, the round cap, or explicit
+   cancel. The cap has two levels. The **soft cap** (`max_rounds`, default 5) is
+   passed when the round that reached it was *productive* — nothing rejected,
+   nothing ambiguous, nothing escalated to the judge or parked — because that is
+   a review still finding real work, not a deadlock. The **hard cap**
+   (`hard_cap`, default `2 × max_rounds`) always ends the run. Either cap exits
+   with an honest "unconverged" summary and never pressures acceptance.
 6. Stalemate — a finding raised AND rejected for 2 consecutive rounds. A
    [MECHANICAL] stalemate goes to a blind judge, invoked read-only in the same
    resolved family as the reviewer (author only runs it; ruling

@@ -78,7 +78,14 @@ Everything below runs today. `/spar:ready` turns a spec into a checkbox plan; `/
       │    │    │            debate); UPHELD / DISMISSED is binding
       │    │    └─ design  → batched user gate + decision ledger at loop end
       │    ├─ author writes a per-finding response → round N+1
-      │    └─ round cap (5) with no convergence → cap exit
+      │    └─ soft cap (5) reached
+      │         ├─ that round was productive — every finding answered
+      │         │  FIXED, nothing rejected, nothing ambiguous or
+      │         │  unanswered, no judge pending, no parked design
+      │         │  finding → keep going, up to hard_cap
+      │         │  (2 x max_rounds, so 10 by default; set the
+      │         │  hard_cap state field to override)
+      │         └─ otherwise, or hard cap → cap exit
       │
       └─ STATUS: CONVERGED
               ├─ risky repo/path · 3+ rounds · design finding?

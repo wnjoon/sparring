@@ -365,9 +365,56 @@ from this future-decisions document after landing.
 
 - **Round cap = circuit breaker, not a quality mechanism.** Healthy loops end
   by convergence; contested loops end via judge/parking; the cap only stops
-  pathological oscillation. Configurable (`max_rounds`), always exits with an
-  honest "unconverged" report, never pressures acceptance. Revisit with
-  dogfooding data (does 5 ever fire?).
+  pathological oscillation. Always exits with an honest "unconverged" report,
+  never pressures acceptance.
+  - **Two levels, since 2026-07-26.** The dogfooding question above got its
+    answer: 5 fired, on a run that was not oscillating at all. Fourteen findings
+    raised, fourteen fixed, nothing rejected, no judge, and the matcher returned
+    NO MATCHES in all five rounds — every round found *new* work. Counting
+    elapsed rounds conflates a deadlock with a review that is still productive,
+    and only the first deserves a circuit breaker.
+  - So `max_rounds` (default 5) is now a **soft** cap, passed when the round that
+    reached it was productive: nothing REJECTED, no ambiguous response, no judge
+    dispatch, no parked design finding. Those are the three ways a round means
+    "we disagree"; their absence means the author simply did the work. `hard_cap`
+    (default `2 × max_rounds`) always stops the run — a reviewer that invents one
+    fresh nitpick per round would otherwise never terminate, and each round is a
+    full re-review of the whole diff. Doubling rather than a constant keeps the
+    ceiling proportional to the budget the run asked for: `max_rounds: 3` gets 6,
+    not a 10 the user never agreed to.
+  - **The productivity test reads the REVIEW's findings, not the response's
+    sections.** The gate before it only checks that a response file exists, so a
+    response that omits a finding reaches it; scoring what the author wrote would
+    read that silence as agreement, on exactly the finding the cap should stop
+    for. A finding with no disposition is UNKNOWN, the same rule
+    `fold_registry` applies.
+  - **Cap fields are bounded on the digit string, before arithmetic.** Bash reads
+    a leading zero as octal and wraps at 64 bits, so `18446744073709551617`
+    evaluates to `1` — an absurd value that a range check placed after the
+    conversion cannot distinguish from a real one. Out of range is rejected, not
+    clamped: a cap of 10^19 is a typo, not a budget. The bound is arithmetic
+    safety (18 digits, so doubling cannot overflow) and *not* a view about
+    sensible budgets — `max_rounds: 101` is honoured, because rejecting a number
+    the user stated plainly is the same silent reshaping the parse exists to
+    avoid.
+  - **Only an unambiguous FIXED buys extra rounds.** The shared response parser
+    is permissive so the registry survives "FIXED (see below)"; the productivity
+    test is not, because this is the one disposition that grants budget.
+    `FIXEDLY` does not count, and a finding answered twice is a conflict.
+  - **Recurrence is deliberately not part of the productivity test.** A finding
+    raised again is either fixed again (still progress) or rejected (already
+    caught). Adding it would only make the signal harder to reason about.
+  - **Why the rounds must be granted inside the run.** There is no cheap manual
+    continuation, and the obvious-looking one is wrong: a fresh `/spar:fight`
+    sets `base_sha` to HEAD, and the reviewer sees `git diff $BASE`. Commit the
+    capped work and re-run, and the reviewer is handed an *empty* diff — it
+    reviews nothing. (It is not silently green: a zero diff is deliberately sent
+    through review rather than safe-skipped, so it fails loudly.) The only real
+    manual continuation is leaving the work uncommitted and re-running with
+    `--include-dirty`, which re-reviews the whole surface from scratch with a
+    reviewer blind to the earlier rounds — a restart, not a resume. The cap
+    message therefore tells the author what was never re-reviewed and explicitly
+    warns against the commit-and-re-run path.
 - **Simplicity guard.** Invariants stay at 4. Every absorbed idea lands as
   hook code + tests or a small prompt change — never as prose rules the
   model must remember. When a new rule seems needed, first ask "can structure
