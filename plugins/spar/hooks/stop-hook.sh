@@ -442,8 +442,10 @@ parked_fingerprints() {
 # reviewer having to raise the same defect twice means a fix landed incomplete,
 # which is churn rather than progress. It was left out of the first version on the
 # reasoning that a repeat is either fixed again or rejected; the review of that
-# very change produced three repeats that were neither. The matcher decides it,
-# never the author, and its verdict is attributed to the round it was reached in.
+# very change produced three repeats that were neither. Neither source is the
+# author's judgment: identity is the engine's deterministic fingerprint, and the
+# matcher — never the author — rules on re-wordings, attributed to the round it
+# was reached in. See round_had_recurrence for why both are needed.
 # Driven from the REVIEW's findings, not the response's sections. The gate before
 # this only checks that a response file exists, so a response that omits a finding
 # — or names none at all — reaches here; reading only what the author wrote would

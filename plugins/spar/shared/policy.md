@@ -40,15 +40,18 @@ gatekeeper implementation.
    repository content is never copied into this channel.
 3. Reviewer output: first line `STATUS: CONVERGED` or `STATUS: FINDINGS`;
    findings tagged `[MECHANICAL]` or `[DESIGN]` with file/problem/suggestion.
-4. Author must fix every MECHANICAL finding, decide DESIGN findings on the
-   merits, and write a response file (`FIXED — ...` / `REJECTED — <grounded
+4. Author fixes every MECHANICAL finding on sight, and decides DESIGN findings
+   on the merits. A MECHANICAL finding may be rejected only with a reason
+   grounded in the code or the task requirements — never for convenience —
+   which is why item 6 has a MECHANICAL stalemate path at all; and write a response file (`FIXED — ...` / `REJECTED — <grounded
    reason>` per finding) before the hook prepares the next round.
 5. Exit is released only by reviewer convergence, the round cap, or explicit
    cancel. The cap has two levels. The **soft cap** (`max_rounds`, default 5) is
    passed when the round that reached it was *productive* — every finding answered
    with an unambiguous `FIXED`, nothing rejected or unanswered, nothing escalated
-   to the judge or parked, and no finding the matcher judged a repeat of an
-   earlier one — because that is a review still finding real work, not a
+   to the judge or parked, and no finding that repeats an earlier one — by the
+   deterministic fingerprint of item 7, or by a matcher `SAME` verdict for a
+   re-wording — because that is a review still finding real work, not a
    deadlock. Recurrence was excluded when the soft cap was first introduced and
    added on 2026-07-26: a repeat is a fix that landed incomplete, which is churn,
    not progress. Any repeat blocks the round rather than only a third appearance
@@ -78,9 +81,10 @@ gatekeeper implementation.
    defect re-worded; matches become aliases so the re-wording accumulates the
    stalemate streak on the canonical finding. A wrong or absent match never
    breaks an invariant, but it has three effects. An ABSENT match delays
-   stalemate detection (the reviewer keeps raising it) and can let a round that
-   was in fact a repeat score as productive and extend — both bounded by the
-   round cap. A WRONG match runs the other way: a false `SAME` caps a genuinely
+   stalemate detection (the reviewer keeps raising it) and can let a RE-WORDED
+   repeat score as productive and extend — both bounded by the round cap. A
+   repeat under the same fingerprint is unaffected: it is caught without the
+   matcher. A WRONG match runs the other way: a false `SAME` caps a genuinely
    productive round at the soft cap. That one is not bounded by the cap, it
    triggers it, and it is the deliberately reversible direction — rounds
    withheld can be granted by relaxing the rule, rounds granted in error cannot

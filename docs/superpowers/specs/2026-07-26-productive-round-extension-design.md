@@ -66,7 +66,8 @@ A round is **productive** when none of these hold:
   — treated as dispute, never as progress), or omits it entirely;
 - a blind judge dispatch is pending;
 - any design finding is parked;
-- the matcher judged any of this round's findings a repeat of an earlier one.
+- any of this round's findings repeats an earlier one — by the engine's
+  deterministic fingerprint, or by a matcher `SAME` verdict for a re-wording.
 
 The first four are the ways a round can mean "the two sides disagree". The fifth
 means something else — see below.
@@ -135,15 +136,41 @@ report and teardown unchanged, a design question parked in an earlier round
 blocks extension even when this round is spotless, and a pending judge dispatch
 never advances past the cap.
 
-Eighteen mutations were each confirmed to fail the checks that should catch them:
-removing the extension, removing the hard cap, dropping REJECTED from the
-productivity test (which also breaks the pre-existing cap tests, as it should),
-replacing the doubling with a constant 10, scoring productivity from the response
-file alone instead of from the review's findings, dropping base-10
-normalisation, dropping the range check, validating after the arithmetic instead
-of before it, bounding the hard cap by the soft cap's limit, reinstating the arbitrary
-100/200 policy limit, accepting a permissive or duplicated disposition, and
-dropping the parked-finding guard.
+Recurrence: a matcher-declared repeat this round caps while one from an earlier
+round does not; an aliases file written before the round column existed is not
+attributed to any round; `apply_matches` writes the whole three-field row with
+the right round in it; an identical re-raise caps with no matcher involved and no
+alias written; a re-raise differing only in case and punctuation caps; and a
+genuinely new defect in a file seen before still extends.
+
+Nineteen mutations were each confirmed to fail the checks that should catch them:
+
+1. removing the extension entirely;
+2. removing the hard cap;
+3. dropping REJECTED from the productivity test (this also breaks the
+   pre-existing cap tests, as it should);
+4. replacing the doubling with a constant 10;
+5. scoring productivity from the response file alone rather than from the
+   review's findings;
+6. dropping base-10 normalisation;
+7. dropping the range check;
+8. validating after the arithmetic instead of before it;
+9. bounding the hard cap by the soft cap's limit;
+10. reinstating the arbitrary 100/200 policy limit;
+11. accepting a permissive disposition (`FIXEDLY`) or a duplicated one;
+12. loosening what may follow `FIXED` to any non-word character;
+13. dropping the parked-finding guard;
+14. dropping the `round_had_recurrence` call from `round_was_productive`;
+15. comparing the wrong alias column, so any match condemns any round;
+16. dropping the round column from what `apply_matches` writes;
+17. recording a hardcoded round in it instead of the real one;
+18. reverting `gate_finding_text` to a two-variable read, so the new column is
+    swallowed into the canonical fingerprint;
+19. deriving recurrence from the matcher alone, so an identical re-raise passes.
+
+One change carries no test: scoping `_rnd` with `local` in `gate_finding_text`.
+It fixes a name leaking into the script's global scope and has no observable
+behaviour today, so there is nothing to assert that would not be a contrivance.
 
 ## Revision: recurrence, 2026-07-26
 
