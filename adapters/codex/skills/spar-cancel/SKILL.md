@@ -6,7 +6,8 @@ description: Clear an active sparring loop and/or a prepared plan, recording an 
 # spar-cancel
 
 ```bash
-SPAR_ROOT="${SPAR_PLUGIN_ROOT:-$HOME/.codex/sparring/plugins/spar}"
+SPAR_ROOT="${SPAR_PLUGIN_ROOT:-}"
+[ -n "$SPAR_ROOT" ] || SPAR_ROOT=@@SPAR_PLUGIN_ROOT@@
 if [ -f .claude/spar.local.md ]; then
   SW="$(sed -n 's/^sweep_result: *//p' .claude/spar.local.md | head -1)"
   case "$SW" in not-run|not-triggered|pending|clean|findings|error) ;; *) SW=not-run ;; esac

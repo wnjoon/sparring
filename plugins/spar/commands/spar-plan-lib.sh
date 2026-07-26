@@ -28,6 +28,27 @@ plan_set_field() { # $1=name $2=value [$3=file]
   ' "$f" > "$tmp" && mv "$tmp" "$f"
 }
 
+# Set a field whether or not it is already there. plan_set_field is a pure
+# replace, which silently does nothing on a state file written before the field
+# existed — fine for a field whose absence means "the default", and wrong for one
+# whose absence means "unguarded". Missing keys are appended at the end of the
+# frontmatter, so the task table below it is untouched.
+plan_put_field() { # $1=name $2=value [$3=file]
+  local f="${3:-$PLAN_STATE_DEFAULT}" tmp
+  tmp="${f}.tmp.$$"
+  awk -v k="$1" -v v="$2" '
+    BEGIN{done=0; marks=0}
+    /^---$/ {
+      marks++
+      if (marks == 2 && !done) { print k ": " v; done=1 }
+      print; next
+    }
+    marks<2 && $0 ~ "^" k ": *" && !done { print k ": " v; done=1; next }
+    { print }
+    END { if (!done) print k ": " v }
+  ' "$f" > "$tmp" && mv "$tmp" "$f"
+}
+
 plan_set_task_status() { # $1=index $2=status [$3=file]
   local f="${3:-$PLAN_STATE_DEFAULT}" tmp
   tmp="${f}.tmp.$$"

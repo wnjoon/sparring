@@ -3,6 +3,10 @@
 # to a content hash, so rewriting this file per run would re-prompt every loop.
 # The hooks self-disable when no loop is active, so an idle registration is free.
 # Usage: install.sh [--scope user|project] [--target <hooks.json>]
+#   --scope  places both the hook registration and the skills (user:
+#            CODEX_HOME/HOME, project: the working tree).
+#   --target relocates ONLY the hooks.json. Skills keep following --scope,
+#            since Codex looks for them at fixed paths.
 # Exit: 0 installed or already current; 2 usage; 3 unsafe path or I/O failure.
 set -uo pipefail
 
@@ -47,11 +51,12 @@ case "$target" in -*) target="./$target" ;; esac
 # symlinked `~/.codex` is a normal dotfiles setup and refusing it would be a dead
 # end with no way out.
 reject_unsafe_path() {
-  [ -L "$target" ] && { echo "error: target is a symlink: $target" >&2; exit 3; }
-  case "$target" in
+  local p="$1"
+  [ -L "$p" ] && { echo "error: target is a symlink: $p" >&2; exit 3; }
+  case "$p" in
     /*) ;;                       # user-chosen absolute path: their own tree
     *)
-      local anc="$target"
+      local anc="$p"
       while :; do
         anc=$(dirname "$anc")
         { [ "$anc" = "." ] || [ "$anc" = "/" ]; } && break
@@ -62,14 +67,14 @@ reject_unsafe_path() {
       done
       ;;
   esac
-  [ -e "$target" ] && [ ! -f "$target" ] \
-    && { echo "error: target is not a regular file: $target" >&2; exit 3; }
+  [ -e "$p" ] && [ ! -f "$p" ] \
+    && { echo "error: target is not a regular file: $p" >&2; exit 3; }
   return 0
 }
 
-reject_unsafe_path
+reject_unsafe_path "$target"
 mkdir -p "$(dirname "$target")" || exit 3
-reject_unsafe_path
+reject_unsafe_path "$target"
 
 command -v python3 >/dev/null 2>&1 \
   || { echo "error: python3 is required to merge hooks.json safely" >&2; exit 3; }
@@ -211,29 +216,64 @@ PY
 
 # Skills — the author-seat command surface. They live beside the hooks: user scope
 # under CODEX_HOME/HOME, project scope in the working tree. Copied only when the
-# content differs, so a re-run is a genuine no-op.
+# rendered content differs, so a re-run is a genuine no-op.
 SKILLS_SRC="$SELF_DIR/skills"
 if [ -d "$SKILLS_SRC" ]; then
   case "$scope" in
     user)    SKILLS_DEST="${CODEX_HOME:-$HOME/.codex}/skills" ;;
     project) SKILLS_DEST=".codex/skills" ;;
   esac
-  # An explicit --target overrides the scope default, so place the skills beside it.
-  [ "$target_given" = 1 ] && SKILLS_DEST="$(dirname "$target")/skills"
+  # --target moves the hooks FILE and nothing else. Skills stay on the scope
+  # default, because Codex discovers them at fixed locations: a copy next to an
+  # arbitrary hooks.json (say /tmp/skills) is a copy nothing will ever load.
+
+  # Every skill calls helper scripts under plugins/spar. The installed copy must
+  # carry the resolved path: an installed skill is read far from this checkout,
+  # and a guessed default would send it looking somewhere nothing was ever put.
+  # SPAR_PLUGIN_ROOT still wins at runtime, so a user who relocates the plugin can
+  # override without reinstalling.
+  # The path is substituted into a shell script the user will run, so it is
+  # shell-quoted first — the same reason the hook commands go through
+  # shlex.quote. A checkout under a directory containing `$(...)`, a backtick or
+  # a double quote would otherwise execute at activation time, inside a block the
+  # user has no reason to inspect. The placeholder therefore stands alone on the
+  # right-hand side of an assignment (`SPAR_ROOT=@@…@@`), never nested inside an
+  # already-quoted expansion, so the quoting shlex produces is the whole story.
+  render_skill() {                     # render_skill <src> <out>
+    SRC="$1" OUT="$2" ROOT="$PLUGIN_ROOT" python3 - <<'PY'
+import os, shlex, sys
+text = open(os.environ["SRC"], encoding="utf-8").read()
+text = text.replace("@@SPAR_PLUGIN_ROOT@@", shlex.quote(os.environ["ROOT"]))
+if "@@" in text:
+    print(f"error: {os.environ['SRC']}: unsubstituted @@placeholder@@ remains",
+          file=sys.stderr)
+    sys.exit(3)
+open(os.environ["OUT"], "w", encoding="utf-8").write(text)
+PY
+  }
+
   installed=0
+  RENDER_TMP="$(mktemp)" || exit 3
+  trap 'rm -f "$RENDER_TMP"' EXIT
   for src in "$SKILLS_SRC"/*/SKILL.md; do
     [ -f "$src" ] || continue
     name="$(basename "$(dirname "$src")")"
     dest="$SKILLS_DEST/$name/SKILL.md"
-    if [ -L "$dest" ] || { [ -e "$dest" ] && [ ! -f "$dest" ]; }; then
-      echo "warning: skipping $dest (not a regular file)" >&2
-      continue
-    fi
-    if [ -f "$dest" ] && cmp -s "$src" "$dest"; then continue; fi
+    # The same rule as the hooks target, for the same reason: under project scope
+    # these paths are relative and live in a tree the repository controls, so a
+    # `.codex/skills` symlink would redirect every installed skill out of the
+    # project — and `mkdir -p` would traverse it before any later check could
+    # notice. Unsafe is fatal, not skipped: an installer that reports success
+    # while leaving skills unwritten is worse than one that stops.
+    reject_unsafe_path "$dest"
     mkdir -p "$(dirname "$dest")" || exit 3
-    cp "$src" "$dest" || exit 3
+    reject_unsafe_path "$dest"
+    render_skill "$src" "$RENDER_TMP" || exit 3
+    if [ -f "$dest" ] && cmp -s "$RENDER_TMP" "$dest"; then continue; fi
+    cp "$RENDER_TMP" "$dest" || exit 3
     installed=$((installed + 1))
   done
+  rm -f "$RENDER_TMP"; trap - EXIT
   if [ "$installed" -gt 0 ]; then
     echo "sparring skills installed in $SKILLS_DEST ($installed updated)"
   else

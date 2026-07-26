@@ -299,6 +299,26 @@ from this future-decisions document after landing.
   before a skill's first action, and a planted-bug run going FINDINGS → fix →
   re-review → CONVERGED. Plan:
   `docs/superpowers/plans/2026-07-26-phase6-remaining.md`.
+- **Enforcement is proven per session, by a liveness marker.** Codex makes hook
+  trust a per-session choice and exposes no way to query it; measured against
+  0.144.1, an untrusted registration is *silently* skipped and the run completes
+  as if no hook existed. So `SessionStart` writes the session id to
+  `<git-dir>/spar-hook-live`, and `spar-fight` refuses to start unless that file
+  names the session running right now. Existence alone is not proof — a marker
+  outlives the session that wrote it. It sits in the git directory, not under
+  `reviews/`: activation must read it before it creates anything, so it has to be
+  somewhere a clean checkout already has, and writing `reviews/` from a hook would
+  litter every repository the user opens.
+  - `--git-dir`, not `--git-common-dir`: the marker names one session, and linked
+    worktrees are how one repository hosts several at once. A shared marker would
+    let a session started in worktree B invalidate worktree A, which then refuses
+    to activate while insisting its hooks never ran. The loop's git-excludes keep
+    using the common directory — those really are repository-wide.
+  - The skill reads its own id from `CODEX_THREAD_ID`, which is measured to equal
+    the session id Codex reports. Whether the *hook payload's* `session_id` is the
+    same string is the one link still unmeasured; the check is fail-closed, so a
+    divergence refuses to start rather than registering a run no session can
+    advance. The live end-to-end run settles it.
 - Entry point for the author seat is a **Codex skill**
   (`~/.codex/skills/spar-fight/SKILL.md`), not `~/.codex/prompts/` (no such
   mechanism in 0.144.1). Hook registration is a standalone `hooks.json` installed
@@ -310,8 +330,9 @@ from this future-decisions document after landing.
   abstraction, mirrored).
 - The sweep in this direction uses a fresh `codex exec` (read-only) so the
   "different model + no context" axis symmetry is preserved.
-- Entry point: `~/.codex/prompts/` custom prompt; shares
-  `plugins/spar/shared/` policy and templates.
+- Both seats share `plugins/spar/shared/` policy and templates, and the installer
+  stamps the resolved `plugins/spar` path into each installed skill so a skill
+  read from `~/.codex/skills/` still finds the helper scripts.
 
 ## Phase 7 — model economics
 

@@ -142,9 +142,10 @@ skip.
 ```
 plugins/spar/            Claude Code plugin (commands, Stop hook)
   commands/              /spar:ready, /spar:fight, /spar:cancel, /spar:report, setup guards + surface helpers
-adapters/codex/          Codex-hosted seat: hooks.json template, installer, skills
-  shared/policy.md       loop policy — source of truth for both adapters
+  hooks/                 Stop dispatcher + round engine + SessionStart
+  shared/policy.md       loop policy — source of truth for both seats
   shared/prompts/        reviewer / judge / matcher / sweeper templates
+adapters/codex/          Codex-hosted seat: hooks.json template, installer, skills
 docs/superpowers/        specs, plans, and design-decisions per phase
 tests/                   pure-bash hook + resolver tests
 bench/                   effect benchmark (living report + tasks/oracles)

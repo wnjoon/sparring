@@ -9,7 +9,13 @@ chk() { if printf '%s' "$3" | grep -qF "$2"; then echo "PASS: $1"; PASS=$((PASS+
 chk_empty() { if [ -z "$3" ]; then echo "PASS: $1"; PASS=$((PASS+1));
   else echo "FAIL: $1"; echo "  want:(empty)"; echo "  got :$3"; FAIL=$((FAIL+1)); fi; }
 run() { printf '%s' "$1" | bash "$H"; }
-fresh() { d=$(mktemp -d); cd "$d" || exit 1; mkdir -p reviews; }
+# A real repository, because the liveness marker lives in the git directory.
+fresh() { d=$(mktemp -d); cd "$d" || exit 1; git init -q .; mkdir -p reviews; }
+marker() { cat "$(git rev-parse --git-dir)/spar-hook-live" 2>/dev/null; }
+marker_state() {
+  [ -f "$(git rev-parse --git-dir)/spar-hook-live" ] 2>/dev/null \
+    && echo present || echo absent
+}
 
 # 1. no queue → silent, exit 0
 fresh
@@ -46,38 +52,62 @@ chk "Stop hook untouched" "stop-fight.sh" "$(jq -r '.hooks.Stop[].hooks[].comman
 # 6. the hook leaves a liveness marker so activation can prove it ran
 fresh
 run '{"source":"startup","session_id":"sess-live-1"}' >/dev/null
-chk "marker written" "sess-live-1" "$(cat reviews/.spar-hook-live 2>/dev/null)"
+chk "marker written" "sess-live-1" "$(marker)"
 
 # 7. a second session overwrites it — the marker names the CURRENT session only
 run '{"source":"startup","session_id":"sess-live-2"}' >/dev/null
-chk "marker names the current session" "sess-live-2" "$(cat reviews/.spar-hook-live 2>/dev/null)"
+chk "marker names the current session" "sess-live-2" "$(marker)"
 
 # 8. no session id → no marker, and still silent
 fresh
 OUT="$(run '{"source":"startup"}')"
 chk_empty "no session id → still silent" "" "$OUT"
-chk "no session id → no marker" "absent" \
-  "$([ -f reviews/.spar-hook-live ] && echo present || echo absent)"
+chk "no session id → no marker" "absent" "$(marker_state)"
 
-# 9. the marker never resurrects a symlinked reviews/ and never creates one
+# 9. a CLEAN CHECKOUT can bootstrap: reviews/ does not exist yet, and activation
+#    reads the marker before anything creates it. The git directory always does.
 fresh
 rm -rf reviews
 run '{"source":"startup","session_id":"sess-live-3"}' >/dev/null
-chk "no reviews/ → marker skipped, directory not created" "absent" \
-  "$([ -d reviews ] && echo present || echo absent)"
+chk "clean checkout → marker still written" "sess-live-3" "$(marker)"
+chk "clean checkout → reviews/ NOT created as a side effect" "absent" \
+  "$([ -e reviews ] && echo present || echo absent)"
 
-fresh
-outside=$(mktemp -d); rm -rf reviews; ln -s "$outside" reviews
+# 10. outside a repository nothing is written and nothing is created
+d=$(mktemp -d); cd "$d" || exit 1
 run '{"source":"startup","session_id":"sess-live-4"}' >/dev/null
-chk "symlinked reviews/ → marker not written through it" "absent" \
-  "$([ -f "$outside/.spar-hook-live" ] && echo present || echo absent)"
+chk_empty "no repository → no marker anywhere" "" \
+  "$(find . -name 'spar-hook-live*' 2>/dev/null)"
+
+# 11. a symlinked marker path is overwritten in place, never followed out of the
+#     git directory (the file is ours; a link there is not something we honour)
+fresh
+outside=$(mktemp -d)
+ln -s "$outside/planted" "$(git rev-parse --git-dir)/spar-hook-live"
+run '{"source":"startup","session_id":"sess-live-5"}' >/dev/null
+chk "symlinked marker → target outside the repo untouched" "absent" \
+  "$([ -f "$outside/planted" ] && echo present || echo absent)"
 rm -rf "$outside"
 
-# 10. the marker does not disturb the pending-queue announcement
+# 12. linked worktrees keep independent markers. The marker names one SESSION,
+#     and a shared common directory would let a session started in worktree B
+#     invalidate worktree A, which refuses to activate despite its hooks running.
+fresh
+git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+WT="$d/../wt-$$"; git worktree add -q "$WT" -b wt-branch 2>/dev/null
+run '{"source":"startup","session_id":"sess-main"}' >/dev/null
+cd "$WT" || exit 1
+run '{"source":"startup","session_id":"sess-worktree"}' >/dev/null
+chk "worktree marker names the worktree's session" "sess-worktree" "$(marker)"
+cd "$d" || exit 1
+chk "main worktree's marker survives the other session" "sess-main" "$(marker)"
+git worktree remove --force "$WT" 2>/dev/null
+
+# 13. the marker does not disturb the pending-queue announcement
 fresh
 printf '# sparring — pending\n\n## id-a :: f | one\ntext\n' > reviews/spar-pending.md
-OUT="$(run '{"source":"startup","session_id":"sess-live-5"}')"
+OUT="$(run '{"source":"startup","session_id":"sess-live-6"}')"
 chk "queue still announced alongside the marker" "1 design decision" "$OUT"
-chk "marker still written" "sess-live-5" "$(cat reviews/.spar-hook-live 2>/dev/null)"
+chk "marker still written" "sess-live-6" "$(marker)"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

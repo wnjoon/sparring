@@ -10,7 +10,14 @@ chk() { if printf '%s' "$3" | grep -qF -- "$2"; then echo "PASS: $1"; PASS=$((PA
 chk_absent() { if printf '%s' "$3" | grep -qF -- "$2"; then
     echo "FAIL: $1"; FAIL=$((FAIL+1)); else echo "PASS: $1"; PASS=$((PASS+1)); fi; }
 
-fresh() { d=$(mktemp -d); cd "$d" || exit 1; cd "$(pwd -P)" || exit 1; }
+# Every case runs in its own temp tree AND its own HOME/CODEX_HOME. Skills follow
+# --scope, so a case that passes only --target still resolves a user-scope skills
+# directory; without this the suite would write into the developer's real
+# ~/.codex on every run. Individual cases still override these inline.
+fresh() {
+  d=$(mktemp -d); cd "$d" || exit 1; cd "$(pwd -P)" || exit 1
+  export HOME="$PWD/.testhome" CODEX_HOME="$PWD/.testcodex"
+}
 
 # 1. fresh install registers both events at absolute paths
 fresh
@@ -229,10 +236,49 @@ done
 FIGHT="$(cat "$ROOT/adapters/codex/skills/spar-fight/SKILL.md" 2>/dev/null)"
 chk "fight skill forbids self-declared convergence" "Never write" "$FIGHT"
 chk "fight skill states the response format" "FIXED" "$FIGHT"
-chk "fight skill requires the liveness check" ".spar-hook-live" "$FIGHT"
+chk "fight skill requires the liveness check" "spar-hook-live" "$FIGHT"
 chk "fight skill claims the session" "owner_session" "$FIGHT"
 chk "fight skill sets the author seat" "author: codex" "$FIGHT"
 chk "fight skill refuses when enforcement is unproven" "NOT be enforced" "$FIGHT"
+
+# The marker must be checked for IDENTITY, not mere existence: one left by an
+# earlier session outlives it, and adopting it would start an unenforced loop.
+chk "fight skill compares the marker to this session" 'CODEX_THREAD_ID' "$FIGHT"
+chk "fight skill rejects a stale marker" "is stale" "$FIGHT"
+
+# It is the mirror of fight.md, not a sketch of it: the same dispatch, the same
+# guards, the same helper scripts. A skill missing these silently drops a
+# prepared plan on the floor, or reviews a dirty tree while claiming otherwise.
+chk "fight skill dispatches a prepared plan" "spar-plan.local.md" "$FIGHT"
+chk "fight skill refuses a task arg with a plan pending" "run spar-fight with no task" "$FIGHT"
+chk "fight skill launches through the shared launcher" "spar-fight-launch.sh" "$FIGHT"
+chk "fight skill runs the clean-worktree guard" "spar-check-worktree.sh" "$FIGHT"
+# A plan prepared by the Claude command has neither key, and plan_set_field is a
+# pure replace — stamping with it would leave the run ungated and mis-attributed.
+chk "fight skill stamps the author with an inserting write" "plan_put_field author codex" "$FIGHT"
+chk "fight skill stamps the session with an inserting write" "plan_put_field owner_session" "$FIGHT"
+chk_absent "fight skill never stamps the seat with a replace-only write" \
+  "plan_set_field owner_session" "$FIGHT"
+chk "fight skill resolves flags instead of hardcoding them" "spar-fight-resolve.sh" "$FIGHT"
+chk_absent "fight skill has no placeholder task" "TASK_DESCRIPTION_GOES_HERE" "$FIGHT"
+
+READY="$(cat "$ROOT/adapters/codex/skills/spar-ready/SKILL.md" 2>/dev/null)"
+chk "ready skill creates the dedicated branch" "git checkout -b" "$READY"
+chk "ready skill resolves its flags" "spar-ready-resolve.sh" "$READY"
+chk "ready skill initialises the plan state it later edits" "spar-plan.local.md.tmp" "$READY"
+chk "ready skill records the author seat on the plan" "author: codex" "$READY"
+chk "ready skill leaves owner_session for fight to stamp" "owner_session:" "$READY"
+chk "ready skill still ingests the task table" "spar-ready-ingest.sh" "$READY"
+
+# 19b. every skill reaches its helpers through a path the installer resolves —
+# a guessed default points at a directory nothing is ever installed into.
+for sk in spar-fight spar-ready spar-cancel spar-report; do
+  S="$(cat "$ROOT/adapters/codex/skills/$sk/SKILL.md" 2>/dev/null)"
+  case "$S" in
+    *'SPAR_PLUGIN_ROOT:-'*)
+      chk "$sk defaults to the substituted root" '@@SPAR_PLUGIN_ROOT@@' "$S" ;;
+  esac
+done
 
 # 20. the installer places the skills, idempotently
 fresh
@@ -245,5 +291,112 @@ BEFORE="$(cat "$PWD/fakecodex/skills/spar-fight/SKILL.md")"
 HOME="$PWD/fakehome" CODEX_HOME="$PWD/fakecodex" bash "$INSTALL" >/dev/null 2>&1
 chk "re-install leaves skills byte-identical" "$BEFORE" \
   "$(cat "$PWD/fakecodex/skills/spar-fight/SKILL.md")"
+
+# 21. the installed skill carries the REAL plugin path, so it works with
+# SPAR_PLUGIN_ROOT unset — which is the normal case after a plain install.
+INSTALLED="$(cat "$PWD/fakecodex/skills/spar-fight/SKILL.md")"
+chk_absent "installed skill keeps no placeholder" '@@SPAR_PLUGIN_ROOT@@' "$INSTALLED"
+chk "installed skill points at this checkout's plugin" "$ROOT/plugins/spar" "$INSTALLED"
+for sk in spar-ready spar-cancel spar-report; do
+  S="$(cat "$PWD/fakecodex/skills/$sk/SKILL.md")"
+  chk_absent "installed $sk keeps no placeholder" '@@' "$S"
+  chk "installed $sk points at this checkout's plugin" "$ROOT/plugins/spar" "$S"
+done
+# The resolved default must actually resolve — evaluated the way the skill's own
+# shell evaluates it, not string-matched, so the quoting is under test too.
+skill_root() {   # skill_root <skill text>  → the SPAR_ROOT the block would use
+  local assign
+  assign="$(printf '%s\n' "$1" | grep -m1 '|| SPAR_ROOT=')"
+  env -u SPAR_PLUGIN_ROOT bash -c \
+    "SPAR_ROOT=\"\${SPAR_PLUGIN_ROOT:-}\"; $assign; printf '%s' \"\$SPAR_ROOT\""
+}
+RESOLVED_ROOT="$(skill_root "$INSTALLED")"
+chk "installed skill's default root exists" "present" \
+  "$([ -d "$RESOLVED_ROOT" ] && [ -f "$RESOLVED_ROOT/commands/spar-plan-lib.sh" ] && echo present || echo absent)"
+
+# 22. project scope: a repository that symlinks .codex/skills must not redirect
+# the installed skills out of the tree. Unsafe is fatal — an installer reporting
+# success while writing nothing (or writing elsewhere) is the worse failure.
+fresh
+outside=$(mktemp -d)
+mkdir -p .codex; ln -s "$outside" .codex/skills
+bash "$INSTALL" --scope project >/dev/null 2>&1
+chk "symlinked project skills dir → exit 3" "3" "$?"
+chk "symlinked project skills dir → nothing written outside the tree" "empty" \
+  "$([ -z "$(ls -A "$outside" 2>/dev/null)" ] && echo empty || echo "wrote: $(ls -A "$outside")")"
+rm -rf "$outside"
+
+# The exact destination file being a symlink is refused the same way.
+fresh
+outside=$(mktemp -d)
+mkdir -p .codex/skills/spar-fight; ln -s "$outside/planted" .codex/skills/spar-fight/SKILL.md
+bash "$INSTALL" --scope project >/dev/null 2>&1
+chk "symlinked destination file → exit 3" "3" "$?"
+chk "symlinked destination file → link target never created" "absent" \
+  "$([ -e "$outside/planted" ] && echo present || echo absent)"
+rm -rf "$outside"
+
+# A real project tree still installs.
+fresh
+bash "$INSTALL" --scope project >/dev/null 2>&1
+chk "clean project scope → skills installed" "present" \
+  "$([ -f .codex/skills/spar-fight/SKILL.md ] && echo present || echo absent)"
+
+# 23. --target relocates the hooks file only. Codex discovers skills at fixed
+# paths, so a copy beside an arbitrary hooks.json is a copy nothing ever loads.
+fresh
+mkdir -p elsewhere
+bash "$INSTALL" --target ./elsewhere/hooks.json >/dev/null 2>&1
+chk "--target → hooks land at the given path" "stop-fight.sh" \
+  "$(cat ./elsewhere/hooks.json 2>/dev/null)"
+chk "--target → skills stay in the user-scope directory" "present" \
+  "$([ -f "$CODEX_HOME/skills/spar-fight/SKILL.md" ] && echo present || echo absent)"
+chk "--target → no skills orphaned beside the hooks file" "absent" \
+  "$([ -e ./elsewhere/skills ] && echo present || echo absent)"
+
+fresh
+mkdir -p elsewhere
+bash "$INSTALL" --scope project --target ./elsewhere/hooks.json >/dev/null 2>&1
+chk "--target with project scope → skills in .codex/skills" "present" \
+  "$([ -f .codex/skills/spar-fight/SKILL.md ] && echo present || echo absent)"
+chk "--target with project scope → none beside the hooks file" "absent" \
+  "$([ -e ./elsewhere/skills ] && echo present || echo absent)"
+
+# 24. a checkout path carrying shell metacharacters must not execute when the
+# installed skill's activation block runs. The path goes into a script the user
+# runs without reading, so quoting it is not cosmetic.
+fresh
+EVIL="$PWD/we\"ird \$(touch pwned) \`touch pwned2\` dir"
+mkdir -p "$EVIL"
+cp -R "$ROOT/adapters" "$EVIL/"
+cp -R "$ROOT/plugins" "$EVIL/"
+bash "$EVIL/adapters/codex/install.sh" >/dev/null 2>&1
+S="$(cat "$CODEX_HOME/skills/spar-fight/SKILL.md" 2>/dev/null)"
+chk "metacharacter path → skill resolves to the real plugin root" \
+  "$EVIL/plugins/spar" "$(skill_root "$S")"
+chk "metacharacter path → command substitution did not run" "absent" \
+  "$({ [ -e pwned ] || [ -e pwned2 ] || [ -e "$EVIL/pwned" ] || [ -e "$EVIL/pwned2" ]; } && echo present || echo absent)"
+for sk in spar-ready spar-cancel spar-report; do
+  S2="$(cat "$CODEX_HOME/skills/$sk/SKILL.md" 2>/dev/null)"
+  chk "metacharacter path → $sk resolves too" "$EVIL/plugins/spar" "$(skill_root "$S2")"
+done
+# SPAR_PLUGIN_ROOT still wins, which is the whole point of keeping the default.
+chk "SPAR_PLUGIN_ROOT overrides the baked-in default" "/somewhere/else" \
+  "$(SPAR_PLUGIN_ROOT=/somewhere/else bash -c "$(printf '%s\n' "$S" | grep -m1 '|| SPAR_ROOT=' | sed 's/^/SPAR_ROOT="${SPAR_PLUGIN_ROOT:-}"; /'); printf '%s' \"\$SPAR_ROOT\"")"
+
+# 25. arguments must not be pasted into the activation block. Task text is
+# arbitrary prose; a line matching a heredoc delimiter would end the heredoc and
+# hand the rest to the shell.
+for sk in spar-fight spar-ready; do
+  S="$(cat "$ROOT/adapters/codex/skills/$sk/SKILL.md" 2>/dev/null)"
+  chk_absent "$sk does not paste arguments into a heredoc" "ARGS_EOF" "$S"
+  chk "$sk reads arguments from a file" ".claude/spar-args.txt" "$S"
+  chk "$sk tells the model to write that file verbatim" "byte for byte" "$S"
+  chk "$sk consumes the file so a re-run cannot inherit it" 'rm -f "$SPAR_ARGS_FILE"' \
+    "$(printf '%s' "$S" | sed 's/RDY_ARGS_FILE/SPAR_ARGS_FILE/g')"
+done
+# The args path is already covered by the loop's git-exclude patterns.
+chk "the args file is hidden from the review surface" ".claude/spar*" \
+  "$(cat "$ROOT/adapters/codex/skills/spar-fight/SKILL.md")"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

@@ -5,12 +5,18 @@ description: Show the final report of a completed sparring run — outcome, roun
 
 # spar-report
 
+Run this, replacing `RUN_ID` with the run id the user named — letters, digits
+and hyphens only, which is all a run id ever contains. Leave it empty when they
+named none, and when they said something that is not a run id. Then present what
+it prints:
+
 ```bash
-SPAR_ROOT="${SPAR_PLUGIN_ROOT:-$HOME/.codex/sparring/plugins/spar}"
-"$SPAR_ROOT/commands/spar-report-show.sh" "$(printf '%s' "$1" | tr -d '[:space:]')" || true
+SPAR_ROOT="${SPAR_PLUGIN_ROOT:-}"
+[ -n "$SPAR_ROOT" ] || SPAR_ROOT=@@SPAR_PLUGIN_ROOT@@
+"$SPAR_ROOT/commands/spar-report-show.sh" "$(printf '%s' 'RUN_ID' | tr -d '[:space:]')" || true
 ```
 
-With no argument it shows the most recent run. Then summarize, in this order: the
+With no id it shows the most recent run. Then summarize, in this order: the
 outcome and round count, the findings tally, any decision still pending, and the
 changed files.
 
