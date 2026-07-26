@@ -274,4 +274,111 @@ chk "checklist asks whether the hooks fired" "did the hooks fire" "$CL"
 chk "checklist explains why the human answer is needed" "only you can" "$CL"
 chk "checklist keeps the ordering observation" "which happened" "$CL"
 
+# ── check ────────────────────────────────────────────────────────────────────
+# Helpers that plant exactly the artifacts a real run would leave behind.
+plant_marker() { # $1=workspace $2=session id
+  local gd; gd="$(git -C "$1/repo" rev-parse --git-dir)"
+  case "$gd" in /*) ;; *) gd="$1/repo/$gd" ;; esac
+  printf '%s\n' "$2" > "$gd/spar-hook-live"
+}
+plant_trust() { # $1=workspace
+  printf '[hooks.state."%s/home/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:deadbeef"\n' \
+    "$1" > "$1/home/config.toml"
+}
+plant_state() { # $1=workspace $2=owner_session
+  mkdir -p "$1/repo/.claude"
+  printf -- '---\nactive: false\nauthor: codex\nreviewer: claude\nowner_session: %s\n---\n' \
+    "$2" > "$1/repo/.claude/spar.local.md"
+}
+plant_report() { # $1=workspace $2=outcome
+  mkdir -p "$1/repo/reviews"
+  printf -- '- outcome: %s\n- rounds: 2\n' "$2" \
+    > "$1/repo/reviews/spar-20260726-120000-aaaaaa-report.md"
+}
+
+# 8. before the human has run anything, nothing is invented
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "check before a run → item 1 unresolved" "ITEM 1: NEEDS YOUR ANSWER" "$OUT"
+chk "check before a run → item 2 unresolved" "ITEM 2: NEEDS YOUR ANSWER" "$OUT"
+chk "check before a run → item 3 unresolved" "ITEM 3: NEEDS YOUR ANSWER" "$OUT"
+chk "check before a run → item 4 unresolved" "ITEM 4: NEEDS YOUR ANSWER" "$OUT"
+chk "check before a run → says the marker is absent" "no liveness marker" "$OUT"
+chk_absent "check before a run → never claims a pass" "CONFIRMED" "$OUT"
+chk "check before a run → exit 0, nothing failed" "0" "$RC"
+
+# 8b. trust is read from the isolated config.toml, not from the human
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "trusted_hash present → item 1 confirmed" "ITEM 1: CONFIRMED" "$OUT"
+chk "trusted but no marker → item 2 failed, not unknown" "ITEM 2: FAILED" "$OUT"
+chk "trusted but no marker → nonzero exit" "1" "$RC"
+
+# 8c. a hook that ran without a trust record is a failure, not a pass
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_marker "$PWD/ws" sess-untrusted
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "marker without trust record → item 1 failed" "ITEM 1: FAILED" "$OUT"
+chk "marker without trust record → nonzero exit" "1" "$RC"
+
+# 9. the full happy path
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-live-9
+plant_state "$PWD/ws" sess-live-9; plant_report "$PWD/ws" converged
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "happy path → item 1 confirmed" "ITEM 1: CONFIRMED" "$OUT"
+chk "happy path → item 2 confirmed" "ITEM 2: CONFIRMED" "$OUT"
+chk "happy path → item 3 confirmed" "ITEM 3: CONFIRMED" "$OUT"
+chk "happy path → item 4 confirmed" "ITEM 4: CONFIRMED" "$OUT"
+chk "happy path → item 3 evidence names the session" "sess-live-9" "$OUT"
+chk "happy path → item 4 evidence names the outcome" "converged" "$OUT"
+chk "happy path → exit 0" "0" "$RC"
+
+# 10. a marker naming a different session than the loop owned is a failure
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-A; plant_state "$PWD/ws" sess-B
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "mismatched session → item 3 failed" "ITEM 3: FAILED" "$OUT"
+chk "mismatched session → evidence names both" "sess-B" "$OUT"
+chk "mismatched session → nonzero exit" "1" "$RC"
+
+# 11. a capped run is not a converged run
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-c; plant_report "$PWD/ws" cap
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "capped run → item 4 failed" "ITEM 4: FAILED" "$OUT"
+chk "capped run → evidence names the cap" "cap" "$OUT"
+chk "capped run → nonzero exit" "1" "$RC"
+
+# 12. check refuses a directory that is not ours, and one inside CODEX_HOME
+fresh
+mkdir -p ./notours
+OUT=$(bash "$V" check --dir ./notours 2>&1); RC=$?
+chk "check on a foreign dir → exit 3" "3" "$RC"
+OUT=$(CODEX_HOME=/ bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "check with CODEX_HOME=/ → exit 3" "3" "$RC"
+
+# 13. trust belonging to a DIFFERENT hooks.json must not count as ours
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+printf '[hooks.state."/somewhere/else/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:x"\n' \
+  > ./ws/home/config.toml
+OUT=$(bash "$V" check --dir ./ws 2>&1)
+chk "foreign trust entry → item 1 still unresolved" "ITEM 1: NEEDS YOUR ANSWER" "$OUT"
+
+# 14. every verdict carries its evidence, so no line stands unexplained
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-e
+OUT=$(bash "$V" check --dir ./ws 2>&1)
+chk "each verdict is followed by evidence" "4" \
+  "$(printf '%s\n' "$OUT" | grep -A1 '^ITEM ' | grep -c '^  [^ ]')"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

@@ -120,6 +120,88 @@ if [ "$cmd" = clean ]; then
   exit 0
 fi
 
+# ── check ────────────────────────────────────────────────────────────────────
+if [ "$cmd" = check ]; then
+  is_ours "$want" || { echo "error: $want is not a harness workspace" >&2; exit 3; }
+  repo="$want/repo"
+  failed=0
+  say() { printf 'ITEM %s: %s\n  %s\n\n' "$1" "$2" "$3"; }
+
+  # Trust is durable: accepting the prompt writes a trusted_hash into the isolated
+  # config.toml, keyed by the hooks.json path and the event. Matched as a FIXED
+  # string against OUR hooks.json, so a trust record belonging to some other
+  # registration in the same file is not read as ours.
+  cfg="$want/home/config.toml"
+  trusted=0
+  if [ -f "$cfg" ] && grep -qF "hooks.state.\"$want/home/hooks.json:" "$cfg" 2>/dev/null; then
+    trusted=1
+  fi
+
+  gitdir="$(git -C "$repo" rev-parse --git-dir 2>/dev/null)"
+  case "$gitdir" in "") gitdir="$repo/.git" ;; /*) ;; *) gitdir="$repo/$gitdir" ;; esac
+  marker="$gitdir/spar-hook-live"
+  seen=""; [ -f "$marker" ] && seen="$(head -1 "$marker")"
+
+  # Item 1 — the trust path. The artifact settles "accepted". It cannot separate
+  # "never prompted" from "declined", which is why the checklist asks for that.
+  if [ "$trusted" = 1 ]; then
+    say 1 "CONFIRMED" \
+      "$cfg records a trusted_hash for this workspace's hooks.json — the prompt appeared and you accepted it"
+  elif [ -n "$seen" ]; then
+    say 1 "FAILED" \
+      "a liveness marker exists but $cfg records no trusted_hash — the hooks ran without the trust path this gate exists to exercise"
+    failed=1
+  else
+    say 1 "NEEDS YOUR ANSWER" \
+      "no trusted_hash in $cfg and no liveness marker — either no session ran, or you were never asked, or you declined; which was it?"
+  fi
+
+  # Item 2 — the user-scope registration firing for a project with no .codex/ of
+  # its own. Trust granted with nothing fired is what separates scope from trust.
+  if [ -n "$seen" ]; then
+    say 2 "CONFIRMED" \
+      "the user-scope registration fired for $repo, which has no .codex/ of its own — marker names $seen"
+  elif [ "$trusted" = 1 ]; then
+    say 2 "FAILED" \
+      "trust was granted but no liveness marker appeared under $repo — user scope did not fire for this directory"
+    failed=1
+  else
+    say 2 "NEEDS YOUR ANSWER" "nothing ran, so scope was never exercised"
+  fi
+
+  # Item 3 — SessionStart ordering. The marker must name the session the loop
+  # recorded as its owner; a mismatch means activation read a stale one.
+  owner="$(sed -n 's/^owner_session: *//p' "$repo/.claude/spar.local.md" 2>/dev/null | head -1)"
+  if [ -z "$seen" ]; then
+    say 3 "NEEDS YOUR ANSWER" \
+      "no liveness marker, so ordering cannot be judged — did spar-fight refuse to start?"
+  elif [ -n "$owner" ] && [ "$owner" != "$seen" ]; then
+    say 3 "FAILED" \
+      "marker names $seen but the loop recorded owner_session $owner — activation did not read this session's marker"
+    failed=1
+  else
+    say 3 "CONFIRMED" \
+      "marker names $seen${owner:+, matching the owner_session the loop recorded} — SessionStart fired before activation read it"
+  fi
+
+  # Item 4 — the planted bug reaching CONVERGED. Only a terminal path writes a
+  # report, so its absence means the loop never finished rather than that it lost.
+  rpt="$(ls "$repo"/reviews/spar-*-report.md 2>/dev/null | tail -1)"
+  if [ -z "$rpt" ]; then
+    say 4 "NEEDS YOUR ANSWER" \
+      "no run report under $repo/reviews — the loop never reached a terminal path"
+  else
+    outcome="$(sed -n 's/^- outcome: *//p' "$rpt" | head -1)"
+    if [ "$outcome" = converged ]; then
+      say 4 "CONFIRMED" "$(basename "$rpt") records outcome: converged"
+    else
+      say 4 "FAILED" "$(basename "$rpt") records outcome: ${outcome:-unreadable}, not converged"
+      failed=1
+    fi
+  fi
+  exit "$failed"
+fi
+
 # ── setup ────────────────────────────────────────────────────────────────────
 if [ "$cmd" = setup ]; then
   # Rebuilt from scratch every time, so a second run is a clean slate rather than

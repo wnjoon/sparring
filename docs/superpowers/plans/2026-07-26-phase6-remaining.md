@@ -557,3 +557,9 @@ Four things need a real Codex session with model credentials and are a release g
 4. **End-to-end**: a planted-bug task authored by Codex, reviewed by `claude -p`, going FINDINGS → fix → re-review → CONVERGED.
 
 Task 3 must not claim Phase 6 is done in the docs until item 4 has been run once.
+
+`adapters/codex/verify-live.sh` makes that run repeatable: `setup` builds an isolated
+CODEX_HOME and a scratch repository with a planted bug and prints a checklist, and
+`check` reads the artifacts afterwards and gives a per-item verdict. It does not
+replace the human step — accepting the trust prompt is interactive, and items 1 and 2
+still need what you saw.

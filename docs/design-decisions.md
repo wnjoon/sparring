@@ -298,7 +298,10 @@ from this future-decisions document after landing.
   the hook trust path, user-vs-project hook scope, whether `SessionStart` fires
   before a skill's first action, and a planted-bug run going FINDINGS → fix →
   re-review → CONVERGED. Plan:
-  `docs/superpowers/plans/2026-07-26-phase6-remaining.md`.
+  `docs/superpowers/plans/2026-07-26-phase6-remaining.md`. The run itself is set up and
+  judged by `adapters/codex/verify-live.sh` (isolated CODEX_HOME, planted bug,
+  per-item verdict); the trust prompt stays interactive, so items 1 and 2 also need
+  the human's observation.
 - **Enforcement is proven per session, by a liveness marker.** Codex makes hook
   trust a per-session choice and exposes no way to query it; measured against
   0.144.1, an untrusted registration is *silently* skipped and the run completes
