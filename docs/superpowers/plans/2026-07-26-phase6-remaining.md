@@ -141,7 +141,7 @@ git commit -m "test: pin the owner gate's full ordering contract in one case"
 - Consumes: the two registered scripts (`hooks/stop-fight.sh`, `hooks/session-start.sh`) and `PLUGIN_ROOT` self-location from Task 1.
 - Produces: `install.sh [--scope user|project] [--target <hooks.json>]`, defaulting to user scope (`~/.codex/hooks.json`). Idempotent: a second run with the same plugin path leaves the file byte-identical, so Codex's hook trust is not reset. Exit `0` installed or already current; `2` usage; `3` unsafe path or I/O failure.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_codex_adapter.sh`:
 
@@ -205,12 +205,12 @@ chk "mentions the trust prompt" "trust" "$OUT"
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bash tests/test_codex_adapter.sh`
 Expected: everything fails — `adapters/codex/install.sh` does not exist.
 
-- [ ] **Step 3: Write the template and installer**
+- [x] **Step 3: Write the template and installer**
 
 Create `adapters/codex/hooks.json.template` (the installer substitutes `@@PLUGIN_ROOT@@`):
 
@@ -339,21 +339,21 @@ EOF
 
 Then `chmod +x adapters/codex/install.sh`.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 bash tests/test_codex_adapter.sh
 ```
 Expected: `PASS=… FAIL=0`.
 
-- [ ] **Step 5: Run the whole suite**
+- [x] **Step 5: Run the whole suite**
 
 ```bash
 for t in tests/test_*.sh; do printf '%-34s ' "$t"; bash "$t" >/dev/null 2>&1 && echo OK || echo FAILED; done
 ```
 Expected: every line `OK` (20 suites now).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add adapters/codex/hooks.json.template adapters/codex/install.sh tests/test_codex_adapter.sh

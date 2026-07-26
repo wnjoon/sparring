@@ -33,15 +33,20 @@ trap 'log "ERR line $LINENO — emitting spar decision"; printf "%s\n" "$SPAR_DE
 
 INPUT="$(cat)"
 
-# Only log the engine's stderr where a log can exist. This matters for the Codex
-# seat: a user-scope hooks.json fires this dispatcher in EVERY session on the
-# machine, and most of those repositories have no .claude/ at all. Appending to
-# .claude/spar-fight.log there fails the redirect, which prints an error to the
-# user's session AND skips the engine entirely — the command never runs. Falling
-# back to /dev/null keeps unrelated sessions quiet without creating an empty
-# .claude/ in every repository the author opens, and the engine still runs, so the
-# passthrough contract is unchanged.
-if [ -d .claude ]; then ERR_SINK="$LOG"; else ERR_SINK=/dev/null; fi
+# Only log where this loop actually lives. This matters for the Codex seat: a
+# user-scope hooks.json fires this dispatcher in EVERY session on the machine.
+# Where there is no .claude/ at all, appending to .claude/spar-fight.log fails the
+# redirect, which prints an error into the user's session AND skips the engine
+# entirely (a failed redirect means the command never runs). Where .claude/ exists
+# but holds no spar state — any repository the author has used Claude Code in — a
+# log file would be created in a repository that has nothing to do with sparring.
+# Keyed on spar state, both cases stay silent and leave no trace, and the engine
+# still runs either way, so the passthrough contract is unchanged.
+if [ -f ".claude/spar.local.md" ] || [ -f "$PLAN_STATE" ]; then
+  ERR_SINK="$LOG"
+else
+  ERR_SINK=/dev/null
+fi
 
 NEW="$(printf '%s' "$INPUT" | bash "$SPAR_HOOK" 2>>"$ERR_SINK")" && [ -n "$NEW" ] && SPAR_DEC="$NEW"
 DEC="$(printf '%s\n' "$SPAR_DEC" | jq -r '.decision // "approve"' 2>/dev/null || echo approve)"
