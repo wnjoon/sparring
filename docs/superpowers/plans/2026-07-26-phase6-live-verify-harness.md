@@ -14,6 +14,7 @@
 - Hooks fail open; the harness must never leave a state that traps a real session.
 - No test may require `codex` or `claude` on PATH. Stub them the way `tests/test_stop_hook.sh` does.
 - The harness reports what it verified and what it could not. It never prints a pass for something only the human observed.
+- Hook trust is durable and therefore checkable. Accepting a trust prompt writes `[hooks.state."<hooks.json path>:<event>:<group>:<hook>"]` with a `trusted_hash` into `$CODEX_HOME/config.toml`; a home whose hooks were never trusted has no such entry (measured against Codex 0.144.1). Item 1 is read from there, not from the human.
 - Every file the harness creates lives under one workspace directory, and `clean` removes exactly that.
 - The four items under verification are fixed and are referred to by these numbers throughout: (1) hook trust path, (2) user-vs-project hook scope, (3) `SessionStart` ordering relative to a skill's first action, (4) a planted-bug run reaching CONVERGED.
 
@@ -314,10 +315,29 @@ a heading marker:
 fresh
 bash "$V" setup --dir ./ws >/dev/null 2>&1
 OUT=$(bash "$V" check --dir ./ws 2>&1)
+chk "check before a run → item 1 unresolved" "ITEM 1: NEEDS YOUR ANSWER" "$OUT"
 chk "check before a run → item 3 unresolved" "ITEM 3: NEEDS YOUR ANSWER" "$OUT"
 chk "check before a run → item 4 unresolved" "ITEM 4: NEEDS YOUR ANSWER" "$OUT"
 chk "check before a run → says the marker is absent" "no liveness marker" "$OUT"
 chk_absent "check before a run → never claims a pass" "ITEM 4: CONFIRMED" "$OUT"
+
+# 8b. trust is read from the isolated config.toml, not from the human
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+printf '[hooks.state."%s/ws/home/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:deadbeef"\n' "$PWD" \
+  > ./ws/home/config.toml
+OUT=$(bash "$V" check --dir ./ws 2>&1)
+chk "trusted_hash present → item 1 confirmed" "ITEM 1: CONFIRMED" "$OUT"
+chk "trusted but no marker → item 2 failed, not unknown" "ITEM 2: FAILED" "$OUT"
+
+# 8c. a hook that ran without a trust record is a failure, not a pass
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+GD=\$(git -C ./ws/repo rev-parse --git-dir)
+printf 'sess-untrusted\n' > "./ws/repo/\$GD/spar-hook-live"
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "marker without trust record → item 1 failed" "ITEM 1: FAILED" "$OUT"
+chk "marker without trust record → nonzero exit" "1" "$RC"
 
 # 9. a marker naming a session, and a converged report → items 3 and 4 confirmed
 fresh
@@ -334,7 +354,7 @@ chk "marker present → item 3 confirmed" "ITEM 3: CONFIRMED" "$OUT"
 chk "item 3 evidence names the session" "sess-live-9" "$OUT"
 chk "converged report → item 4 confirmed" "ITEM 4: CONFIRMED" "$OUT"
 chk "item 4 evidence names the outcome" "outcome: converged" "$OUT"
-chk "item 1 stays the human's to answer" "ITEM 1: NEEDS YOUR ANSWER" "$OUT"
+chk "trust plus marker → item 2 confirmed" "ITEM 2: CONFIRMED" "$OUT"
 
 # 10. a marker naming a DIFFERENT session than the loop owned → failure, not a pass
 fresh
@@ -380,21 +400,37 @@ if [ "$cmd" = check ]; then
   failed=0
   say() { printf 'ITEM %s: %s\n  %s\n\n' "$1" "$2" "$3"; }
 
-  # 1 and 2 leave no artifact that distinguishes them from each other: a hook that
-  # ran proves trust was granted AND user scope fired, but a hook that did not run
-  # cannot say which failed. So the marker is reported as shared evidence and the
-  # verdict stays with the human.
+  # Trust is durable: accepting the prompt writes a trusted_hash into the isolated
+  # config.toml, keyed by the hooks.json path and the event. That is what tells
+  # item 1 apart from item 2 — without it, a hook that never ran could not say
+  # whether trust was refused or the registration simply did not fire here.
+  cfg="$want/home/config.toml"
+  trusted=0
+  if [ -f "$cfg" ] \
+    && grep -q "^\[hooks\.state\.\"$want/home/hooks\.json:" "$cfg" 2>/dev/null; then
+    trusted=1
+  fi
   gitdir="$(git -C "$repo" rev-parse --git-dir 2>/dev/null)"
   marker="$repo/${gitdir:-.git}/spar-hook-live"
-  if [ -f "$marker" ]; then
-    seen="$(head -1 "$marker")"
-    ev="the SessionStart hook ran and left a marker naming '$seen' — so trust was granted and the user-scope registration fired"
+  seen=""; [ -f "$marker" ] && seen="$(head -1 "$marker")"
+
+  if [ "$trusted" = 1 ]; then
+    say 1 "CONFIRMED" "$cfg records a trusted_hash for the harness hooks.json — the prompt appeared and you accepted it"
+  elif [ -n "$seen" ]; then
+    say 1 "FAILED" "a liveness marker exists but $cfg records no trusted_hash — the hooks ran without the trust path this gate is meant to exercise"
+    failed=1
   else
-    seen=""
-    ev="no liveness marker under $repo — either the hooks never ran, or no session was started here"
+    say 1 "NEEDS YOUR ANSWER" "no trusted_hash in $cfg and no liveness marker — either no session ran, or you declined the prompt; which was it?"
   fi
-  say 1 "NEEDS YOUR ANSWER" "$ev; what did the trust prompt say?"
-  say 2 "NEEDS YOUR ANSWER" "$ev; did you see it fire for this project directory?"
+
+  if [ -n "$seen" ]; then
+    say 2 "CONFIRMED" "the user-scope registration fired for $repo, which has no .codex/ of its own — marker names '$seen'"
+  elif [ "$trusted" = 1 ]; then
+    say 2 "FAILED" "trust was granted but no liveness marker appeared under $repo — user scope did not fire for this directory"
+    failed=1
+  else
+    say 2 "NEEDS YOUR ANSWER" "nothing ran, so scope was never exercised"
+  fi
 
   # 3 is the one the artifacts can settle: the marker must name the session the
   # loop recorded as its owner.
@@ -456,8 +492,10 @@ git commit -m "feat(codex): verdicts from the live-verification artifacts"
 ## Non-goals
 
 - Automating the trust prompt. It is interactive by design, and a harness that
-  bypassed it would verify a path no real user takes.
-- Running Codex or Claude from the harness. Items 1–3 are about what a human sees.
+  bypassed it would verify a path no real user takes. Reading the decision back
+  out of `config.toml` afterwards is not the same thing and is fair game.
+- Running Codex or Claude from the harness. Starting the session is the human's
+  step; only the artifacts it leaves are the harness's.
 - Marking Phase 6 done. That happens after a real run, not after this lands.
 
 ## Verification this plan cannot do
