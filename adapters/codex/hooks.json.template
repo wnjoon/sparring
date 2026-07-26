@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_PLUGIN_ROOT='@@PLUGIN_ROOT@@' '@@PLUGIN_ROOT@@/hooks/stop-fight.sh'",
+            "timeout": 60,
+            "statusMessage": "sparring: checking loop phase..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_PLUGIN_ROOT='@@PLUGIN_ROOT@@' '@@PLUGIN_ROOT@@/hooks/session-start.sh'",
+            "timeout": 10,
+            "statusMessage": "sparring: checking for pending design decisions..."
+          }
+        ]
+      }
+    ]
+  }
+}

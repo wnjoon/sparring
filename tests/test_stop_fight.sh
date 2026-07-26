@@ -156,4 +156,20 @@ chk "no env → state advanced to review" "phase: review" "$(cat .claude/spar.lo
 rm -rf "$STUB_CLI"
 teardown
 
+# ── an unrelated repository must be silent ──
+# The Codex seat registers this dispatcher at user scope, so it fires in every
+# session on the machine — most of them in repositories with no .claude/ at all.
+# Those must approve quietly: no stderr, no .claude/ created, engine not spawned.
+setup
+unset SPAR_FIGHT_SPAR_HOOK
+rm -rf .claude
+ERRF=$(mktemp)
+OUT="$(echo '{}' | bash "$HOOK" 2>"$ERRF")"
+chk "no loop state → approve" '"approve"' "$OUT"
+nchk "no loop state → nothing on stderr" "No such file or directory" "$(cat "$ERRF")"
+chk "no loop state → no .claude/ litter" "absent" \
+  "$([ -d .claude ] && echo present || echo absent)"
+rm -f "$ERRF"
+teardown
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

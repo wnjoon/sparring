@@ -32,7 +32,18 @@ block(){ jq -nc --arg r "$1" --arg s "${2:-sparring fight}" \
 trap 'log "ERR line $LINENO — emitting spar decision"; printf "%s\n" "$SPAR_DEC"; exit 0' ERR
 
 INPUT="$(cat)"
-NEW="$(printf '%s' "$INPUT" | bash "$SPAR_HOOK" 2>>"$LOG")" && [ -n "$NEW" ] && SPAR_DEC="$NEW"
+
+# Only log the engine's stderr where a log can exist. This matters for the Codex
+# seat: a user-scope hooks.json fires this dispatcher in EVERY session on the
+# machine, and most of those repositories have no .claude/ at all. Appending to
+# .claude/spar-fight.log there fails the redirect, which prints an error to the
+# user's session AND skips the engine entirely — the command never runs. Falling
+# back to /dev/null keeps unrelated sessions quiet without creating an empty
+# .claude/ in every repository the author opens, and the engine still runs, so the
+# passthrough contract is unchanged.
+if [ -d .claude ]; then ERR_SINK="$LOG"; else ERR_SINK=/dev/null; fi
+
+NEW="$(printf '%s' "$INPUT" | bash "$SPAR_HOOK" 2>>"$ERR_SINK")" && [ -n "$NEW" ] && SPAR_DEC="$NEW"
 DEC="$(printf '%s\n' "$SPAR_DEC" | jq -r '.decision // "approve"' 2>/dev/null || echo approve)"
 
 [ -f "$PLAN_STATE" ] || passthrough
