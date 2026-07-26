@@ -401,9 +401,21 @@ from this future-decisions document after landing.
     is permissive so the registry survives "FIXED (see below)"; the productivity
     test is not, because this is the one disposition that grants budget.
     `FIXEDLY` does not count, and a finding answered twice is a conflict.
-  - **Recurrence is deliberately not part of the productivity test.** A finding
-    raised again is either fixed again (still progress) or rejected (already
-    caught). Adding it would only make the signal harder to reason about.
+  - **Recurrence counts against a round — revised 2026-07-26 after the second
+    run.** The first version left it out, reasoning that a finding raised again is
+    either fixed again (progress) or rejected (already caught). That enumeration
+    missed the case the review of this very change produced three times: a finding
+    fixed *incompletely* and re-raised. It is neither progress nor a rejection —
+    it is the reviewer having to say the same thing twice, which is the clearest
+    "not converging" signal short of an outright rejection, and the soft cap is
+    what it should hit. Neither half is the author's judgment: identity across
+    rounds is the engine's deterministic fingerprint, the same one the stalemate
+    streak has always used (policy §7), and the matcher decides only the
+    re-worded case, its verdict recorded per round so an early match does not
+    condemn a later one.
+    Deliberately the strict form (any repeat) rather than a "third appearance"
+    counter: the evidence is two runs, relaxing later is easy, and rounds lost to
+    a rule that was too generous cannot be recovered.
   - **Why the rounds must be granted inside the run.** There is no cheap manual
     continuation, and the obvious-looking one is wrong: a fresh `/spar:fight`
     sets `base_sha` to HEAD, and the reviewer sees `git diff $BASE`. Commit the

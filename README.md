@@ -80,9 +80,10 @@ Everything below runs today. `/spar:ready` turns a spec into a checkbox plan; `/
       │    ├─ author writes a per-finding response → round N+1
       │    └─ soft cap (5) reached
       │         ├─ that round was productive — every finding answered
-      │         │  FIXED, nothing rejected, nothing ambiguous or
-      │         │  unanswered, no judge pending, no parked design
-      │         │  finding → keep going, up to hard_cap
+      │         │  FIXED, nothing rejected, ambiguous or unanswered,
+      │         │  no judge pending, no parked design finding, and
+      │         │  no finding the matcher called a repeat
+      │         │  → keep going, up to hard_cap
       │         │  (2 x max_rounds, so 10 by default; set the
       │         │  hard_cap state field to override)
       │         └─ otherwise, or hard cap → cap exit
@@ -94,6 +95,13 @@ Everything below runs today. `/spar:ready` turns a spec into a checkbox plan; `/
               │        ├─ clean            → converged exit
               │        └─ findings at cap  → sweep-findings-at-cap exit
               └─ otherwise → converged exit
+
+  The soft cap is passed only while rounds stay productive, because it exists to
+  stop a deadlock and elapsed rounds alone cannot tell one from a review still
+  finding real work. A re-raised finding counts against a round: a repeat means a
+  fix landed incomplete. Any repeat blocks it, not just a third appearance —
+  strict is the reversible direction. Full rationale, including what overturned
+  the first version, is in docs/design-decisions.md.
 
   every exit above — converged · blocked-pending-user · cap ·
   sweep-findings-at-cap · skipped — writes the detailed final report

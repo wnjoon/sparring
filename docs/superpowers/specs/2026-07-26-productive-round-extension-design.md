@@ -1,7 +1,7 @@
 # Productive-round extension — design
 
 **Date:** 2026-07-26
-**Status:** implemented (`plugins/spar/hooks/stop-hook.sh`, 56 new checks in `tests/test_stop_hook.sh`)
+**Status:** implemented (`plugins/spar/hooks/stop-hook.sh`, 65 new checks in `tests/test_stop_hook.sh`)
 
 ## The problem, as observed
 
@@ -63,12 +63,13 @@ A round is **productive** when none of these hold:
 
 - the author REJECTED any finding;
 - the author's response for a finding says neither FIXED nor REJECTED (ambiguous
-  — treated as dispute, never as progress);
+  — treated as dispute, never as progress), or omits it entirely;
 - a blind judge dispatch is pending;
-- any design finding is parked.
+- any design finding is parked;
+- the matcher judged any of this round's findings a repeat of an earlier one.
 
-Those are the three ways a round can mean "the two sides disagree". Their absence
-means the reviewer raised real work and the author did it.
+The first four are the ways a round can mean "the two sides disagree". The fifth
+means something else — see below.
 
 ### Rejected alternatives
 
@@ -79,9 +80,10 @@ means the reviewer raised real work and the author did it.
 - **Stop on diminishing returns** (findings-per-round below a threshold).
   Severity is not modeled — only MECHANICAL/DESIGN — so "trivial" is not
   machine-visible, and the rule would risk stopping on a small but real finding.
-- **Include recurrence in the productivity test.** A finding raised again is
-  either fixed again, which is still progress, or rejected, which the test
-  already catches. It would add a signal without adding information.
+- ~~**Include recurrence in the productivity test.**~~ Rejected in the first
+  version on the reasoning that a finding raised again is either fixed again
+  (progress) or rejected (already caught) — **reversed on 2026-07-26**, see
+  below.
 - **A "grace round" that may not raise new findings.** Bounded and cheap, but it
   weakens the guarantee: a review forbidden from reporting what it sees is not
   the same instrument, and it needs a separate prompt to express that.
@@ -103,7 +105,7 @@ commit-and-re-run path for the reason above.
 
 ## Verification
 
-56 checks in `tests/test_stop_hook.sh` (suite total 293 → 349), both totals
+65 checks in `tests/test_stop_hook.sh` (suite total 293 → 358), both totals
 measured by running the suite with and without the change rather than counted
 from the diff.
 
@@ -133,7 +135,7 @@ report and teardown unchanged, a design question parked in an earlier round
 blocks extension even when this round is spotless, and a pending judge dispatch
 never advances past the cap.
 
-Thirteen mutations were each confirmed to fail the checks that should catch them:
+Eighteen mutations were each confirmed to fail the checks that should catch them:
 removing the extension, removing the hard cap, dropping REJECTED from the
 productivity test (which also breaks the pre-existing cap tests, as it should),
 replacing the doubling with a constant 10, scoring productivity from the response
@@ -143,9 +145,43 @@ of before it, bounding the hard cap by the soft cap's limit, reinstating the arb
 100/200 policy limit, accepting a permissive or duplicated disposition, and
 dropping the parked-finding guard.
 
+## Revision: recurrence, 2026-07-26
+
+The review of this change (`20260726-143952-4a5f53`) capped at 5 unconverged with
+12 findings raised, 12 fixed and 0 rejected — and the matcher flagged three of
+them as re-raised. Under the rule as first written, every one of those rounds
+scored as productive.
+
+The original enumeration was wrong: it counted two outcomes for a re-raised
+finding, and the run produced a third. A finding fixed *incompletely* and raised
+again is neither progress nor a rejection. All three here were mine — the FIXED
+grammar tightened twice before it was right, and the note's own check count went
+stale three times. That is the reviewer having to repeat itself, which is the
+clearest "not converging" signal short of an outright rejection, and it is
+exactly what the soft cap is for.
+
+So recurrence now counts against a round, from the two sources the engine
+already distinguishes (policy §7). Identity is the deterministic fingerprint —
+file plus normalized title — which is what the stalemate streak has always used
+and needs no judgment. The matcher covers the case identity misses, a repeat
+under different wording; a `SAME` verdict is an independent pass, never the
+author's own call, and it is recorded per round so a match in round 3 does not
+condemn round 5. What is excluded either way is the author deciding for himself
+that two findings are the same.
+
+Strict form (any repeat) rather than a "third appearance" counter, deliberately.
+A counter needs a raise-count column in the registry, whose exact lines existing
+tests compare verbatim, and the evidence for tuning it is two runs. Relaxing a
+rule later is easy; rounds granted by a rule that was too generous are gone. On
+the evidence available the strict rule keeps the case that motivated the feature
+— the first run, matcher `NO MATCHES` in all five rounds, would still extend —
+and tightens only the case that looked too permissive.
+
 ## Not covered
 
 Whether this changes real convergence rates is not something tests can answer.
-The next few dogfooding runs are the evidence; if productive runs routinely reach
-the hard cap, the productivity test is too permissive and should tighten rather
-than the ceiling rising.
+The next few dogfooding runs are the evidence, and they now cut both ways: if
+productive runs routinely reach the hard cap the test is still too permissive,
+and if runs keep capping at the soft cap on a single recurrence it is too strict
+and should relax toward the third-appearance rule. Two runs is not enough to tell
+which.

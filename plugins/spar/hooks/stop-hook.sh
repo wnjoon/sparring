@@ -433,16 +433,17 @@ parked_fingerprints() {
 
 # True when a round moved the work forward without anyone digging in.
 #
-# The three ways a round can mean "the two sides disagree" are all visible here:
-# the author REJECTED a finding, the author wrote a section that says neither
-# FIXED nor REJECTED (ambiguous — treated as dispute, never as progress), or the
-# round escalated to the blind judge. A round with none of those is one where the
-# reviewer raised real work and the author did it.
+# The ways a round can mean "the two sides disagree" are all visible here: the
+# author REJECTED a finding, the author wrote a section that says neither FIXED
+# nor REJECTED (ambiguous — treated as dispute, never as progress), or the round
+# escalated to the blind judge or parked a design question.
 #
-# Deliberately NOT part of the test: whether a finding is a repeat of an earlier
-# one. A finding that recurs is either fixed again — which is still progress — or
-# rejected, which this already catches. Adding recurrence would only make the
-# signal harder to reason about.
+# Recurrence is the fifth blocker and the one that is not a disagreement: the
+# reviewer having to raise the same defect twice means a fix landed incomplete,
+# which is churn rather than progress. It was left out of the first version on the
+# reasoning that a repeat is either fixed again or rejected; the review of that
+# very change produced three repeats that were neither. The matcher decides it,
+# never the author, and its verdict is attributed to the round it was reached in.
 # Driven from the REVIEW's findings, not the response's sections. The gate before
 # this only checks that a response file exists, so a response that omits a finding
 # — or names none at all — reaches here; reading only what the author wrote would
@@ -477,11 +478,58 @@ strict_fixed_ids() { # $1 = response file
   ' "$1" 2>/dev/null
 }
 
+# Did this round re-raise a defect an earlier round already covered?
+#
+# Two sources, because neither sees the whole picture.
+#
+# (a) The matcher's verdict. A SAME means an independent pass judged two DIFFERENT
+#     wordings to be one defect — never the author's call — recorded against the
+#     round it was reached in so a match in round 3 does not condemn round 5.
+#
+# (b) Fingerprint identity across earlier reviews. The matcher never sees an
+#     identical re-raise: build_matcher only offers findings whose fingerprint is
+#     not already tracked, so a defect raised again under the SAME file and title
+#     produces no alias. Relying on (a) alone would let the plainest form of "the
+#     reviewer already said this" be the one form that scores as progress, which
+#     inverts the rule. This is string equality between two review files, not a
+#     judgment about whether two wordings mean the same thing, so it takes nothing
+#     away from the matcher.
+fingerprints_of() { # $1 = review file → one canonical fingerprint per line
+  local id tag file nt
+  while IFS=$'\t' read -r id tag file nt; do
+    [ -n "$id" ] || continue
+    resolve_alias "${file} | ${nt}"; printf '\n'
+  done < <(parse_findings "$1")
+}
+
+round_had_recurrence() { # $1 = round
+  local n="$1"
+  if [ -f "$ALIASES_FILE" ] \
+    && awk -F'\t' -v n="$n" '$3==n {found=1; exit} END {exit !found}' \
+         "$ALIASES_FILE" 2>/dev/null; then
+    return 0
+  fi
+  local rf; rf=$(review_file "$n"); [ -f "$rf" ] || return 1
+  local cur; cur=$(mktemp) || return 1
+  fingerprints_of "$rf" | sort -u > "$cur"
+  local i=1 prev rc=1
+  while [ "$i" -lt "$n" ]; do
+    prev=$(review_file "$i")
+    if [ -f "$prev" ] && fingerprints_of "$prev" | grep -qxFf "$cur" -; then
+      rc=0; break
+    fi
+    i=$((i + 1))
+  done
+  rm -f "$cur"
+  return "$rc"
+}
+
 round_was_productive() { # $1 = round
   local rf resp; rf=$(review_file "$1"); resp=$(response_file "$1")
   [ -f "$rf" ] && [ -f "$resp" ] || return 1
   [ -f "$JUDGE_PENDING" ] && return 1
   [ -n "$(parked_fingerprints)" ] && return 1
+  round_had_recurrence "$1" && return 1
   local fixed; fixed=$(mktemp) || return 1
   strict_fixed_ids "$resp" > "$fixed"
   local id tag file nt any=0 ok=1
@@ -813,8 +861,8 @@ extract_finding() { # $1=review file  $2=fingerprint
 gate_finding_text() { # $1=review file  $2=canonical fp
   local t; t=$(extract_finding "$1" "$2")
   if [ -z "$t" ] && [ -f "$ALIASES_FILE" ]; then
-    local vfp cfp
-    while IFS=$'\t' read -r vfp cfp; do
+    local vfp cfp _rnd
+    while IFS=$'\t' read -r vfp cfp _rnd; do
       [ "$cfp" = "$2" ] || continue
       t=$(extract_finding "$1" "$vfp")
       [ -n "$t" ] && break
@@ -927,7 +975,13 @@ EXIST_EOF
 }
 
 # Turn a matcher output's SAME lines into aliases.
-apply_matches() { # $1=matcher output file
+#
+# The round is recorded as a third column. An alias means the reviewer raised the
+# same defect under new wording — which the cap logic needs to attribute to a
+# specific round, not just to the run. Readers that predate the column take the
+# first two fields, so adding it is safe as long as no one reads the tail with a
+# bare two-variable `read` (see gate_finding_text).
+apply_matches() { # $1=matcher output file  $2=round
   [ -f "$1" ] || return 0
   touch "$ALIASES_FILE"
   local kw ntag etag rest vfp cfp
@@ -936,7 +990,7 @@ apply_matches() { # $1=matcher output file
     vfp=$(awk -F'\t' -v t="$ntag" '$1==t{print $2; exit}' "$MATCHER_MANIFEST" 2>/dev/null)
     cfp=$(awk -F'\t' -v t="$etag" '$1==t{print $2; exit}' "$MATCHER_MANIFEST" 2>/dev/null)
     [ -n "$vfp" ] && [ -n "$cfp" ] && [ "$vfp" != "$cfp" ] || continue
-    printf '%s\t%s\n' "$vfp" "$cfp" >> "$ALIASES_FILE"
+    printf '%s\t%s\t%s\n' "$vfp" "$cfp" "${2:-0}" >> "$ALIASES_FILE"
   done < <(grep '^SAME ' "$1" 2>/dev/null)
   rm -f "$MATCHER_MANIFEST"
 }
@@ -966,7 +1020,7 @@ bash ${MATCHER_RUNNER}
 Then stop again." "sparring [${REVIEW_ID}] round ${n}: finding-matcher pending"
     fi
     rm -f "$MATCHER_RETRY"
-    apply_matches "$out"
+    apply_matches "$out" "$n"
     rm -f "$MATCHER_PENDING" "$MATCHER_RUNNER"
     echo "$n" > "$MATCHER_ROUND"
     return 0

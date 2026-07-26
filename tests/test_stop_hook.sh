@@ -516,7 +516,15 @@ chk "matcher prompt is blind (no response text)" "absent" "$(grep -qi 'cohesive 
 MOUT=$(cat .claude/spar-matcher-pending)
 printf 'SAME N1 E1\n' > "$MOUT"
 OUT=$(run_hook)   # apply alias; fold(2) resolves variant→canonical → canonical streak 2 → DESIGN parked → gate
-chk "alias recorded" "$(printf 'mod.py | break up mod py into parts\tmod.py | split the module')" "$(cat .claude/spar-aliases.tsv)"
+# The WHOLE row, including the round column. Matching only the two-column prefix
+# would keep passing if apply_matches stopped recording the round — and the
+# recurrence tests below hand-write their own files, so nothing else covers the
+# write side.
+chk "alias recorded with its round" \
+  "$(printf 'mod.py | break up mod py into parts\tmod.py | split the module\t2')" \
+  "$(cat .claude/spar-aliases.tsv)"
+chk "alias row is exactly three fields" "3" \
+  "$(awk -F'\t' 'NR==1{print NF}' .claude/spar-aliases.tsv)"
 chk "reword folded onto canonical (streak 2, parked)" "$(printf 'mod.py | split the module\tDESIGN\t2\t2\tparked')" "$(cat .claude/spar-registry.tsv)"
 chk "aliased parked finding still fires the gate" 'gate' "$OUT"
 
@@ -1580,6 +1588,68 @@ round_files 5
 printf 'mod.py | split it\tDESIGN\t3\t2\tparked\n' > .claude/spar-registry.tsv
 OUT=$(run_hook 2>&1)
 chk "an earlier parked finding blocks extension even on a clean round" \
+  'Round cap (5) reached' "$OUT"
+
+# A re-raised defect is the reviewer having to say the same thing twice. That is
+# the clearest "not converging" signal short of an outright rejection, and the
+# soft cap is what it should hit — even though every finding this round was fixed.
+in_review 5
+round_files 5
+printf 'a.py | old wording\tb.py | canonical\t5\n' > .claude/spar-aliases.tsv
+OUT=$(run_hook 2>&1)
+chk "a recurrence this round → caps despite everything being fixed" \
+  'Round cap (5) reached' "$OUT"
+chk "recurrence at the cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+
+# Attributed per round: an earlier round's match must not condemn this one.
+in_review 5
+round_files 5
+printf 'a.py | old wording\tb.py | canonical\t3\n' > .claude/spar-aliases.tsv
+OUT=$(run_hook 2>&1)
+chk "a recurrence from an EARLIER round → still extends" \
+  'Round 6 verification review' "$OUT"
+
+# An aliases file written before the round column existed must not read as a
+# recurrence in every round.
+in_review 5
+round_files 5
+printf 'a.py | old wording\tb.py | canonical\n' > .claude/spar-aliases.tsv
+OUT=$(run_hook 2>&1)
+chk "a column-less legacy alias row → not attributed to this round" \
+  'Round 6 verification review' "$OUT"
+
+# An IDENTICAL re-raise never reaches the matcher — build_matcher skips findings
+# already in the registry — so without a second source the plainest repeat would
+# be the one form that scores as progress.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F3-1 [MECHANICAL] a.py the same defect\n' \
+  > reviews/spar-20260721-120000-abc123-r3.md
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] a.py the same defect\n' > "$RF5X"
+printf '### F5-1: FIXED — did it again\n' > "$RP5X"
+OUT=$(run_hook 2>&1)
+chk "an identical re-raise → caps, with no matcher involved" \
+  'Round cap (5) reached' "$OUT"
+chk "identical re-raise → no alias was needed to detect it" "absent" \
+  "$([ -s .claude/spar-aliases.tsv ] && echo present || echo absent)"
+
+# A different defect in the same file is not a repeat.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F3-1 [MECHANICAL] a.py one defect\n' \
+  > reviews/spar-20260721-120000-abc123-r3.md
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] a.py a different defect\n' > "$RF5X"
+printf '### F5-1: FIXED — did it\n' > "$RP5X"
+OUT=$(run_hook 2>&1)
+chk "a new defect in a file seen before → still extends" \
+  'Round 6 verification review' "$OUT"
+
+# Title wording is normalised, so punctuation and case do not hide a repeat.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F3-1 [MECHANICAL] a.py The Same Defect!\n' \
+  > reviews/spar-20260721-120000-abc123-r3.md
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] a.py the same defect\n' > "$RF5X"
+printf '### F5-1: FIXED — did it again\n' > "$RP5X"
+OUT=$(run_hook 2>&1)
+chk "a re-raise differing only in case and punctuation → caps" \
   'Round cap (5) reached' "$OUT"
 
 # A pending judge dispatch must never be scored as progress. The judge branch

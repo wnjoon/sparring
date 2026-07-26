@@ -45,9 +45,16 @@ gatekeeper implementation.
    reason>` per finding) before the hook prepares the next round.
 5. Exit is released only by reviewer convergence, the round cap, or explicit
    cancel. The cap has two levels. The **soft cap** (`max_rounds`, default 5) is
-   passed when the round that reached it was *productive* — nothing rejected,
-   nothing ambiguous, nothing escalated to the judge or parked — because that is
-   a review still finding real work, not a deadlock. The **hard cap**
+   passed when the round that reached it was *productive* — every finding answered
+   with an unambiguous `FIXED`, nothing rejected or unanswered, nothing escalated
+   to the judge or parked, and no finding the matcher judged a repeat of an
+   earlier one — because that is a review still finding real work, not a
+   deadlock. Recurrence was excluded when the soft cap was first introduced and
+   added on 2026-07-26: a repeat is a fix that landed incomplete, which is churn,
+   not progress. Any repeat blocks the round rather than only a third appearance
+   — the evidence is two runs, and a rule that grants rounds too freely cannot
+   have them back, while a rule that is too strict can be relaxed. The
+   **hard cap**
    (`hard_cap`, default `2 × max_rounds`) always ends the run. Either cap exits
    with an honest "unconverged" summary and never pressures acceptance.
 6. Stalemate — a finding raised AND rejected for 2 consecutive rounds. A
@@ -70,8 +77,14 @@ gatekeeper implementation.
    reviewer (once per round, author only runs it), decides which are the same
    defect re-worded; matches become aliases so the re-wording accumulates the
    stalemate streak on the canonical finding. A wrong or absent match never
-   breaks an invariant — it only delays stalemate detection (the reviewer
-   keeps raising it, bounded by the round cap).
+   breaks an invariant, but it has three effects. An ABSENT match delays
+   stalemate detection (the reviewer keeps raising it) and can let a round that
+   was in fact a repeat score as productive and extend — both bounded by the
+   round cap. A WRONG match runs the other way: a false `SAME` caps a genuinely
+   productive round at the soft cap. That one is not bounded by the cap, it
+   triggers it, and it is the deliberately reversible direction — rounds
+   withheld can be granted by relaxing the rule, rounds granted in error cannot
+   be taken back.
 8. After reviewer convergence, a final sweep fires for a risky touched
    surface or risky repository, 3+ reviewer rounds, or any reviewer design
    finding. It is one fresh, read-only author-family instance, blind to
