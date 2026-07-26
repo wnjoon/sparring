@@ -1,8 +1,9 @@
 # sparring loop policy (SoT)
 
 The Claude-hosted adapter implements this policy. The planned Codex-hosted
-adapter must mirror it except where its weaker pre-commit enforcement is
-explicitly documented.
+adapter mirrors it exactly, including enforcement strength: Codex has a Stop hook
+that honors `decision:block`, so both directions share this policy and one
+gatekeeper implementation.
 
 ## Roles
 
@@ -39,11 +40,26 @@ explicitly documented.
    repository content is never copied into this channel.
 3. Reviewer output: first line `STATUS: CONVERGED` or `STATUS: FINDINGS`;
    findings tagged `[MECHANICAL]` or `[DESIGN]` with file/problem/suggestion.
-4. Author must fix every MECHANICAL finding, decide DESIGN findings on the
-   merits, and write a response file (`FIXED — ...` / `REJECTED — <grounded
+4. Author fixes every MECHANICAL finding on sight, and decides DESIGN findings
+   on the merits. A MECHANICAL finding may be rejected only with a reason
+   grounded in the code or the task requirements — never for convenience —
+   which is why item 6 has a MECHANICAL stalemate path at all; and write a response file (`FIXED — ...` / `REJECTED — <grounded
    reason>` per finding) before the hook prepares the next round.
-5. Exit is released only by reviewer convergence, the round cap (default 5,
-   exits with an honest "unconverged" summary), or explicit cancel.
+5. Exit is released only by reviewer convergence, the round cap, or explicit
+   cancel. The cap has two levels. The **soft cap** (`max_rounds`, default 5) is
+   passed when the round that reached it was *productive* — every finding answered
+   with an unambiguous `FIXED`, nothing rejected or unanswered, nothing escalated
+   to the judge or parked, and no finding that repeats an earlier one — by the
+   deterministic fingerprint of item 7, or by a matcher `SAME` verdict for a
+   re-wording — because that is a review still finding real work, not a
+   deadlock. Recurrence was excluded when the soft cap was first introduced and
+   added on 2026-07-26: a repeat is a fix that landed incomplete, which is churn,
+   not progress. Any repeat blocks the round rather than only a third appearance
+   — the evidence is two runs, and a rule that grants rounds too freely cannot
+   have them back, while a rule that is too strict can be relaxed. The
+   **hard cap**
+   (`hard_cap`, default `2 × max_rounds`) always ends the run. Either cap exits
+   with an honest "unconverged" summary and never pressures acceptance.
 6. Stalemate — a finding raised AND rejected for 2 consecutive rounds. A
    [MECHANICAL] stalemate goes to a blind judge, invoked read-only in the same
    resolved family as the reviewer (author only runs it; ruling
@@ -64,11 +80,18 @@ explicitly documented.
    reviewer (once per round, author only runs it), decides which are the same
    defect re-worded; matches become aliases so the re-wording accumulates the
    stalemate streak on the canonical finding. A wrong or absent match never
-   breaks an invariant — it only delays stalemate detection (the reviewer
-   keeps raising it, bounded by the round cap).
+   breaks an invariant, but it has three effects. An ABSENT match delays
+   stalemate detection (the reviewer keeps raising it) and can let a RE-WORDED
+   repeat score as productive and extend — both bounded by the round cap. A
+   repeat under the same fingerprint is unaffected: it is caught without the
+   matcher. A WRONG match runs the other way: a false `SAME` caps a genuinely
+   productive round at the soft cap. That one is not bounded by the cap, it
+   triggers it, and it is the deliberately reversible direction — rounds
+   withheld can be granted by relaxing the rule, rounds granted in error cannot
+   be taken back.
 8. After reviewer convergence, a final sweep fires for a risky touched
    surface or risky repository, 3+ reviewer rounds, or any reviewer design
-   finding. It is one fresh, read-only Claude author-family instance, blind to
+   finding. It is one fresh, read-only author-family instance, blind to
    the ledger and all loop history but allowed repository intent pointers.
    It uses `SWEEP: CLEAN|FINDINGS`, never `STATUS: CONVERGED`, and runs at
    most once. The sweep itself is not a reviewer round. Findings below the cap
@@ -105,7 +128,8 @@ Phases 1–5 (implemented): core loop; design findings, blind judge, gate,
 decision ledger, semantic matcher; same-family Claude review; safe skip,
 changed-surface intent harvest, durable outcomes, and final sweep; unattended
 mode and the final run report (`/spar:report`).
-Phase 6: Codex-hosted adapter (git pre-commit enforcement). Phase 7: model
+Phase 6: Codex-hosted adapter (mirrored seats, same Stop-hook enforcement via
+Codex's own `Stop` hook). Phase 7: model
 economics (reviewer/effort config, tiered fix writers).
 Phase 8 (orchestration): `/spar:ready` + `/spar:fight` — a plan-to-fight
 workflow layered ABOVE the loop. `/spar:ready` runs writing-plans → dedicated

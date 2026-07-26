@@ -10,6 +10,21 @@ state="${1:?plan state}"; taskfile="${2:?task text file}"
 reviewer="$(plan_field reviewer "$state")"
 case "$reviewer" in codex|claude) ;; *) echo "error: bad reviewer in plan state" >&2; exit 2 ;; esac
 
+# Author seat and owning session travel with the PLAN, not with one task: the
+# hook launches every task after the first, so a value carried only by the seat's
+# activation step would be lost from task 2 onward. Both are absent from a
+# Claude-hosted plan state, and absent means "the historical default" — author
+# claude, no session gating — so those state files stay byte-identical.
+author="$(plan_field author "$state")"
+case "$author" in '' | codex | claude) ;;
+  *) echo "error: bad author in plan state: $author" >&2; exit 2 ;;
+esac
+owner_session="$(plan_field owner_session "$state")"
+# A newline in the session id would inject an arbitrary field into the state file.
+case "$owner_session" in *[!A-Za-z0-9_.-]*)
+  echo "error: owner_session in plan state has unexpected characters" >&2; exit 2 ;;
+esac
+
 # Propagate the plan's unattended flag into each task's fight state. A missing
 # or malformed value defaults to false (attended) — older plan states that
 # predate the flag keep working unchanged.
@@ -30,7 +45,13 @@ phase: task
 round: 0
 review_id: ${id}
 base_sha: ${base}
+STATE_EOF
+  [ -n "$author" ] && printf 'author: %s\n' "$author"
+  cat <<STATE_EOF
 reviewer: ${reviewer}
+STATE_EOF
+  [ -n "$owner_session" ] && printf 'owner_session: %s\n' "$owner_session"
+  cat <<STATE_EOF
 include_dirty: false
 unattended: ${unattended}
 max_rounds: 5

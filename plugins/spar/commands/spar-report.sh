@@ -77,11 +77,22 @@ rounds=$(field rounds "$OUTCOME"); [ -n "$rounds" ] || rounds=$(field round "$ST
 case "$rounds" in ''|*[!0-9]*) rounds=0 ;; esac
 reviewer=$(field reviewer "$OUTCOME")
 [ -n "$reviewer" ] || reviewer=$(field reviewer "$STATE")
-case "$reviewer" in
-  codex)  pairing="cross-model (claude author ↔ codex reviewer)" ;;
-  claude) pairing="same-model (claude author ↔ claude reviewer)" ;;
-  *)      reviewer=unknown; pairing="unknown pairing" ;;
-esac
+# The pairing is a property of BOTH seats, so it must be derived from the pair.
+# Hardcoding "claude author" was safe only while Claude was the only host; with a
+# Codex author seat it inverts the label — reporting a codex↔codex loop as
+# cross-model. `author` is absent in every pre-Phase-6 run, hence the claude
+# default, matching stop-hook.sh's own resolution.
+author=$(field author "$OUTCOME")
+[ -n "$author" ] || author=$(field author "$STATE")
+case "$author" in ''|claude) author=claude ;; codex) ;; *) author=unknown ;; esac
+case "$reviewer" in codex|claude) ;; *) reviewer=unknown ;; esac
+if [ "$author" = unknown ] || [ "$reviewer" = unknown ]; then
+  pairing="unknown pairing"
+elif [ "$author" = "$reviewer" ]; then
+  pairing="same-model (${author} author ↔ ${reviewer} reviewer)"
+else
+  pairing="cross-model (${author} author ↔ ${reviewer} reviewer)"
+fi
 sweep=$(field sweep "$OUTCOME"); [ -n "$sweep" ] || sweep=$(field sweep_result "$STATE")
 case "$sweep" in not-run|not-triggered|pending|clean|findings|error) ;; *) sweep=not-run ;; esac
 

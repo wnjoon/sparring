@@ -276,22 +276,63 @@ from this future-decisions document after landing.
 
 ## Phase 6 — Codex-hosted adapter
 
-- Seats mirror; policy identical. Enforcement moves from the Stop hook to a
-  **git pre-commit hook**: an active unconverged loop blocks commits. This is
-  a **weaker guarantee** than Claude's Stop hook and must be stated as such —
-  a pre-commit hook gates *landing* the work, not *ending the session*, so a
-  Codex author can walk away without converging (only without committing).
-  Enforcement contract here is explicit: "you cannot commit unconverged
-  work", NOT "you cannot stop". Closing the walk-away gap, if needed, is a
-  separate mechanism — never assumed from the pre-commit hook alone.
+- Seats mirror; policy identical. **Enforcement stays a Stop hook** — Codex has
+  one. Superseded 2026-07-25: this section previously specified a **git
+  pre-commit hook** and accepted a weaker guarantee ("you cannot commit
+  unconverged work", not "you cannot stop"), because Codex was believed to have
+  no session-exit hook. `codex-cli 0.144.1` does: hooks are stable and default-on,
+  the event set includes `stop`, and a Stop hook returning
+  `{"decision":"block","reason":…}` forces another turn — verified by spike
+  (`docs/superpowers/notes/codex-hooks-spike.md`). The pre-commit hook is
+  therefore dropped: it is bypassable with `git commit --no-verify`, it gates the
+  wrong event, and it is unnecessary. Both adapters now have identical enforcement
+  strength, and both share one gatekeeper — `stop-hook.sh` already discards its
+  stdin and decides only from the state file and artifacts. Full design:
+  `docs/superpowers/specs/2026-07-25-phase6-codex-adapter-design.md`.
+- **Implementation status (2026-07-26):** code complete on the Phase 6 branch —
+  `adapters/codex/{hooks.json.template,install.sh,skills/}` register both hooks and
+  install four author-seat skills, and the shared engine gained the three seat-aware
+  changes (self-locating plugin root, `author` field driving the sweep,
+  `owner_session` gating). **Not yet run end to end with live models**, so the
+  roadmap does not mark it done. The four things only a real session can settle:
+  the hook trust path, user-vs-project hook scope, whether `SessionStart` fires
+  before a skill's first action, and a planted-bug run going FINDINGS → fix →
+  re-review → CONVERGED. Plan:
+  `docs/superpowers/plans/2026-07-26-phase6-remaining.md`.
+- **Enforcement is proven per session, by a liveness marker.** Codex makes hook
+  trust a per-session choice and exposes no way to query it; measured against
+  0.144.1, an untrusted registration is *silently* skipped and the run completes
+  as if no hook existed. So `SessionStart` writes the session id to
+  `<git-dir>/spar-hook-live`, and `spar-fight` refuses to start unless that file
+  names the session running right now. Existence alone is not proof — a marker
+  outlives the session that wrote it. It sits in the git directory, not under
+  `reviews/`: activation must read it before it creates anything, so it has to be
+  somewhere a clean checkout already has, and writing `reviews/` from a hook would
+  litter every repository the user opens.
+  - `--git-dir`, not `--git-common-dir`: the marker names one session, and linked
+    worktrees are how one repository hosts several at once. A shared marker would
+    let a session started in worktree B invalidate worktree A, which then refuses
+    to activate while insisting its hooks never ran. The loop's git-excludes keep
+    using the common directory — those really are repository-wide.
+  - The skill reads its own id from `CODEX_THREAD_ID`, which is measured to equal
+    the session id Codex reports. Whether the *hook payload's* `session_id` is the
+    same string is the one link still unmeasured; the check is fail-closed, so a
+    divergence refuses to start rather than registering a run no session can
+    advance. The live end-to-end run settles it.
+- Entry point for the author seat is a **Codex skill**
+  (`~/.codex/skills/spar-fight/SKILL.md`), not `~/.codex/prompts/` (no such
+  mechanism in 0.144.1). Hook registration is a standalone `hooks.json` installed
+  once — a Codex plugin cannot carry it (`plugin_hooks` is a removed feature), and
+  rewriting the file per run would reset Codex's hook trust every loop.
 - Reviewer = `claude -p` restricted to read-only tools; declares CONVERGED.
   Reuses the read-only blind Claude reviewer built in Phase 3, and Codex-Codex
   same-family sparring falls out of this direction for free (Phase 3's family
   abstraction, mirrored).
 - The sweep in this direction uses a fresh `codex exec` (read-only) so the
   "different model + no context" axis symmetry is preserved.
-- Entry point: `~/.codex/prompts/` custom prompt; shares
-  `plugins/spar/shared/` policy and templates.
+- Both seats share `plugins/spar/shared/` policy and templates, and the installer
+  stamps the resolved `plugins/spar` path into each installed skill so a skill
+  read from `~/.codex/skills/` still finds the helper scripts.
 
 ## Phase 7 — model economics
 
@@ -324,9 +365,68 @@ from this future-decisions document after landing.
 
 - **Round cap = circuit breaker, not a quality mechanism.** Healthy loops end
   by convergence; contested loops end via judge/parking; the cap only stops
-  pathological oscillation. Configurable (`max_rounds`), always exits with an
-  honest "unconverged" report, never pressures acceptance. Revisit with
-  dogfooding data (does 5 ever fire?).
+  pathological oscillation. Always exits with an honest "unconverged" report,
+  never pressures acceptance.
+  - **Two levels, since 2026-07-26.** The dogfooding question above got its
+    answer: 5 fired, on a run that was not oscillating at all. Fourteen findings
+    raised, fourteen fixed, nothing rejected, no judge, and the matcher returned
+    NO MATCHES in all five rounds — every round found *new* work. Counting
+    elapsed rounds conflates a deadlock with a review that is still productive,
+    and only the first deserves a circuit breaker.
+  - So `max_rounds` (default 5) is now a **soft** cap, passed when the round that
+    reached it was productive: nothing REJECTED, no ambiguous response, no judge
+    dispatch, no parked design finding. Those are the three ways a round means
+    "we disagree"; their absence means the author simply did the work. `hard_cap`
+    (default `2 × max_rounds`) always stops the run — a reviewer that invents one
+    fresh nitpick per round would otherwise never terminate, and each round is a
+    full re-review of the whole diff. Doubling rather than a constant keeps the
+    ceiling proportional to the budget the run asked for: `max_rounds: 3` gets 6,
+    not a 10 the user never agreed to.
+  - **The productivity test reads the REVIEW's findings, not the response's
+    sections.** The gate before it only checks that a response file exists, so a
+    response that omits a finding reaches it; scoring what the author wrote would
+    read that silence as agreement, on exactly the finding the cap should stop
+    for. A finding with no disposition is UNKNOWN, the same rule
+    `fold_registry` applies.
+  - **Cap fields are bounded on the digit string, before arithmetic.** Bash reads
+    a leading zero as octal and wraps at 64 bits, so `18446744073709551617`
+    evaluates to `1` — an absurd value that a range check placed after the
+    conversion cannot distinguish from a real one. Out of range is rejected, not
+    clamped: a cap of 10^19 is a typo, not a budget. The bound is arithmetic
+    safety (18 digits, so doubling cannot overflow) and *not* a view about
+    sensible budgets — `max_rounds: 101` is honoured, because rejecting a number
+    the user stated plainly is the same silent reshaping the parse exists to
+    avoid.
+  - **Only an unambiguous FIXED buys extra rounds.** The shared response parser
+    is permissive so the registry survives "FIXED (see below)"; the productivity
+    test is not, because this is the one disposition that grants budget.
+    `FIXEDLY` does not count, and a finding answered twice is a conflict.
+  - **Recurrence counts against a round — revised 2026-07-26 after the second
+    run.** The first version left it out, reasoning that a finding raised again is
+    either fixed again (progress) or rejected (already caught). That enumeration
+    missed the case the review of this very change produced three times: a finding
+    fixed *incompletely* and re-raised. It is neither progress nor a rejection —
+    it is the reviewer having to say the same thing twice, which is the clearest
+    "not converging" signal short of an outright rejection, and the soft cap is
+    what it should hit. Neither half is the author's judgment: identity across
+    rounds is the engine's deterministic fingerprint, the same one the stalemate
+    streak has always used (policy §7), and the matcher decides only the
+    re-worded case, its verdict recorded per round so an early match does not
+    condemn a later one.
+    Deliberately the strict form (any repeat) rather than a "third appearance"
+    counter: the evidence is two runs, relaxing later is easy, and rounds lost to
+    a rule that was too generous cannot be recovered.
+  - **Why the rounds must be granted inside the run.** There is no cheap manual
+    continuation, and the obvious-looking one is wrong: a fresh `/spar:fight`
+    sets `base_sha` to HEAD, and the reviewer sees `git diff $BASE`. Commit the
+    capped work and re-run, and the reviewer is handed an *empty* diff — it
+    reviews nothing. (It is not silently green: a zero diff is deliberately sent
+    through review rather than safe-skipped, so it fails loudly.) The only real
+    manual continuation is leaving the work uncommitted and re-running with
+    `--include-dirty`, which re-reviews the whole surface from scratch with a
+    reviewer blind to the earlier rounds — a restart, not a resume. The cap
+    message therefore tells the author what was never re-reviewed and explicitly
+    warns against the commit-and-re-run path.
 - **Simplicity guard.** Invariants stay at 4. Every absorbed idea lands as
   hook code + tests or a small prompt change — never as prose rules the
   model must remember. When a new rule seems needed, first ask "can structure

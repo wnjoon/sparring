@@ -5,7 +5,7 @@
 
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: v0.6.0 — adds the final run report: every finished run writes `reviews/spar-<id>-report.md` (converged or not), shown by `/spar:report`. The Claude-hosted loop includes safe skips, design-intent pointers, a risk-triggered final sweep, and unattended mode; `/spar:ready` turns a spec into a checkbox plan on a dedicated branch and `/spar:fight` runs it task-by-task.**
+**Status: v0.7.0 — the round cap now tells a deadlock from a review that is still finding real work. `max_rounds` (5) is a soft cap, passed while rounds stay productive; `hard_cap` (2 × max_rounds) always ends the run. Also ships the Codex-hosted author seat: `adapters/codex/install.sh` registers the same two hooks with Codex and installs the `spar-fight` / `spar-ready` / `spar-cancel` / `spar-report` skills — code complete, not yet run end to end with live models.**
 
 Phases 1–5 and 8 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar:fight` gives you:
 
@@ -16,7 +16,7 @@ Phases 1–5 and 8 are implemented; the core loop is verified end-to-end against
 - **single-agent mode** — auto-detects the reviewer (Codex if installed → cross-model, the recommended default; otherwise Claude), so `/spar:fight` works with no second vendor. `--reviewer codex|claude` overrides;
 - a reported **safe skip** for changes no larger than 10 lines / 2 paths when no risky path or unsafe change kind is touched;
 - changed-surface **design-intent pointers** on every fresh review;
-- a once-only, fresh Claude **final sweep** after risky, long, or design-bearing loops;
+- a once-only, fresh author-family **final sweep** after risky, long, or design-bearing loops;
 - a **final run report** — converged or not, a finished run writes `reviews/spar-<id>-report.md` (`cap`, `sweep-findings-at-cap`, `skipped`, and unattended `blocked-pending-user` included; an internal-error bypass or an explicit `/spar:cancel` writes none): outcome, rounds, reviewer pairing, sweep result, findings tally, judge rulings, your settled design decisions, anything still pending, and the changed files. `/spar:report [id]` shows it (defaults to the latest run).
 
 <br>
@@ -25,7 +25,7 @@ Phases 1–5 and 8 are implemented; the core loop is verified end-to-end against
 
 
 
-Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phases 6–7 (the Codex-hosted mirror, model economics) are design only — the [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
+Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phase 6 (the Codex-hosted mirror) is code complete — `adapters/codex/install.sh` registers the same two hooks with Codex and installs the author-seat skills — but it has not yet been run end to end with live models, so it is not claimed as done. Phase 7 (model economics) is design only. The two-level round cap arrived in v0.7.0 after three dogfooding runs ended at the cap with nothing contested — see [the design note](docs/superpowers/specs/2026-07-26-productive-round-extension-design.md). The [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 
 ## Direction
 
@@ -78,7 +78,16 @@ Everything below runs today. `/spar:ready` turns a spec into a checkbox plan; `/
       │    │    │            debate); UPHELD / DISMISSED is binding
       │    │    └─ design  → batched user gate + decision ledger at loop end
       │    ├─ author writes a per-finding response → round N+1
-      │    └─ round cap (5) with no convergence → cap exit
+      │    └─ soft cap (5) reached
+      │         ├─ that round was productive — every finding answered
+      │         │  FIXED, nothing rejected, ambiguous or unanswered,
+      │         │  no judge pending, no parked design finding, and
+      │         │  no finding repeating an earlier one (same
+      │         │  fingerprint, or a matcher SAME for a re-wording)
+      │         │  → keep going, up to hard_cap
+      │         │  (2 x max_rounds, so 10 by default; set the
+      │         │  hard_cap state field to override)
+      │         └─ otherwise, or hard cap → cap exit
       │
       └─ STATUS: CONVERGED
               ├─ risky repo/path · 3+ rounds · design finding?
@@ -87,6 +96,13 @@ Everything below runs today. `/spar:ready` turns a spec into a checkbox plan; `/
               │        ├─ clean            → converged exit
               │        └─ findings at cap  → sweep-findings-at-cap exit
               └─ otherwise → converged exit
+
+  The soft cap is passed only while rounds stay productive, because it exists to
+  stop a deadlock and elapsed rounds alone cannot tell one from a review still
+  finding real work. A re-raised finding counts against a round: a repeat means a
+  fix landed incomplete. Any repeat blocks it, not just a third appearance —
+  strict is the reversible direction. Full rationale, including what overturned
+  the first version, is in docs/design-decisions.md.
 
   every exit above — converged · blocked-pending-user · cap ·
   sweep-findings-at-cap · skipped — writes the detailed final report
@@ -98,11 +114,11 @@ The reviewer / judge / matcher run as **Codex** (`codex exec --sandbox read-only
 
 The same structure runs in both directions. The seats swap; the invariants don't:
 
-| Seat | Claude-hosted (`/spar:fight`) | Codex-hosted (planned) |
+| Seat | Claude-hosted (`/spar:fight`) | Codex-hosted (`spar-fight` skill) |
 |---|---|---|
 | Author (sole writer) | Claude Code session | Codex CLI session |
 | Reviewer (declares `CONVERGED`) | `codex exec --sandbox read-only` (default) or `claude -p` (single-agent) | `claude -p` (read-only tools) |
-| Enforcement | Stop hook blocks exit | git pre-commit hook blocks commit (gates landing, not session exit) |
+| Enforcement | Stop hook blocks exit | Codex `Stop` hook blocks exit — same guarantee, same gatekeeper script |
 
 ## Invariants
 
@@ -115,12 +131,12 @@ The same structure runs in both directions. The seats swap; the invariants don't
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Core loop: `/spar:fight`, Stop hook, round machinery, per-finding response enforcement, round cap, read-only reviewer | ✅ done |
+| 1 | Core loop: `/spar:fight`, Stop hook, round machinery, per-finding response enforcement, two-level round cap, read-only reviewer | ✅ done |
 | 2 | `[DESIGN]` debate-first (conveyance boundary + decision ledger) · stalemate blind judge · batched end-of-loop gate · cross-round semantic finding matcher | ✅ done |
 | 3 | Single-agent mode: same-family sparring (Claude reviewer/judge/matcher) so `/spar:fight` works without Codex — auto-detect + explicit override; cross-model stays the default | ✅ done |
 | 4 | Safe skip + changed-surface intent harvest + risk-triggered final sweep + durable exit reason | ✅ done |
 | 5 | Unattended mode + final report (`/spar:report`) | ✅ done |
-| 6 | Codex-hosted adapter (mirror seats, git pre-commit enforcement) | planned |
+| 6 | Codex-hosted adapter: mirror the seats (Codex authors, `claude -p` reviews) and reuse the same Stop-hook gatekeeper via Codex's own `Stop` hook | 🔨 code complete, pending a live end-to-end run |
 | 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
 | 8 | `/spar:ready` + `/spar:fight` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) fight loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | ✅ done |
 
@@ -142,8 +158,10 @@ skip.
 ```
 plugins/spar/            Claude Code plugin (commands, Stop hook)
   commands/              /spar:ready, /spar:fight, /spar:cancel, /spar:report, setup guards + surface helpers
-  shared/policy.md       loop policy — source of truth for both adapters
+  hooks/                 Stop dispatcher + round engine + SessionStart
+  shared/policy.md       loop policy — source of truth for both seats
   shared/prompts/        reviewer / judge / matcher / sweeper templates
+adapters/codex/          Codex-hosted seat: hooks.json template, installer, skills
 docs/superpowers/        specs, plans, and design-decisions per phase
 tests/                   pure-bash hook + resolver tests
 bench/                   effect benchmark (living report + tasks/oracles)

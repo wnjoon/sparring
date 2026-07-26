@@ -37,12 +37,22 @@ block() { # $1=reason $2=statusMessage
   exit 0
 }
 DIFF_SURFACE_FILE=".claude/spar-diff.txt"
-OUTCOME_WRITER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-record-outcome.sh"
-CHANGE_CLASSIFIER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-classify-change.sh"
-INTENT_HARVESTER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-harvest-intent.sh"
+# Resolve the plugin root from this script's own location so the engine works
+# under any host that does not export CLAUDE_PLUGIN_ROOT (Codex registers hooks
+# from a project/user hooks.json, which has no env field). The env var still wins
+# when set, so the Claude host and existing tests are unaffected. Without this the
+# engine failed open SILENTLY — it could not find its templates, and the outcome
+# writer was broken by the same missing root, so nothing was recorded.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [ -z "$PLUGIN_ROOT" ]; then
+  PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || PLUGIN_ROOT=""
+fi
+OUTCOME_WRITER="${PLUGIN_ROOT}/commands/spar-record-outcome.sh"
+CHANGE_CLASSIFIER="${PLUGIN_ROOT}/commands/spar-classify-change.sh"
+INTENT_HARVESTER="${PLUGIN_ROOT}/commands/spar-harvest-intent.sh"
 INTENT_FILE=".claude/spar-intent-pointers.txt"
-QUEUE_WRITER="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-queue-pending.sh"
-REPORT_GEN="${CLAUDE_PLUGIN_ROOT:-}/commands/spar-report.sh"
+QUEUE_WRITER="${PLUGIN_ROOT}/commands/spar-queue-pending.sh"
+REPORT_GEN="${PLUGIN_ROOT}/commands/spar-report.sh"
 SWEEP_RUNNER=".claude/spar-run-sweep.sh"
 SWEEP_PROMPT_FILE=".claude/spar-sweep-prompt.txt"
 SWEEP_RETRY_FILE=".claude/spar-sweep-retries"
@@ -139,11 +149,63 @@ INCLUDE_DIRTY=$(field include_dirty)
 SWEEP_DONE=$(field sweep_done)
 SWEEP_RESULT=$(field sweep_result)
 
-[ "$ACTIVE" = "true" ] || { record_outcome cap; cleanup; approve; }
 echo "$REVIEW_ID" | grep -qE '^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$' \
   || { log "invalid review_id: $REVIEW_ID"; finish_approve error-bypass; }
+# Digits alone are not a usable number here, and neither is arithmetic on them.
+# "08" is octal to bash and raises an error mid-expansion. Worse, bash wraps at 64
+# bits, so 18446744073709551617 evaluates to 1 — an absurd value that arrives
+# looking like a perfectly ordinary budget. A range check placed AFTER the
+# conversion cannot see the difference, so the bound is enforced on the digit
+# STRING first and arithmetic only ever runs on a value already known to be safe.
+#
+# The bound is arithmetic safety, NOT a view about sensible budgets. 18 digits
+# keeps every value below 10^18, so doubling one stays well inside a signed 64-bit
+# range and nothing here can overflow. What counts as a reasonable cap is the
+# user's call: rejecting max_rounds: 101 because someone here picked 100 would be
+# reshaping an intent they stated plainly, which is the thing this parse is
+# supposed to avoid.
+SAFE_DIGITS=999999999999999999      # 18 nines: 2x this still cannot overflow
+# Callers must absorb the failure (|| VAR=""): a rejected value is expected input,
+# not an internal error, and an unhandled non-zero status would trip the ERR trap
+# and fail the whole hook open on a typo in the state file.
+bounded_int() {                     # $1=digits $2=inclusive bound → echo value, or fail
+  local v="$1" b="$2"
+  v="${v#"${v%%[!0]*}"}"; [ -n "$v" ] || v=0     # strip leading zeros
+  [ "${#v}" -le "${#b}" ] || return 1            # too many digits: out of range, no math
+  v=$((10#$v))
+  [ "$v" -le "$b" ] || return 1
+  printf '%s' "$v"
+}
+
 case "$ROUND" in ''|*[!0-9]*) log "invalid round: $ROUND"; finish_approve error-bypass;; esac
-case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=5;; esac
+ROUND_OK=$(bounded_int "$ROUND" "$SAFE_DIGITS") \
+  || { log "round out of range: $ROUND"; finish_approve error-bypass; }
+ROUND="$ROUND_OK"
+
+case "$MAX_ROUNDS" in
+  ''|*[!0-9]*) MAX_ROUNDS=5 ;;
+  *) MAX_ROUNDS_OK=$(bounded_int "$MAX_ROUNDS" "$SAFE_DIGITS") || MAX_ROUNDS_OK=""
+     if [ -z "$MAX_ROUNDS_OK" ] || [ "$MAX_ROUNDS_OK" -lt 1 ]; then
+       log "max_rounds unusable: $MAX_ROUNDS — using 5"; MAX_ROUNDS=5
+     else MAX_ROUNDS="$MAX_ROUNDS_OK"; fi ;;
+esac
+# The soft cap guards against DEADLOCK; the hard cap is the only thing that
+# guarantees termination. See the extension logic at the end of the review phase
+# for why the two differ. Defaults to double the soft cap, so it stays
+# proportional to whatever budget the run actually asked for rather than jumping
+# to a constant a user who set max_rounds: 3 never agreed to. An explicit value is
+# honoured as written; the only adjustment is that it can never sit below the soft
+# cap, where it would mean "extend to less than we already allow".
+HARD_CAP=$(field hard_cap)
+case "$HARD_CAP" in
+  ''|*[!0-9]*) HARD_CAP=$((MAX_ROUNDS * 2)) ;;
+  *) HARD_CAP_OK=$(bounded_int "$HARD_CAP" "$SAFE_DIGITS") || HARD_CAP_OK=""
+     if [ -z "$HARD_CAP_OK" ]; then
+       log "hard_cap unusable: $HARD_CAP — using 2x max_rounds"
+       HARD_CAP=$((MAX_ROUNDS * 2))
+     else HARD_CAP="$HARD_CAP_OK"; fi ;;
+esac
+[ "$HARD_CAP" -lt "$MAX_ROUNDS" ] && HARD_CAP="$MAX_ROUNDS"
 case "$INCLUDE_DIRTY" in
   ''|false) INCLUDE_DIRTY=false ;;
   true) ;;
@@ -154,6 +216,15 @@ case "$UNATTENDED" in
   ''|false) UNATTENDED=false ;;
   true) ;;
   *) log "invalid unattended: $UNATTENDED"; finish_approve error-bypass;;
+esac
+# Which family occupies the AUTHOR seat. The final sweep is a fresh author-family
+# instance (policy §Protocol 8), so it must follow this rather than the reviewer.
+# Absent → claude, which is every pre-existing run: the Claude-hosted adapter.
+AUTHOR=$(field author)
+case "$AUTHOR" in
+  ''|claude) AUTHOR=claude ;;
+  codex) ;;
+  *) log "invalid author: $AUTHOR"; finish_approve error-bypass ;;
 esac
 case "$SWEEP_DONE" in ''|false) SWEEP_DONE=false;; true) ;; *)
   log "invalid sweep_done: $SWEEP_DONE"; finish_approve error-bypass;;
@@ -170,6 +241,52 @@ case "$REVIEWER" in
   *) log "invalid reviewer: $REVIEWER"; finish_approve error-bypass;;
 esac
 
+# Anything that is not a verified match — malformed payload, missing session id,
+# or jq unavailable — resolves to "no session id" and takes the same exit as any
+# other foreign session: approve, mutate nothing. This branch must never terminate
+# the run, because the session it cannot identify may not own it: recording an
+# outcome and running cleanup() would delete a live loop's state from a session
+# that has no claim to it, which is precisely what the gate exists to prevent. The
+# loop state therefore survives, nothing is reported as finished, and the log says
+# why. jq is a declared requirement (README §Install, enforced in CI), and only
+# runs that opted into gating reach this branch at all — a Claude-hosted run has no
+# owner_session field, so no jq dependency is added for existing users.
+#
+# Placement is deliberate and sits between two failure modes. It is AFTER the field
+# validations, because a state file we cannot parse cannot be trusted to say who
+# owns it either — corruption is handled by whoever observes it, so a broken run
+# self-heals instead of sitting inert until someone runs /spar:cancel. It is BEFORE
+# the `active != true` teardown, because that path records an outcome and runs
+# cleanup(): a session that cannot prove ownership must not perform another run's
+# teardown.
+OWNER_SESSION=$(field owner_session)
+if [ -n "$OWNER_SESSION" ]; then
+  THIS_SESSION=""
+  if command -v jq >/dev/null 2>&1; then
+    THIS_SESSION=$(printf '%s' "$HOOK_INPUT" \
+      | jq -r 'if type == "object" and (.session_id | type) == "string"
+               then .session_id else empty end' 2>/dev/null) || THIS_SESSION=""
+  else
+    log "jq unavailable — cannot verify session ownership; treating as foreign"
+  fi
+  if [ "$THIS_SESSION" != "$OWNER_SESSION" ]; then
+    log "foreign session (${THIS_SESSION:-none}) — this run belongs to ${OWNER_SESSION}"
+    approve
+  fi
+fi
+
+[ "$ACTIVE" = "true" ] || { record_outcome cap; cleanup; approve; }
+
+# A user-scope hook registration fires in EVERY session of that host, so a run
+# claims its session and the engine ignores everyone else. Absent field → no
+# gating, which is every pre-existing run. The answer is always approve — this
+# gate never blocks, so a foreign session is released rather than trapped.
+#
+# Ownership is decided only from a strict parse. A truncated payload such as
+# '{"session_id":"sess-aaa"' is not a session claim, and a regex would read one
+# out of it — so there is no regex path here at all. jq also rejects non-object
+# payloads and a non-string session_id.
+#
 BASE=$(field base_sha)
 echo "$BASE" | grep -qE '^([0-9a-f]{7,40}|none)$' || BASE="HEAD"
 
@@ -314,6 +431,120 @@ parked_fingerprints() {
   awk -F'\t' '$5=="parked"{print $1}' "$REGISTRY_FILE" 2>/dev/null
 }
 
+# True when a round moved the work forward without anyone digging in.
+#
+# The ways a round can mean "the two sides disagree" are all visible here: the
+# author REJECTED a finding, the author wrote a section that says neither FIXED
+# nor REJECTED (ambiguous — treated as dispute, never as progress), or the round
+# escalated to the blind judge or parked a design question.
+#
+# Recurrence is the fifth blocker and the one that is not a disagreement: the
+# reviewer having to raise the same defect twice means a fix landed incomplete,
+# which is churn rather than progress. It was left out of the first version on the
+# reasoning that a repeat is either fixed again or rejected; the review of that
+# very change produced three repeats that were neither. Neither source is the
+# author's judgment: identity is the engine's deterministic fingerprint, and the
+# matcher — never the author — rules on re-wordings, attributed to the round it
+# was reached in. See round_had_recurrence for why both are needed.
+# Driven from the REVIEW's findings, not the response's sections. The gate before
+# this only checks that a response file exists, so a response that omits a finding
+# — or names none at all — reaches here; reading only what the author wrote would
+# score those silences as agreement and hand the run extra rounds on the strength
+# of an unanswered finding. Same rule fold_registry already applies: a finding
+# with no disposition is UNKNOWN.
+# Findings answered exactly once, with FIXED standing on its own after the colon.
+#
+# Stricter than parse_responses on purpose, and separate from it on purpose. That
+# parser is deliberately permissive so the registry keeps working when an author
+# writes "FIXED (see the note below)" — but it also reads "FIXEDLY" as FIXED and
+# keeps only the first section when a finding is answered twice. Permissive is
+# right for bookkeeping and wrong here: this is the only disposition that buys
+# extra rounds, so anything short of an unambiguous answer must not qualify. A
+# finding answered FIXED and then REJECTED is a conflict, not an answer.
+#
+# "FIXED" must be followed by whitespace or end the line — the documented grammar
+# is `FIXED — <what you did>`. Any other character makes a different word or a
+# hedge: FIXED?, FIXED-ish and FIXED/REJECTED are all things an author might write
+# when they are not sure, and "not sure" is the state the soft cap exists to stop
+# on. Being strict here only ever withholds extra rounds, never grants them.
+strict_fixed_ids() { # $1 = response file
+  awk '
+    /^### F[0-9]+-[0-9]+:/ {
+      id=$2; sub(/:$/, "", id)
+      seen[id]++
+      rest=$0; sub(/^### F[0-9]+-[0-9]+:[ \t]*/, "", rest)
+      if (rest ~ /^FIXED([ \t]|$)/) ok[id]++
+      next
+    }
+    END { for (i in seen) if (seen[i] == 1 && ok[i] == 1) print i }
+  ' "$1" 2>/dev/null
+}
+
+# Did this round re-raise a defect an earlier round already covered?
+#
+# Two sources, because neither sees the whole picture.
+#
+# (a) The matcher's verdict. A SAME means an independent pass judged two DIFFERENT
+#     wordings to be one defect — never the author's call — recorded against the
+#     round it was reached in so a match in round 3 does not condemn round 5.
+#
+# (b) Fingerprint identity across earlier reviews. The matcher never sees an
+#     identical re-raise: build_matcher only offers findings whose fingerprint is
+#     not already tracked, so a defect raised again under the SAME file and title
+#     produces no alias. Relying on (a) alone would let the plainest form of "the
+#     reviewer already said this" be the one form that scores as progress, which
+#     inverts the rule. This is string equality between two review files, not a
+#     judgment about whether two wordings mean the same thing, so it takes nothing
+#     away from the matcher.
+fingerprints_of() { # $1 = review file → one canonical fingerprint per line
+  local id tag file nt
+  while IFS=$'\t' read -r id tag file nt; do
+    [ -n "$id" ] || continue
+    resolve_alias "${file} | ${nt}"; printf '\n'
+  done < <(parse_findings "$1")
+}
+
+round_had_recurrence() { # $1 = round
+  local n="$1"
+  if [ -f "$ALIASES_FILE" ] \
+    && awk -F'\t' -v n="$n" '$3==n {found=1; exit} END {exit !found}' \
+         "$ALIASES_FILE" 2>/dev/null; then
+    return 0
+  fi
+  local rf; rf=$(review_file "$n"); [ -f "$rf" ] || return 1
+  local cur; cur=$(mktemp) || return 1
+  fingerprints_of "$rf" | sort -u > "$cur"
+  local i=1 prev rc=1
+  while [ "$i" -lt "$n" ]; do
+    prev=$(review_file "$i")
+    if [ -f "$prev" ] && fingerprints_of "$prev" | grep -qxFf "$cur" -; then
+      rc=0; break
+    fi
+    i=$((i + 1))
+  done
+  rm -f "$cur"
+  return "$rc"
+}
+
+round_was_productive() { # $1 = round
+  local rf resp; rf=$(review_file "$1"); resp=$(response_file "$1")
+  [ -f "$rf" ] && [ -f "$resp" ] || return 1
+  [ -f "$JUDGE_PENDING" ] && return 1
+  [ -n "$(parked_fingerprints)" ] && return 1
+  round_had_recurrence "$1" && return 1
+  local fixed; fixed=$(mktemp) || return 1
+  strict_fixed_ids "$resp" > "$fixed"
+  local id tag file nt any=0 ok=1
+  while IFS=$'\t' read -r id tag file nt; do
+    [ -n "$id" ] || continue
+    any=1
+    grep -qxF -- "$id" "$fixed" || { ok=0; break; }
+  done < <(parse_findings "$rf")
+  rm -f "$fixed"
+  # A round with no parseable finding is not evidence of progress either.
+  [ "$any" = 1 ] && [ "$ok" = 1 ]
+}
+
 # True if the round's review raised ≥1 finding and EVERY raised finding is parked.
 only_parked_this_round() { # $1=round
   local rf; rf=$(review_file "$1"); [ -f "$rf" ] || return 1
@@ -437,14 +668,27 @@ EOF
   chmod +x "$runner"
 }
 
-emit_sweep_runner() { # fresh author-family Claude, always read-only
+emit_sweep_runner() { # fresh author-family instance, always read-only
   local out; out=$(sweep_file)
+  # The generated runner receives this verbatim. Single quotes keep $snapshot,
+  # $tmp and $source_root as literal text for the runner's own runtime.
+  # The two CLIs differ in how they deliver output: claude writes stdout, so the
+  # redirect sits OUTSIDE the (cd "$snapshot" …) subshell and a relative $tmp
+  # resolves against the original cwd; codex writes the file itself via
+  # --output-last-message, evaluated INSIDE the subshell after the cd, so that
+  # path must be absolute or the result lands in the throwaway snapshot.
+  local sweep_invoke
+  if [ "$AUTHOR" = codex ]; then
+    sweep_invoke='(cd "$snapshot" && codex exec --sandbox read-only --skip-git-repo-check --output-last-message "$source_root/$tmp")'
+  else
+    sweep_invoke='(cd "$snapshot" && claude -p --safe-mode --tools Read Grep Glob) > "$tmp"'
+  fi
   { echo "# Changes under closure sweep (git diff ${BASE}):"; git diff "${BASE}" 2>/dev/null;
     echo; echo "# Untracked files:"; git status --porcelain --untracked-files=all 2>/dev/null; } \
     > "$DIFF_SURFACE_FILE"
   cat > "$SWEEP_RUNNER" <<EOF
 #!/usr/bin/env bash
-# sparring final sweep — fresh Claude author-family instance (generated)
+# sparring final sweep — fresh author-family instance (generated)
 set -uo pipefail
 if [ -e reviews ] || [ -L reviews ]; then
   [ -d reviews ] && [ ! -L reviews ] || exit 1
@@ -492,7 +736,7 @@ while IFS= read -r -d '' path; do
 done < "\$manifest"
 
 { cat "\$source_root/${SWEEP_PROMPT_FILE}"; echo; echo '--- Changes under sweep ---'; cat "\$source_root/${DIFF_SURFACE_FILE}"; } | \\
-  (cd "\$snapshot" && claude -p --safe-mode --tools Read Grep Glob) > "\$tmp"
+  ${sweep_invoke}
 [ -s "\$tmp" ] || exit 1
 ln "\$tmp" "${out}" || exit 1
 EOF
@@ -500,7 +744,7 @@ EOF
 }
 
 prepare_sweep() {
-  local tpl_dir="${CLAUDE_PLUGIN_ROOT:-}/shared/prompts"
+  local tpl_dir="${PLUGIN_ROOT}/shared/prompts"
   [ -f "$tpl_dir/sweeper.md" ] \
     || { log "template missing: $tpl_dir/sweeper.md"; finish_approve error-bypass error; }
   local prompt intent=""
@@ -545,7 +789,7 @@ should_sweep() {
 
 prepare_round() { # $1=round number → writes PROMPT_FILE + RUNNER
   local n="$1"
-  local tpl_dir="${CLAUDE_PLUGIN_ROOT:-}/shared/prompts"
+  local tpl_dir="${PLUGIN_ROOT}/shared/prompts"
   [ -f "$tpl_dir/reviewer.md" ] \
     || { log "template missing: $tpl_dir/reviewer.md"; finish_approve error-bypass; }
 
@@ -619,8 +863,8 @@ extract_finding() { # $1=review file  $2=fingerprint
 gate_finding_text() { # $1=review file  $2=canonical fp
   local t; t=$(extract_finding "$1" "$2")
   if [ -z "$t" ] && [ -f "$ALIASES_FILE" ]; then
-    local vfp cfp
-    while IFS=$'\t' read -r vfp cfp; do
+    local vfp cfp _rnd
+    while IFS=$'\t' read -r vfp cfp _rnd; do
       [ "$cfp" = "$2" ] || continue
       t=$(extract_finding "$1" "$vfp")
       [ -n "$t" ] && break
@@ -649,7 +893,7 @@ resolve_finding_text() { # $1=fp  $2=current round
 # template is missing or the finding cannot be extracted.
 prepare_judge() { # $1=fingerprint
   local fp="$1"
-  local tpl_dir="${CLAUDE_PLUGIN_ROOT:-}/shared/prompts"
+  local tpl_dir="${PLUGIN_ROOT}/shared/prompts"
   [ -f "$tpl_dir/judge.md" ] || { log "judge template missing"; return 1; }
   local finding; finding=$(extract_finding "$(review_file "$ROUND")" "$fp")
   [ -n "$finding" ] || { log "cannot extract finding for judge: $fp"; return 1; }
@@ -673,7 +917,7 @@ prepare_judge() { # $1=fingerprint
 # 1 if there are no ambiguous candidates (caller marks the round matched).
 build_matcher() { # $1=round
   local n="$1" rf; rf=$(review_file "$n")
-  local tpl_dir="${CLAUDE_PLUGIN_ROOT:-}/shared/prompts"
+  local tpl_dir="${PLUGIN_ROOT}/shared/prompts"
   [ -f "$tpl_dir/matcher.md" ] || return 1
   [ -f "$REGISTRY_FILE" ] || return 1
   local existing; existing=$(awk -F'\t' '$5=="open"||$5=="parked"{print $1}' "$REGISTRY_FILE" 2>/dev/null)
@@ -733,7 +977,13 @@ EXIST_EOF
 }
 
 # Turn a matcher output's SAME lines into aliases.
-apply_matches() { # $1=matcher output file
+#
+# The round is recorded as a third column. An alias means the reviewer raised the
+# same defect under new wording — which the cap logic needs to attribute to a
+# specific round, not just to the run. Readers that predate the column take the
+# first two fields, so adding it is safe as long as no one reads the tail with a
+# bare two-variable `read` (see gate_finding_text).
+apply_matches() { # $1=matcher output file  $2=round
   [ -f "$1" ] || return 0
   touch "$ALIASES_FILE"
   local kw ntag etag rest vfp cfp
@@ -742,7 +992,7 @@ apply_matches() { # $1=matcher output file
     vfp=$(awk -F'\t' -v t="$ntag" '$1==t{print $2; exit}' "$MATCHER_MANIFEST" 2>/dev/null)
     cfp=$(awk -F'\t' -v t="$etag" '$1==t{print $2; exit}' "$MATCHER_MANIFEST" 2>/dev/null)
     [ -n "$vfp" ] && [ -n "$cfp" ] && [ "$vfp" != "$cfp" ] || continue
-    printf '%s\t%s\n' "$vfp" "$cfp" >> "$ALIASES_FILE"
+    printf '%s\t%s\t%s\n' "$vfp" "$cfp" "${2:-0}" >> "$ALIASES_FILE"
   done < <(grep '^SAME ' "$1" 2>/dev/null)
   rm -f "$MATCHER_MANIFEST"
 }
@@ -772,7 +1022,7 @@ bash ${MATCHER_RUNNER}
 Then stop again." "sparring [${REVIEW_ID}] round ${n}: finding-matcher pending"
     fi
     rm -f "$MATCHER_RETRY"
-    apply_matches "$out"
+    apply_matches "$out" "$n"
     rm -f "$MATCHER_PENDING" "$MATCHER_RUNNER"
     echo "$n" > "$MATCHER_ROUND"
     return 0
@@ -831,8 +1081,8 @@ reviewer convergence judgment." \
     set_state review 1
     rm -f "$RETRY_FILE"
     NOTE=""
-    [ "$REVIEWER" = "claude" ] && NOTE="
-NOTE: same-model review — reduced cross-vendor blind-spot coverage. Install the Codex CLI for cross-model review."
+    [ "$REVIEWER" = "$AUTHOR" ] && NOTE="
+NOTE: same-model review — reduced cross-vendor blind-spot coverage. Install the other vendor's CLI for cross-model review."
     block "Implementation phase done. Round 1 independent review is required.
 
 Run (use a 600000ms timeout — reviews take minutes):
@@ -881,8 +1131,8 @@ bash ${RUNNER}
       if [ "$SWEEP_DONE" = true ]; then
         log "converged at round $ROUND after sweep"; finish_approve converged "$SWEEP_RESULT"
       elif should_sweep; then
-        command -v claude >/dev/null 2>&1 \
-          || { log "author-family CLI not found for sweep"; finish_approve error-bypass error; }
+        command -v "$AUTHOR" >/dev/null 2>&1 \
+          || { log "author-family CLI not found for sweep: $AUTHOR"; finish_approve error-bypass error; }
         set_sweep_state true pending
         set_state sweep "$ROUND"
         prepare_sweep
@@ -1082,19 +1332,44 @@ as '### P<k>: <decision + basis>'. Then stop again." \
         "sparring [${REVIEW_ID}] round ${ROUND}: design gate"
     fi
 
+    # The soft cap exists to stop a DEADLOCK — two sides that will not agree, where
+    # more rounds buy nothing. It counts elapsed rounds, which also catches a very
+    # different case: a review that is still surfacing real work the author keeps
+    # fixing. Stopping that one discards progress and protects no one, and there is
+    # no cheap way to resume it afterwards — a fresh run re-bases on the committed
+    # work, so the reviewer would be handed an empty diff. Whatever rounds this run
+    # needs, it has to get inside this run.
+    #
+    # So: extend past the soft cap while rounds stay productive, and stop at the
+    # hard cap regardless. The hard cap is what makes this terminate — a reviewer
+    # that invents one fresh nitpick per round would otherwise never stop, and every
+    # such round is a full re-review of the whole diff.
     if [ "$ROUND" -ge "$MAX_ROUNDS" ]; then
-      log "round cap ${MAX_ROUNDS} reached — unconverged exit"
-      record_outcome cap
-      # An unconverged run is exactly the one a human needs summarized. Safe here:
-      # this path only deactivates and blocks, so cleanup() (and with it the
-      # ledger and registry the report reads) has not run yet.
-      generate_report
-      deactivate_state
-      block "Round cap (${MAX_ROUNDS}) reached and the reviewer has NOT
+      if [ "$ROUND" -lt "$HARD_CAP" ] && round_was_productive "$ROUND"; then
+        log "round ${ROUND} productive (nothing rejected, nothing escalated) — extending past the soft cap ${MAX_ROUNDS}, hard cap ${HARD_CAP}"
+      else
+        if [ "$ROUND" -ge "$HARD_CAP" ]; then
+          CAP_KIND="Hard round cap (${HARD_CAP})"
+          log "hard cap ${HARD_CAP} reached — unconverged exit"
+        else
+          CAP_KIND="Round cap (${MAX_ROUNDS})"
+          log "round cap ${MAX_ROUNDS} reached on a non-productive round — unconverged exit"
+        fi
+        record_outcome cap
+        # An unconverged run is exactly the one a human needs summarized. Safe here:
+        # this path only deactivates and blocks, so cleanup() (and with it the
+        # ledger and registry the report reads) has not run yet.
+        generate_report
+        deactivate_state
+        block "${CAP_KIND} reached and the reviewer has NOT
 converged. Do not keep fixing. Report to the user: the loop ended
-unconverged — summarize the unresolved findings from ${RF} honestly, then
-stop. The loop is now deactivated; your next stop will be released." \
-        "sparring [${REVIEW_ID}]: round cap — unconverged"
+unconverged — summarize the unresolved findings from ${RF} honestly, and say
+plainly which fixes were never re-reviewed. Do NOT suggest committing and
+re-running to continue: a new run re-bases on the commit, so the reviewer
+would see an empty diff. The loop is now deactivated; your next stop will be
+released." \
+          "sparring [${REVIEW_ID}]: round cap — unconverged"
+      fi
     fi
 
     NEXT=$((ROUND + 1))

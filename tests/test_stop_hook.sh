@@ -7,7 +7,7 @@ HOOK="$ROOT/plugins/spar/hooks/stop-hook.sh"
 export CLAUDE_PLUGIN_ROOT="$ROOT/plugins/spar"
 
 # The hook refuses to dispatch a round when the reviewer CLI is missing
-# (stop-hook.sh:793-797), so every reviewed path below needs `codex` and
+# (stop-hook.sh:803-807), so every reviewed path below needs `codex` and
 # `claude` to merely exist. Provide no-op stubs and put them first on PATH: the
 # suite must not depend on what the developer happens to have installed, and CI
 # must never need a real reviewer CLI. Tests that drive a runner script build
@@ -196,6 +196,8 @@ chk "prompt resolves intent slot" "absent" \
 in_review() { fresh_dir; write_state review "$1"; mkdir -p reviews; }
 RF1="reviews/spar-20260721-120000-abc123-r1.md"
 RP1="reviews/spar-20260721-120000-abc123-r1-response.md"
+RF5X="reviews/spar-20260721-120000-abc123-r5.md"
+RP5X="reviews/spar-20260721-120000-abc123-r5-response.md"
 
 # ── 5. review file missing → block (retry), 3rd miss → fail-open ──
 in_review 1
@@ -514,7 +516,15 @@ chk "matcher prompt is blind (no response text)" "absent" "$(grep -qi 'cohesive 
 MOUT=$(cat .claude/spar-matcher-pending)
 printf 'SAME N1 E1\n' > "$MOUT"
 OUT=$(run_hook)   # apply alias; fold(2) resolves variant→canonical → canonical streak 2 → DESIGN parked → gate
-chk "alias recorded" "$(printf 'mod.py | break up mod py into parts\tmod.py | split the module')" "$(cat .claude/spar-aliases.tsv)"
+# The WHOLE row, including the round column. Matching only the two-column prefix
+# would keep passing if apply_matches stopped recording the round — and the
+# recurrence tests below hand-write their own files, so nothing else covers the
+# write side.
+chk "alias recorded with its round" \
+  "$(printf 'mod.py | break up mod py into parts\tmod.py | split the module\t2')" \
+  "$(cat .claude/spar-aliases.tsv)"
+chk "alias row is exactly three fields" "3" \
+  "$(awk -F'\t' 'NR==1{print NF}' .claude/spar-aliases.tsv)"
 chk "reword folded onto canonical (streak 2, parked)" "$(printf 'mod.py | split the module\tDESIGN\t2\t2\tparked')" "$(cat .claude/spar-registry.tsv)"
 chk "aliased parked finding still fires the gate" 'gate' "$OUT"
 
@@ -1003,7 +1013,7 @@ chk "error-bypass → no report by design" "absent" \
   "$([ -f "$RPT" ] && echo present || echo absent)"
 
 # ── CLI presence: the hook refuses to start a round without the reviewer CLI ──
-# This branch (stop-hook.sh:793-797) had no coverage — the suite reached the
+# This branch (stop-hook.sh:803-807) had no coverage — the suite reached the
 # reviewed paths only because the developer happened to have codex installed.
 # SYS_PATH deliberately excludes STUB_BIN so the CLI really is missing. jq may
 # also be absent there, which is fine: block() falls back to a printf JSON that
@@ -1024,6 +1034,642 @@ chk "reviewer CLI absent → no report (error-bypass never reports)" "absent" \
 fresh_dir; write_state task 0; mkdir -p reviews
 OUT=$(run_hook)
 chk "reviewer CLI present → round 1 dispatched" "spar-run-reviewer.sh" "$OUT"
+
+# ── self-location: the engine must work without CLAUDE_PLUGIN_ROOT ──
+# With the var unset the engine used to fail open SILENTLY: no round dispatched,
+# no outcome recorded, state deleted. It must instead behave exactly as it does
+# with the var set, by locating its siblings from its own path.
+fresh_dir; write_state task 0; mkdir -p reviews
+OUT=$(env -u CLAUDE_PLUGIN_ROOT bash "$HOOK" <<< '{}')
+chk "no plugin root → still dispatches round 1" "spar-run-reviewer.sh" "$OUT"
+chk_file "no plugin root → runner written" ".claude/spar-run-reviewer.sh"
+chk "no plugin root → prompt carries the task" "fizzbuzz" \
+  "$(cat .claude/spar-reviewer-prompt.txt 2>/dev/null)"
+chk "no plugin root → state advanced" "phase: review" "$(cat .claude/spar.local.md 2>/dev/null)"
+
+# And the terminal path still records a durable outcome without the var.
+fresh_dir; write_state review 1; mkdir -p reviews
+converged_no_sweep
+env -u CLAUDE_PLUGIN_ROOT bash "$HOOK" <<< '{}' >/dev/null
+chk "no plugin root → outcome still recorded" "reason: converged" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+
+# ── author family: the sweep must follow the AUTHOR, not always claude ──
+add_author() { # $1=value
+  sed -i '' "s/^reviewer: /author: $1\nreviewer: /" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^reviewer: /author: $1\nreviewer: /" .claude/spar.local.md
+}
+sweep_fixture() { # a converged round that triggers the sweep (3+ rounds does it)
+  fresh_dir; write_state review 3; mkdir -p reviews
+  printf 'STATUS: CONVERGED\n\nAll good.\n' > reviews/spar-20260721-120000-abc123-r3.md
+}
+chk_absent_hook() { # $1=unwanted $2=haystack $3=desc
+  if printf '%s' "$2" | grep -qF "$1"; then echo "FAIL: $3"; FAIL=$((FAIL+1))
+  else echo "PASS: $3"; PASS=$((PASS+1)); fi
+}
+
+# default (no author field) → claude sweep runner, exactly as today
+sweep_fixture
+run_hook >/dev/null
+chk "no author field → claude sweep runner" "claude -p --safe-mode" \
+  "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+
+# author: codex → codex sweep runner
+sweep_fixture; add_author codex
+run_hook >/dev/null
+chk "author codex → codex sweep runner" "codex exec" "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+chk "author codex → sweep stays read-only" "read-only" "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+# codex writes its own output file from inside the snapshot subshell, so the path
+# must be absolute — a relative $tmp would land in the throwaway snapshot.
+chk "author codex → absolute output path" 'output-last-message "$source_root/$tmp"' \
+  "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+chk_absent_hook "claude -p" "$(cat .claude/spar-run-sweep.sh 2>/dev/null)" \
+  "author codex → no claude in the sweep runner"
+
+# invalid author → internal-state error, fail open, never silently claude
+sweep_fixture; add_author bogus
+chk "invalid author → approve (fail open)" '"decision":"approve"' "$(run_hook)"
+chk "invalid author → error-bypass outcome" "reason: error-bypass" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+
+# the cross-model notice must key off the pairing, not the reviewer alone
+fresh_dir; write_state task 0; mkdir -p reviews; add_author codex
+sed -i '' 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md
+OUT=$(run_hook)
+chk_absent_hook "same-model review" "$OUT" \
+  "codex author + claude reviewer → not called same-model"
+
+# and a genuinely same-family pairing still gets the notice
+fresh_dir; write_state task 0; mkdir -p reviews; add_author claude
+sed -i '' 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md
+chk "claude author + claude reviewer → same-model notice" "same-model review" "$(run_hook)"
+
+# ── owner gating: a foreign session must not join someone else's run ──
+# A user-scope hook registration fires in EVERY session of that host, so without
+# this an unrelated Codex session opened in a repo with an active loop would be
+# pulled in and would advance the state machine.
+add_owner() { # $1=session id
+  sed -i '' "s/^reviewer: /owner_session: $1\nreviewer: /" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^reviewer: /owner_session: $1\nreviewer: /" .claude/spar.local.md
+}
+payload() { printf '{"session_id":"%s","hook_event_name":"Stop"}' "$1"; }
+
+# matching session → the loop runs normally
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+OUT=$(payload sess-aaa | bash "$HOOK")
+chk "owner match → round dispatched" "spar-run-reviewer.sh" "$OUT"
+
+# foreign session → approve, and the run is left completely untouched
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+OUT=$(payload sess-zzz | bash "$HOOK")
+chk "foreign session → approve" '"decision":"approve"' "$OUT"
+chk "foreign session → state untouched" "phase: task" "$(cat .claude/spar.local.md 2>/dev/null)"
+chk "foreign session → no runner written" "absent" \
+  "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
+chk "foreign session → no outcome recorded" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-outcome.md ] && echo present || echo absent)"
+
+# no owner field → unchanged behavior, whatever the payload says
+fresh_dir; write_state task 0; mkdir -p reviews
+OUT=$(payload sess-zzz | bash "$HOOK")
+chk "no owner field → round dispatched" "spar-run-reviewer.sh" "$OUT"
+
+# owner set but payload carries no session id → treated as foreign, approve
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+chk "no session id in payload → approve" '"decision":"approve"' "$(run_hook)"
+chk "no session id in payload → state untouched" "phase: task" \
+  "$(cat .claude/spar.local.md 2>/dev/null)"
+
+# malformed JSON is NOT a session claim, even when the owner's id appears in it
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+OUT=$(printf '{"session_id":"sess-aaa"' | bash "$HOOK")
+chk "truncated payload → approve" '"decision":"approve"' "$OUT"
+chk "truncated payload → state untouched" "phase: task" "$(cat .claude/spar.local.md 2>/dev/null)"
+chk "truncated payload → no runner written" "absent" \
+  "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
+
+# a non-object payload carrying the id is not a claim either
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+chk "array payload → approve" '"decision":"approve"' "$(printf '["sess-aaa"]' | bash "$HOOK")"
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+chk "non-string session_id → approve" '"decision":"approve"' \
+  "$(printf '{"session_id":123}' | bash "$HOOK")"
+
+# with jq unavailable, ownership is unverifiable → treated as foreign: approve and
+# mutate NOTHING. Terminating here would delete a live run's state from a session
+# that may not own it, which is what the gate exists to prevent. A malformed
+# payload carrying the owner's id must not impersonate it either.
+nojq_path() { # → a PATH with everything except jq
+  local d; d=$(mktemp -d) || return 1
+  local dir f b
+  for dir in /bin /usr/bin; do
+    for f in "$dir"/*; do
+      b=${f##*/}; [ "$b" = jq ] && continue
+      [ -e "$d/$b" ] || ln -sf "$f" "$d/$b" 2>/dev/null
+    done
+  done
+  for b in codex claude; do printf '#!/bin/sh\nexit 0\n' > "$d/$b"; chmod +x "$d/$b"; done
+  printf '%s' "$d"
+}
+NOJQ=$(nojq_path)
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+OUT=$(printf '{"session_id":"sess-aaa"' \
+  | env -i PATH="$NOJQ" HOME="$HOME" CLAUDE_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" bash "$HOOK")
+chk "no jq + malformed owner payload → approve" '"decision":"approve"' "$OUT"
+chk "no jq → no round dispatched" "absent" \
+  "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
+chk "no jq → the run survives, state untouched" "phase: task" \
+  "$(cat .claude/spar.local.md 2>/dev/null)"
+chk "no jq → nothing recorded as an outcome" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-outcome.md ] && echo present || echo absent)"
+
+# a well-formed owning payload is treated the same while jq is missing —
+# unverifiable is unverifiable — but still without destroying the run
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+OUT=$(printf '{"session_id":"sess-aaa"}' \
+  | env -i PATH="$NOJQ" HOME="$HOME" CLAUDE_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" bash "$HOOK")
+chk "no jq + valid owner payload → approve" '"decision":"approve"' "$OUT"
+chk "no jq + valid owner payload → state survives" "phase: task" \
+  "$(cat .claude/spar.local.md 2>/dev/null)"
+chk "no jq + valid owner payload → no outcome written" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-outcome.md ] && echo present || echo absent)"
+
+# a run WITHOUT owner gating never needs jq — existing Claude-hosted runs.
+# Assert on effects, not on the block text: with jq missing, block() falls back to
+# a printf JSON that carries only the reason's first line, so the runner path is
+# not in stdout even though the round was dispatched.
+fresh_dir; write_state task 0; mkdir -p reviews
+OUT=$(printf '{}' | env -i PATH="$NOJQ" HOME="$HOME" CLAUDE_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" bash "$HOOK")
+chk "no owner field + no jq → still blocks for the review" '"decision":"block"' "$OUT"
+chk_file "no owner field + no jq → runner written" ".claude/spar-run-reviewer.sh"
+chk "no owner field + no jq → state advanced" "phase: review" "$(cat .claude/spar.local.md 2>/dev/null)"
+rm -rf "$NOJQ"
+
+# a DEACTIVATED owner-scoped run must survive a foreign session too. The
+# `active != true` path records an outcome and runs cleanup(), so the gate has to
+# sit ahead of it — otherwise a session that cannot prove ownership performs the
+# owner's teardown.
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+sed -i '' 's/^active: true/active: false/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^active: true/active: false/' .claude/spar.local.md
+OUT=$(payload sess-zzz | bash "$HOOK")
+chk "foreign session + inactive run → approve" '"decision":"approve"' "$OUT"
+chk "foreign session + inactive run → state NOT cleaned up" "present" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+chk "foreign session + inactive run → no outcome written" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-outcome.md ] && echo present || echo absent)"
+
+# the owner still gets its own teardown when it stops
+OUT=$(payload sess-aaa | bash "$HOOK")
+chk "owner + inactive run → approve" '"decision":"approve"' "$OUT"
+chk "owner + inactive run → state cleaned up" "gone" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
+chk "owner + inactive run → outcome recorded" "reason: cap" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+
+# corruption, unlike teardown, is handled by whoever observes it: a state file we
+# cannot parse cannot be trusted to name its owner, so the gate must not run first
+# and leave a broken run inert until someone runs /spar:cancel.
+fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+sed -i '' 's/^review_id: .*/review_id: ..\/..\/evil/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^review_id: .*/review_id: ..\/..\/evil/' .claude/spar.local.md
+OUT=$(payload sess-zzz | bash "$HOOK")
+chk "foreign session + corrupt state → approve (fail open)" '"decision":"approve"' "$OUT"
+chk "foreign session + corrupt state → corruption still handled" "gone" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
+
+# the gate must never block — a foreign session is released, not trapped
+fresh_dir; write_state review 1; mkdir -p reviews; add_owner sess-aaa
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] x\n- file: a.py:1\n- problem: p\n- suggestion: s\n' \
+  > reviews/spar-20260721-120000-abc123-r1.md
+OUT=$(payload sess-zzz | bash "$HOOK")
+chk_absent_hook '"decision":"block"' "$OUT" "foreign session mid-round → never blocks"
+
+# ── the gate's full ordering contract, in one place ──
+# fields → validations → gate → teardown. Each row below fails if the gate moves
+# in one direction, and the pair together pins it from both sides. The separate
+# cases above check each rule alone, which is how a self-contradictory placement
+# instruction ("after the validations AND before any mutation" — the `active`
+# branch IS a mutation) survived three review rounds.
+owner_state() { # $1=extra sed expression applied to the state file
+  fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
+  [ -n "${1:-}" ] && { sed -i '' "$1" .claude/spar.local.md 2>/dev/null \
+    || sed -i "$1" .claude/spar.local.md; }
+  return 0
+}
+
+# 1. healthy + foreign → untouched (gate is before the teardown)
+owner_state
+OUT=$(payload sess-zzz | bash "$HOOK")
+chk "contract: healthy+foreign → approve" '"decision":"approve"' "$OUT"
+chk "contract: healthy+foreign → state kept" "present" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+
+# 2. inactive + foreign → untouched (the teardown is a mutation; strangers skip it)
+owner_state 's/^active: true/active: false/'
+payload sess-zzz | bash "$HOOK" >/dev/null
+chk "contract: inactive+foreign → state kept" "present" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+chk "contract: inactive+foreign → no outcome" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-outcome.md ] && echo present || echo absent)"
+
+# 3. corrupt + foreign → HANDLED (validations run first; a file we cannot parse
+#    cannot be trusted to name its owner, and must not sit inert)
+owner_state 's/^review_id: .*/review_id: ..\/..\/evil/'
+payload sess-zzz | bash "$HOOK" >/dev/null
+chk "contract: corrupt+foreign → cleaned up" "gone" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
+
+# 4. healthy + owner → proceeds normally
+owner_state
+OUT=$(payload sess-aaa | bash "$HOOK")
+chk "contract: healthy+owner → round dispatched" "spar-run-reviewer.sh" "$OUT"
+
+# ── X. the soft cap extends while rounds stay PRODUCTIVE ─────────────────────
+# The cap counts elapsed rounds, which conflates a deadlock with a review that is
+# still finding real work. A round where nothing was rejected and nothing
+# escalated is the second case; it must not end the run.
+set_field() { # $1=key $2=value
+  sed -i '' "s/^$1: .*/$1: $2/" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^$1: .*/$1: $2/" .claude/spar.local.md
+}
+round_files() { # $1=round  → writes a FINDINGS review + an all-FIXED response
+  printf 'STATUS: FINDINGS\n\n### F%s-1 [MECHANICAL] a real defect\n' "$1" \
+    > "reviews/spar-20260721-120000-abc123-r$1.md"
+  printf '### F%s-1: FIXED — corrected it\n' "$1" \
+    > "reviews/spar-20260721-120000-abc123-r$1-response.md"
+}
+
+in_review 5
+round_files 5
+OUT=$(run_hook)
+chk "productive round 5 → extends instead of capping" 'Round 6 verification review' "$OUT"
+chk "productive round 5 → still active" 'active: true' "$(cat .claude/spar.local.md)"
+chk "productive round 5 → round advanced" 'round: 6' "$(cat .claude/spar.local.md)"
+chk "productive round 5 → no cap outcome recorded" "absent" \
+  "$([ -f reviews/spar-20260721-120000-abc123-outcome.md ] && echo present || echo absent)"
+
+# A rejection is a dispute, and a dispute is exactly what the soft cap is for.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] a real defect\n' > "$RF5X"
+printf '### F5-1: REJECTED — grounded reason\n' > "$RP5X"
+OUT=$(run_hook)
+chk "rejection at the soft cap → caps, does not extend" 'Round cap (5) reached' "$OUT"
+chk "rejection at the soft cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+
+# An ambiguous response is treated as dispute, never as progress.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] a real defect\n' > "$RF5X"
+printf '### F5-1: looked at it\n' > "$RP5X"
+OUT=$(run_hook)
+chk "ambiguous response at the soft cap → caps" 'Round cap (5) reached' "$OUT"
+
+# The hard cap terminates a run that stays productive forever.
+in_review 10
+round_files 10
+OUT=$(run_hook)
+chk "hard cap → stops even on a productive round" 'Hard round cap (10) reached' "$OUT"
+chk "hard cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+chk "hard cap → durable cap outcome" "reason: cap" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+chk "hard cap → report carries the real round count" "rounds: 10" \
+  "$(cat reviews/spar-20260721-120000-abc123-report.md 2>/dev/null)"
+
+# Rounds between the two caps keep extending.
+in_review 8
+round_files 8
+OUT=$(run_hook)
+chk "productive round 8 → still extends below the hard cap" 'Round 9 verification review' "$OUT"
+
+# The hard cap is proportional to the budget the run asked for, not a constant:
+# max_rounds 3 doubles to 6, so a deliberately cheap run stays cheap.
+in_review 3
+set_field max_rounds 3
+round_files 3
+OUT=$(run_hook)
+chk "max_rounds 3 → extends past 3" 'Round 4 verification review' "$OUT"
+in_review 6
+set_field max_rounds 3
+round_files 6
+OUT=$(run_hook)
+chk "max_rounds 3 → hard cap is 6, not 10" 'Hard round cap (6) reached' "$OUT"
+
+# An explicit hard_cap overrides the doubling.
+in_review 5
+set_field max_rounds 5
+printf 'hard_cap: 5\n' >> /dev/null
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md
+round_files 5
+OUT=$(run_hook)
+chk "explicit hard_cap 5 → no extension at all" 'Hard round cap (5) reached' "$OUT"
+
+# A response that omits a finding is silence, not agreement. The gate before the
+# productivity test only checks that a response FILE exists, so these reach it.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n\n### F5-2 [MECHANICAL] two\n' > "$RF5X"
+printf '### F5-1: FIXED — did it\n' > "$RP5X"
+OUT=$(run_hook)
+chk "omitted response at the soft cap → caps, does not extend" 'Round cap (5) reached' "$OUT"
+
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+printf 'I looked at everything and it is fine.\n' > "$RP5X"
+OUT=$(run_hook)
+chk "unrecognised response at the soft cap → caps" 'Round cap (5) reached' "$OUT"
+
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+: > "$RP5X"
+OUT=$(run_hook)
+chk "empty response at the soft cap → caps" 'Round cap (5) reached' "$OUT"
+
+# A FINDINGS review with nothing parseable is not evidence of progress either.
+in_review 5
+printf 'STATUS: FINDINGS\n\nno structured findings here\n' > "$RF5X"
+printf '### F5-1: FIXED — did it\n' > "$RP5X"
+OUT=$(run_hook)
+chk "unparseable review at the soft cap → caps" 'Round cap (5) reached' "$OUT"
+
+# Several findings, all answered FIXED, still extends.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n\n### F5-2 [MECHANICAL] two\n' > "$RF5X"
+printf '### F5-1: FIXED — a\n\n### F5-2: FIXED — b\n' > "$RP5X"
+OUT=$(run_hook)
+chk "all findings answered FIXED → extends" 'Round 6 verification review' "$OUT"
+
+# Digit-only is not the same as usable. A leading zero is octal to bash's
+# arithmetic, and a twenty-digit value wraps — doubling it can come out negative.
+# Neither may reach a comparison that decides whether the loop keeps running.
+in_review 5
+set_field max_rounds 08
+round_files 5
+OUT=$(run_hook 2>&1)
+chk "leading-zero max_rounds → no arithmetic error on stderr" "clean" \
+  "$(printf '%s' "$OUT" | grep -q 'value too great for base' && echo dirty || echo clean)"
+chk "leading-zero max_rounds → read as decimal 8, so round 5 extends" \
+  'Round 6 verification review' "$OUT"
+
+in_review 8
+set_field max_rounds 08
+round_files 8
+OUT=$(run_hook 2>&1)
+chk "leading-zero max_rounds → 8 means 8, so round 8 still extends" \
+  'Round 9 verification review' "$OUT"
+in_review 16
+set_field max_rounds 08
+round_files 16
+OUT=$(run_hook 2>&1)
+chk "leading-zero max_rounds → hard cap is 16, not 0 or a wrap" \
+  'Hard round cap (16) reached' "$OUT"
+
+in_review 5
+set_field max_rounds 99999999999999999999
+round_files 5
+OUT=$(run_hook 2>&1)
+chk "absurd max_rounds → falls back to the default, no wraparound" \
+  'Round 6 verification review' "$OUT"
+chk "absurd max_rounds → recorded in the log" 'max_rounds unusable' "$(cat .claude/spar.log 2>/dev/null)"
+
+in_review 10
+set_field max_rounds 99999999999999999999
+round_files 10
+OUT=$(run_hook 2>&1)
+chk "absurd max_rounds → the run still terminates" 'Hard round cap (10) reached' "$OUT"
+
+in_review 5
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 99999999999999999999/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 99999999999999999999/' .claude/spar.local.md
+round_files 5
+OUT=$(run_hook 2>&1)
+chk "absurd hard_cap → falls back to 2x max_rounds" 'Round 6 verification review' "$OUT"
+in_review 10
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 99999999999999999999/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 99999999999999999999/' .claude/spar.local.md
+round_files 10
+OUT=$(run_hook 2>&1)
+chk "absurd hard_cap → the run still terminates at 2x" 'Hard round cap (10) reached' "$OUT"
+
+in_review 5
+set_field max_rounds 0
+round_files 5
+OUT=$(run_hook 2>&1)
+chk "max_rounds 0 → treated as invalid, default applies" 'Round 6 verification review' "$OUT"
+
+# Bash wraps at 64 bits, so an absurd value can arrive looking ordinary:
+# 2^64+1 = 18446744073709551617 evaluates to 1. A range check after the conversion
+# cannot tell that from a genuine "1", so the bound must hold on the digit string.
+WRAP1=18446744073709551617      # wraps to 1
+WRAP7=18446744073709551623      # wraps to 7
+in_review 5
+set_field max_rounds $WRAP1
+round_files 5
+OUT=$(run_hook 2>&1)
+chk "max_rounds wrapping to a small value → rejected, not accepted as 1" \
+  'Round 6 verification review' "$OUT"
+chk "max_rounds wrapping to a small value → logged as unusable" 'max_rounds unusable' \
+  "$(cat .claude/spar.log 2>/dev/null)"
+
+in_review 5
+sed -i '' "s/^max_rounds: 5/max_rounds: 5\nhard_cap: $WRAP1/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^max_rounds: 5/max_rounds: 5\nhard_cap: $WRAP1/" .claude/spar.local.md
+round_files 5
+OUT=$(run_hook 2>&1)
+chk "hard_cap wrapping to a small value → rejected, falls back to 2x" \
+  'Round 6 verification review' "$OUT"
+
+# A corrupt round must fail OPEN, not silently consume another round's artifacts.
+in_review 5
+set_field round $WRAP7
+printf 'STATUS: FINDINGS\n\n### F7-1 [MECHANICAL] planted\n' \
+  > reviews/spar-20260721-120000-abc123-r7.md
+chk "round wrapping to a small value → fails open, does not adopt round 7" \
+  '"decision":"approve"' "$(run_hook 2>&1)"
+
+# The hard cap's bound is twice the soft cap's, so doubling holds at every legal
+# max_rounds and an explicit override in that range is honoured, not shrunk.
+in_review 100
+set_field max_rounds 60
+round_files 100
+OUT=$(run_hook 2>&1)
+chk "max_rounds 60 → hard cap is 120, so round 100 extends" \
+  'Round 101 verification review' "$OUT"
+in_review 120
+set_field max_rounds 60
+round_files 120
+OUT=$(run_hook 2>&1)
+chk "max_rounds 60 → hard cap really is 120" 'Hard round cap (120) reached' "$OUT"
+
+in_review 100
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 120/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 120/' .claude/spar.local.md
+round_files 100
+OUT=$(run_hook 2>&1)
+chk "explicit hard_cap 120 → honoured, not shrunk to 100" \
+  'Round 101 verification review' "$OUT"
+
+# The soft cap is a budget, not a policy about sensible budgets. A value the user
+# stated plainly is honoured; only values arithmetic cannot carry are rejected.
+in_review 101
+set_field max_rounds 101
+round_files 101
+OUT=$(run_hook 2>&1)
+chk "max_rounds 101 → honoured, not shrunk to a built-in limit" \
+  'Round 102 verification review' "$OUT"
+in_review 202
+set_field max_rounds 101
+round_files 202
+OUT=$(run_hook 2>&1)
+chk "max_rounds 101 → its hard cap really is 202" 'Hard round cap (202) reached' "$OUT"
+in_review 240
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 250/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 250/' .claude/spar.local.md
+round_files 240
+OUT=$(run_hook 2>&1)
+chk "explicit hard_cap 250 → honoured" 'Round 241 verification review' "$OUT"
+
+# Only an UNAMBIGUOUS FIXED buys extra rounds. The shared response parser is
+# permissive by design; permissive is wrong for the one disposition that extends.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+printf '### F5-1: FIXEDLY — a word that merely starts with it\n' > "$RP5X"
+OUT=$(run_hook 2>&1)
+chk "FIXEDLY is not FIXED → caps" 'Round cap (5) reached' "$OUT"
+
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+printf '### F5-1: FIXED — did it\n\n### F5-1: REJECTED — actually no\n' > "$RP5X"
+OUT=$(run_hook 2>&1)
+chk "a finding answered twice is a conflict → caps" 'Round cap (5) reached' "$OUT"
+
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+printf '### F5-1: FIXED\n' > "$RP5X"
+OUT=$(run_hook 2>&1)
+chk "bare FIXED with no prose still counts → extends" 'Round 6 verification review' "$OUT"
+
+# A hedge is not an answer. Anything other than whitespace or end-of-line after
+# FIXED is a different word or a qualification, and both mean "not sure" — which
+# is the state the soft cap exists to stop on.
+for hedge in 'FIXED?' 'FIXED/REJECTED' 'FIXED-ish' 'FIXED.REJECTED'; do
+  in_review 5
+  printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+  printf '### F5-1: %s — not committing to it\n' "$hedge" > "$RP5X"
+  chk "hedged disposition '$hedge' → caps" 'Round cap (5) reached' "$(run_hook 2>&1)"
+done
+# ...while the documented grammar keeps working.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] one\n' > "$RF5X"
+printf '### F5-1: FIXED — did the thing\n' > "$RP5X"
+chk "the documented 'FIXED — prose' form still extends" \
+  'Round 6 verification review' "$(run_hook 2>&1)"
+
+# Requirement (2) names judged and parked explicitly. A round carrying either is
+# a dispute, so the soft cap must behave exactly as it did before this change.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] a.py fixed one\n\n### F5-2 [DESIGN] mod.py split it\n' > "$RF5X"
+printf '### F5-1: FIXED — did it\n\n### F5-2: REJECTED — cohesive on purpose\n' > "$RP5X"
+printf 'mod.py | split it\tDESIGN\t4\t2\tparked\n' > .claude/spar-registry.tsv
+OUT=$(run_hook 2>&1)
+chk "a parked finding in a mixed round → caps, never extends" 'Round cap (5) reached' "$OUT"
+chk "parked at the cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+chk "parked at the cap → durable cap outcome" "reason: cap" \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
+chk_file "parked at the cap → report generated" \
+  reviews/spar-20260721-120000-abc123-report.md
+
+# The parked guard must bite on its own. Here THIS round is spotless — every
+# finding answered FIXED — but a design question parked in an earlier round is
+# still outstanding, and an unresolved parked decision is not a converging run.
+in_review 5
+round_files 5
+printf 'mod.py | split it\tDESIGN\t3\t2\tparked\n' > .claude/spar-registry.tsv
+OUT=$(run_hook 2>&1)
+chk "an earlier parked finding blocks extension even on a clean round" \
+  'Round cap (5) reached' "$OUT"
+
+# A re-raised defect is the reviewer having to say the same thing twice. That is
+# the clearest "not converging" signal short of an outright rejection, and the
+# soft cap is what it should hit — even though every finding this round was fixed.
+in_review 5
+round_files 5
+printf 'a.py | old wording\tb.py | canonical\t5\n' > .claude/spar-aliases.tsv
+OUT=$(run_hook 2>&1)
+chk "a recurrence this round → caps despite everything being fixed" \
+  'Round cap (5) reached' "$OUT"
+chk "recurrence at the cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+
+# Attributed per round: an earlier round's match must not condemn this one.
+in_review 5
+round_files 5
+printf 'a.py | old wording\tb.py | canonical\t3\n' > .claude/spar-aliases.tsv
+OUT=$(run_hook 2>&1)
+chk "a recurrence from an EARLIER round → still extends" \
+  'Round 6 verification review' "$OUT"
+
+# An aliases file written before the round column existed must not read as a
+# recurrence in every round.
+in_review 5
+round_files 5
+printf 'a.py | old wording\tb.py | canonical\n' > .claude/spar-aliases.tsv
+OUT=$(run_hook 2>&1)
+chk "a column-less legacy alias row → not attributed to this round" \
+  'Round 6 verification review' "$OUT"
+
+# An IDENTICAL re-raise never reaches the matcher — build_matcher skips findings
+# already in the registry — so without a second source the plainest repeat would
+# be the one form that scores as progress.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F3-1 [MECHANICAL] a.py the same defect\n' \
+  > reviews/spar-20260721-120000-abc123-r3.md
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] a.py the same defect\n' > "$RF5X"
+printf '### F5-1: FIXED — did it again\n' > "$RP5X"
+OUT=$(run_hook 2>&1)
+chk "an identical re-raise → caps, with no matcher involved" \
+  'Round cap (5) reached' "$OUT"
+chk "identical re-raise → no alias was needed to detect it" "absent" \
+  "$([ -s .claude/spar-aliases.tsv ] && echo present || echo absent)"
+
+# A different defect in the same file is not a repeat.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F3-1 [MECHANICAL] a.py one defect\n' \
+  > reviews/spar-20260721-120000-abc123-r3.md
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] a.py a different defect\n' > "$RF5X"
+printf '### F5-1: FIXED — did it\n' > "$RP5X"
+OUT=$(run_hook 2>&1)
+chk "a new defect in a file seen before → still extends" \
+  'Round 6 verification review' "$OUT"
+
+# Title wording is normalised, so punctuation and case do not hide a repeat.
+in_review 5
+printf 'STATUS: FINDINGS\n\n### F3-1 [MECHANICAL] a.py The Same Defect!\n' \
+  > reviews/spar-20260721-120000-abc123-r3.md
+printf 'STATUS: FINDINGS\n\n### F5-1 [MECHANICAL] a.py the same defect\n' > "$RF5X"
+printf '### F5-1: FIXED — did it again\n' > "$RP5X"
+OUT=$(run_hook 2>&1)
+chk "a re-raise differing only in case and punctuation → caps" \
+  'Round cap (5) reached' "$OUT"
+
+# A pending judge dispatch must never be scored as progress. The judge branch
+# runs first, so assert what matters: the run does not advance past the cap.
+in_review 5
+round_files 5
+printf 'a.py | fixed one\treviews/spar-20260721-120000-abc123-judge-1.md\n' > .claude/spar-judge-pending
+OUT=$(run_hook 2>&1)
+chk "judge pending at the soft cap → does not extend" "absent" \
+  "$(printf '%s' "$OUT" | grep -q 'Round 6 verification review' && echo present || echo absent)"
+
+# The cap message must not send the user down the commit-and-re-run path: a new
+# run re-bases on the commit, so its reviewer would be handed an empty diff.
+in_review 5
+round_files 5
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md
+CAPOUT=$(run_hook)
+chk "cap message warns against commit-and-re-run" 'empty diff' "$CAPOUT"
+chk "cap message asks what was never re-reviewed" 'never re-reviewed' "$CAPOUT"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

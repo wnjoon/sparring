@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "@@STOP_COMMAND@@",
+            "timeout": 60,
+            "statusMessage": "sparring: checking loop phase..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "@@SESSION_COMMAND@@",
+            "timeout": 10,
+            "statusMessage": "sparring: checking for pending design decisions..."
+          }
+        ]
+      }
+    ]
+  }
+}

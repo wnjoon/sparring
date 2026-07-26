@@ -118,4 +118,111 @@ chk "F fail-open preserves spar block" '"block"' "$OUT"
 chk "F keeps spar reason on internal error" "spar mid-round" "$OUT"
 teardown
 
+# ── the dispatcher must locate the REAL engine with no env vars at all ──
+# Codex registers hooks from a hooks.json, which has no env field, so neither hook
+# may depend on CLAUDE_PLUGIN_ROOT being exported. This case runs the dispatcher
+# for real: no CLAUDE_PLUGIN_ROOT, and no SPAR_FIGHT_SPAR_HOOK stub, so the engine
+# it executes is whatever its own self-location resolved. Reviewer CLIs are stubbed
+# on PATH because the engine refuses to dispatch a round without one, and this
+# suite must stay hermetic.
+setup
+unset SPAR_FIGHT_SPAR_HOOK
+STUB_CLI=$(mktemp -d)
+for c in codex claude; do printf '#!/bin/sh\nexit 0\n' > "$STUB_CLI/$c"; chmod +x "$STUB_CLI/$c"; done
+cat > .claude/spar.local.md <<'SPARSTATE'
+---
+active: true
+phase: task
+round: 0
+review_id: 20260721-120000-abc123
+base_sha: none
+reviewer: codex
+include_dirty: false
+unattended: false
+max_rounds: 5
+sweep_done: false
+sweep_result: not-run
+---
+
+Add a fizzbuzz function with tests
+SPARSTATE
+OUT="$(echo '{}' | env -u CLAUDE_PLUGIN_ROOT PATH="$STUB_CLI:$PATH" bash "$HOOK")"
+chk "no env → real engine dispatched round 1" "spar-run-reviewer.sh" "$OUT"
+chk "no env → engine wrote the runner" "present" \
+  "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
+chk "no env → engine wrote the prompt from its own templates" "fizzbuzz" \
+  "$(cat .claude/spar-reviewer-prompt.txt 2>/dev/null)"
+chk "no env → state advanced to review" "phase: review" "$(cat .claude/spar.local.md)"
+rm -rf "$STUB_CLI"
+teardown
+
+# ── an unrelated repository must be silent ──
+# The Codex seat registers this dispatcher at user scope, so it fires in every
+# session on the machine — most of them in repositories with no .claude/ at all.
+# Those must approve quietly: no stderr, no .claude/ created, engine not spawned.
+setup
+unset SPAR_FIGHT_SPAR_HOOK
+rm -rf .claude
+ERRF=$(mktemp)
+OUT="$(echo '{}' | bash "$HOOK" 2>"$ERRF")"
+chk "no loop state → approve" '"approve"' "$OUT"
+# Assert stderr is EMPTY, not merely free of one known message.
+if [ -s "$ERRF" ]; then
+  echo "FAIL: no loop state → stderr must be empty"; echo "  got :$(cat "$ERRF")"; FAIL=$((FAIL+1))
+else echo "PASS: no loop state → stderr empty"; PASS=$((PASS+1)); fi
+chk "no loop state → no .claude/ litter" "absent" \
+  "$([ -d .claude ] && echo present || echo absent)"
+rm -f "$ERRF"
+teardown
+
+# ── and an unrelated repository that DOES have .claude/ stays clean too ──
+# Any repository the author has used Claude Code in has a .claude/ directory. The
+# user-scope registration must not drop a log file into all of them.
+setup
+unset SPAR_FIGHT_SPAR_HOOK
+rm -rf .claude; mkdir .claude
+OUT="$(echo '{}' | bash "$HOOK" 2>/dev/null)"
+chk "empty .claude/ → approve" '"approve"' "$OUT"
+chk "empty .claude/ → no log written" "absent" \
+  "$([ -f .claude/spar-fight.log ] && echo present || echo absent)"
+# `chk ... ""` would always pass — grep -F "" matches everything. Test emptiness.
+LEFT="$(ls -A .claude)"
+if [ -n "$LEFT" ]; then
+  echo "FAIL: empty .claude/ → nothing else created"; echo "  got :$LEFT"; FAIL=$((FAIL+1))
+else echo "PASS: empty .claude/ → nothing else created"; PASS=$((PASS+1)); fi
+teardown
+
+# and with a real loop the engine's stderr must actually LAND in the log — the
+# positive half of the ERR_SINK change. Without this, flipping ERR_SINK to
+# /dev/null unconditionally (discarding every engine diagnostic during a live
+# loop, which is exactly what spar-fight.log exists for) passes the whole suite.
+setup
+cat > "$TMP/spar-noisy.sh" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+echo boom >&2
+echo '{"decision":"approve"}'
+STUB
+chmod +x "$TMP/spar-noisy.sh"
+export SPAR_FIGHT_SPAR_HOOK="$TMP/spar-noisy.sh"
+printf -- '---\nactive: true\nphase: task\nround: 0\nreview_id: 20260721-120000-abc123\nbase_sha: none\nreviewer: codex\nmax_rounds: 5\nsweep_done: false\nsweep_result: not-run\n---\n\ndo it\n' \
+  > .claude/spar.local.md
+echo '{}' | bash "$HOOK" >/dev/null 2>&1
+chk "active loop → engine stderr lands in the log" "boom" \
+  "$(cat .claude/spar-fight.log 2>/dev/null)"
+teardown
+
+# and the engine itself still runs end to end under a real loop
+setup
+unset SPAR_FIGHT_SPAR_HOOK
+STUB_CLI2=$(mktemp -d)
+for c in codex claude; do printf '#!/bin/sh\nexit 0\n' > "$STUB_CLI2/$c"; chmod +x "$STUB_CLI2/$c"; done
+printf -- '---\nactive: true\nphase: task\nround: 0\nreview_id: 20260721-120000-abc123\nbase_sha: none\nreviewer: codex\nmax_rounds: 5\nsweep_done: false\nsweep_result: not-run\n---\n\ndo it\n' \
+  > .claude/spar.local.md
+echo '{}' | env -u CLAUDE_PLUGIN_ROOT PATH="$STUB_CLI2:$PATH" bash "$HOOK" >/dev/null 2>&1
+chk "active loop → engine still runs" "present" \
+  "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
+rm -rf "$STUB_CLI2"
+teardown
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

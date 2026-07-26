@@ -7,12 +7,19 @@
 set -uo pipefail
 PLAN_STATE=".claude/spar-plan.local.md"
 LOG=".claude/spar-fight.log"
-DIR="${CLAUDE_PLUGIN_ROOT:-}/commands"
+# Resolve the plugin root from this script's own location: Codex registers hooks
+# from a hooks.json, which has no env field, so neither hook may depend on
+# CLAUDE_PLUGIN_ROOT being exported. The variable still wins when set.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [ -z "$PLUGIN_ROOT" ]; then
+  PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || PLUGIN_ROOT=""
+fi
+DIR="${PLUGIN_ROOT}/commands"
 LIB="$DIR/spar-plan-lib.sh"
 CHECK="$DIR/spar-fight-check.sh"
 LAUNCH="$DIR/spar-fight-launch.sh"
 TASKFILE=".claude/spar-fight-task.txt"
-SPAR_HOOK="${SPAR_FIGHT_SPAR_HOOK:-${CLAUDE_PLUGIN_ROOT:-}/hooks/stop-hook.sh}"
+SPAR_HOOK="${SPAR_FIGHT_SPAR_HOOK:-${PLUGIN_ROOT}/hooks/stop-hook.sh}"
 
 log(){ mkdir -p .claude; echo "[$(date -u +%FT%TZ)] $*" >> "$LOG"; }
 SPAR_DEC='{"decision":"approve"}'
@@ -25,7 +32,23 @@ block(){ jq -nc --arg r "$1" --arg s "${2:-sparring fight}" \
 trap 'log "ERR line $LINENO — emitting spar decision"; printf "%s\n" "$SPAR_DEC"; exit 0' ERR
 
 INPUT="$(cat)"
-NEW="$(printf '%s' "$INPUT" | bash "$SPAR_HOOK" 2>>"$LOG")" && [ -n "$NEW" ] && SPAR_DEC="$NEW"
+
+# Only log where this loop actually lives. This matters for the Codex seat: a
+# user-scope hooks.json fires this dispatcher in EVERY session on the machine.
+# Where there is no .claude/ at all, appending to .claude/spar-fight.log fails the
+# redirect, which prints an error into the user's session AND skips the engine
+# entirely (a failed redirect means the command never runs). Where .claude/ exists
+# but holds no spar state — any repository the author has used Claude Code in — a
+# log file would be created in a repository that has nothing to do with sparring.
+# Keyed on spar state, both cases stay silent and leave no trace, and the engine
+# still runs either way, so the passthrough contract is unchanged.
+if [ -f ".claude/spar.local.md" ] || [ -f "$PLAN_STATE" ]; then
+  ERR_SINK="$LOG"
+else
+  ERR_SINK=/dev/null
+fi
+
+NEW="$(printf '%s' "$INPUT" | bash "$SPAR_HOOK" 2>>"$ERR_SINK")" && [ -n "$NEW" ] && SPAR_DEC="$NEW"
 DEC="$(printf '%s\n' "$SPAR_DEC" | jq -r '.decision // "approve"' 2>/dev/null || echo approve)"
 
 [ -f "$PLAN_STATE" ] || passthrough
