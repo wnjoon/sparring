@@ -79,11 +79,28 @@ OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 40)
 chk_absent "non-string model is dropped" "model=42" "$OUT"
 chk "bad ladder → default effort still emitted" "effort=" "$OUT"
 
-# 6. an unknown family is not an error
+# 6. an unknown family is not an error — and must not pick up a real config.
+# Tested against a VALID config: with a nonexistent one the check passes whether
+# or not the family is validated, which is how this was missed the first time.
 fresh
-OUT=$(SPAR_CONFIG_FILE=/nonexistent bash "$C" gemini 40); RC=$?
-chk "unknown family → exit 0" "0" "$RC"
-chk "unknown family → defaults" "source=default" "$OUT"
+cat > cfg.toml <<'TOML'
+[reviewer.claude]
+model = "claude-sonnet-5"
+[effort]
+ladder = [[0, "low"], [200, "high"]]
+TOML
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" gemini 40); RC=$?
+chk "unknown family with a valid config → exit 0" "0" "$RC"
+chk "unknown family with a valid config → defaults" "source=default" "$OUT"
+chk "unknown family → does not take the ladder effort" "effort=medium" "$OUT"
+chk_absent "unknown family → no model leaks from another family" "claude-sonnet-5" "$OUT"
+OUT=$(SPAR_CONFIG_FILE=/nonexistent bash "$C" gemini 40)
+chk "unknown family with no config → defaults too" "source=default" "$OUT"
+# The two supported families still read the same config.
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 40)
+chk "claude still reads it" "source=config" "$OUT"
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" codex 40)
+chk "codex still reads it" "source=config" "$OUT"
 
 # 7. output is exactly four key=value lines, nothing else
 fresh

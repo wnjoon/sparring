@@ -30,7 +30,7 @@
 **Interfaces:**
 - Produces: `spar-config.sh <family> <diff-lines>` prints four `key=value` lines on stdout — `model=`, `effort=`, `writer=`, `source=` — and exits 0 always. `source=` is `config` or `default`. Unknown family, missing file, unreadable TOML, or absent python3 all yield the default line set with `source=default`. Consumed by Task 2 (runner flags) and Task 3 (writer tier).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_config.sh`:
 
@@ -137,12 +137,12 @@ chk "shipped config parses" "source=" "$OUT"
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `bash tests/test_config.sh`
 Expected: every check FAILs — neither the reader nor the config exists.
 
-- [ ] **Step 3: Write the shipped config**
+- [x] **Step 3: Write the shipped config**
 
 `plugins/spar/shared/config.toml`, commented so a reader learns the contract from the file:
 
@@ -173,7 +173,7 @@ Expected: every check FAILs — neither the reader nor the config exists.
 ladder = [[0, "low"], [200, "medium"], [1000, "high"]]
 ```
 
-- [ ] **Step 4: Write the reader**
+- [x] **Step 4: Write the reader**
 
 `plugins/spar/commands/spar-config.sh`. It must never fail the caller:
 
@@ -235,16 +235,16 @@ PY
 printf '%s\n' "$OUT"
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `bash tests/test_config.sh`
 Expected: `PASS=<n> FAIL=0`.
 
-- [ ] **Step 6: Prove the fallbacks are real**
+- [x] **Step 6: Prove the fallbacks are real**
 
 In a scratch copy, make `emit_default` print `source=config` and confirm the four fallback checks fail; then make the ladder ignore thresholds and confirm the six effort checks fail.
 
-- [ ] **Step 7: Run the whole suite and commit**
+- [x] **Step 7: Run the whole suite and commit**
 
 ```bash
 for t in tests/test_*.sh; do bash "$t" >/dev/null || echo "FAILED: $t"; done

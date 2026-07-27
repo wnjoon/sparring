@@ -16,6 +16,12 @@ CFG="${SPAR_CONFIG_FILE:-$DIR/../shared/config.toml}"
 # from a file, so they must add no flags at all rather than pass an empty one.
 emit_default() { printf 'model=\neffort=medium\nwriter=\nsource=default\n'; exit 0; }
 
+# Only families the engine actually resolves. The ladder is family-independent,
+# so without this an unknown name would come back with source=config and a real
+# effort — a caller would then add flags for a CLI that is never invoked. The
+# engine validates REVIEWER and AUTHOR to the same two names.
+case "$FAMILY" in claude|codex) ;; *) emit_default ;; esac
+
 # A symlink is refused for the same reason the loop refuses one anywhere else:
 # this file decides which model runs, and a link is a way to point that at
 # something the repository did not put there.
