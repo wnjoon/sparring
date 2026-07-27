@@ -316,6 +316,15 @@ from this future-decisions document after landing.
   so loudly; (3) the harness counted that same-model convergence as a pass, so
   item 4 now requires the report's pairing to be cross-model. Phase 6 is still not
   done: the run that would close it has to be cross-model, and this one was not.
+- **Second live run, 2026-07-27 — Phase 6 closed.** With `claude` on PATH the seat
+  did what it claims: Codex authored `range(1, n + 1)`, `claude -p` reviewed it
+  blind and raised two real findings (no boundary tests at n=0/n=1, and untracked
+  `__pycache__` with no `.gitignore`), Codex fixed both, and the re-review returned
+  CONVERGED at round 2. The `{}` release output was accepted — no invalid-JSON
+  error this time. A first attempt in the same workspace is worth recording too:
+  `claude -p` hit `ENOTFOUND` and returned an error string instead of a review,
+  and the hook set it aside as `.invalid-1` rather than reading a blank as
+  findings or as convergence, which is the fail-safe behaving under a real fault.
 - **Enforcement is proven per session, by a liveness marker.** Codex makes hook
   trust a per-session choice and exposes no way to query it; measured against
   0.144.1, an untrusted registration is *silently* skipped and the run completes

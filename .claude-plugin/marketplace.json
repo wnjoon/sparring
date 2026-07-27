@@ -4,13 +4,13 @@
     "name": "wnjoon"
   },
   "metadata": {
-    "description": "Enforced review sparring with blind rounds, safe skips, intent pointers, a risk-triggered final sweep, unattended mode, a final run report (/spar:report), a productive-round cap that separates a deadlock from a review still finding work, and a /spar:ready plan → /spar:fight execute workflow"
+    "description": "Enforced review sparring with blind rounds, safe skips, intent pointers, a risk-triggered final sweep, unattended mode, a final run report (/spar:report), a productive-round cap that separates a deadlock from a review still finding work, a /spar:ready plan → /spar:fight execute workflow, and a Codex-hosted author seat verified end to end against live models"
   },
   "plugins": [
     {
       "name": "spar",
       "source": "./plugins/spar",
-      "description": "Enforced review sparring with blind rounds, safe skips, intent pointers, a risk-triggered final sweep, unattended mode, a final run report (/spar:report), a productive-round cap that separates a deadlock from a review still finding work, and a /spar:ready plan → /spar:fight execute workflow",
+      "description": "Enforced review sparring with blind rounds, safe skips, intent pointers, a risk-triggered final sweep, unattended mode, a final run report (/spar:report), a productive-round cap that separates a deadlock from a review still finding work, a /spar:ready plan → /spar:fight execute workflow, and a Codex-hosted author seat verified end to end against live models",
       "license": "MIT",
       "keywords": [
         "code-review",
