@@ -268,7 +268,13 @@ git commit -m "feat(economics): optional per-family model, writer tier and effor
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_stop_hook.sh` before the tally. Fixtures use `printf` one-liners so no line here begins with a heading marker:
+Append to `tests/test_stop_hook.sh` before the tally. Fixtures use `printf`
+one-liners so no line here begins with a heading marker. **That suite has no
+`chk_absent`** — it asserts absence as
+`chk "…" "absent" "$(grep -q … && echo present || echo absent)"`, and the snippets
+below follow it. (`chk_absent_hook` at `:1066` exists but takes
+`$1=unwanted $2=haystack $3=desc`, a different order; do not reach for it by
+habit.)
 
 ```bash
 # Economics: a configured model and effort reach the generated runner.
@@ -281,20 +287,24 @@ chk "configured effort reaches the codex runner" 'model_reasoning_effort="low"' 
 # The judge and matcher come from the same emitter, so they must carry it too,
 # and the sweep must NOT carry the reviewer's model — it runs author-family.
 chk "the judge runner carries the same flags" '--model gpt-5.6-sol' "$(cat .claude/spar-run-judge.sh 2>/dev/null; echo no-judge-runner)"
-chk_absent "the sweep does not take the reviewer's model" 'gpt-5.6-sol' "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+chk "the sweep does not take the reviewer's model" "absent" \
+  "$(grep -qF 'gpt-5.6-sol' .claude/spar-run-sweep.sh 2>/dev/null && echo present || echo absent)"
 
 # With no config the runner is byte-identical to today's.
 in_review 1
 SPAR_CONFIG_FILE=/nonexistent run_hook >/dev/null
-chk_absent "no config → no model flag" '--model' "$(cat .claude/spar-run-reviewer.sh)"
-chk_absent "no config → no effort flag" 'model_reasoning_effort' "$(cat .claude/spar-run-reviewer.sh)"
+chk "no config → no model flag" "absent" \
+  "$(grep -qF -- '--model' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+chk "no config → no effort flag" "absent" \
+  "$(grep -qF 'model_reasoning_effort' .claude/spar-run-reviewer.sh && echo present || echo absent)"
 
 # An unreadable config must not stop a review being dispatched.
 in_review 1
 printf 'not = = toml\n' > .claude/cfg.toml
 OUT=$(SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook)
 chk "broken config → the round is still dispatched" 'spar-run-reviewer.sh' "$OUT"
-chk_absent "broken config → no half-written flag" '--model ' "$(cat .claude/spar-run-reviewer.sh)"
+chk "broken config → no half-written flag" "absent" \
+  "$(grep -qF -- '--model ' .claude/spar-run-reviewer.sh && echo present || echo absent)"
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -389,6 +399,15 @@ git commit -m "feat(economics): reviewer model and effort flags on the generated
 **Interfaces:**
 - Consumes: `spar-config.sh` writer tier; the round's parsed findings.
 - Produces: `.claude/spar-fix-brief.md` when at least one finding is delegable, and a line in the block message pointing at it. The author dispatches; the hook only recommends.
+- **The brief is a loop artifact and must be torn down like one.** Declare
+  `FIX_BRIEF=".claude/spar-fix-brief.md"` beside the other path constants
+  (`stop-hook.sh:52-70`, where `SWEEP_RUNNER` and friends live), add it to
+  `cleanup()` (`:61`), and add it to the `rm -f` lists in
+  `plugins/spar/commands/cancel.md` and
+  `adapters/codex/skills/spar-cancel/SKILL.md`. Without this a cancelled run
+  leaves a brief behind and the next run's author can dispatch a writer against
+  findings that no longer exist. The `.claude/spar*` git-exclude already covers
+  the path, so nothing else is needed to keep it off the review surface.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -403,14 +422,16 @@ chk "brief carries the location" "a.py:10" "$(cat .claude/spar-fix-brief.md)"
 chk "brief carries the basis, not just the title" "loop stops early" "$(cat .claude/spar-fix-brief.md)"
 chk "brief names the recommended tier" "cheap-tier" "$(cat .claude/spar-fix-brief.md)"
 chk "the block message points at the brief" "spar-fix-brief.md" "$OUT"
-chk_absent "the hook does not claim to have dispatched anything" "dispatched the writer" "$OUT"
+chk "the hook does not claim to have dispatched anything" "absent" \
+  "$(printf '%s' "$OUT" | grep -qF 'dispatched the writer' && echo present || echo absent)"
 
 # A design finding is judgment and is never delegated.
 in_review 1
 printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:1\n- problem: big\n- suggestion: split\n' > "$RF1"
 printf '[writer.codex]\ntier = "cheap-tier"\n' > .claude/cfg.toml
 SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null
-chk_absent "design findings are never delegated" "cheap-tier" "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+chk "design findings are never delegated" "absent" \
+  "$(grep -qF 'cheap-tier' .claude/spar-fix-brief.md 2>/dev/null && echo present || echo absent)"
 
 # No writer tier configured → no brief, no behaviour change.
 in_review 1
@@ -419,14 +440,23 @@ SPAR_CONFIG_FILE=/nonexistent run_hook >/dev/null
 chk "no tier configured → no brief" "absent" "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
 
 # Escalation: a finding whose fingerprint the previous round already raised is
-# the session model's to fix, not a cheap writer's.
-in_review 2
+# the session model's to fix, not a cheap writer's. Round 2 carries one repeat
+# and one new finding, so the brief exists and the exclusion is visible in it —
+# with only the repeat there would be no brief and the check would pass for the
+# wrong reason. Two run_hook calls, because the registry folds one round at a
+# time and the round-1 fold is what makes F2-1 a repeat at all.
+in_review 1
+printf '[writer.codex]\ntier = "cheap-tier"\n' > .claude/cfg.toml
 printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] a.py off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
 printf -- '### F1-1: FIXED — did it\n' > "$RP1"
-printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] a.py off by one\n- file: a.py:10\n- problem: still wrong\n- suggestion: s\n' > "$RFb2"
-printf '[writer.codex]\ntier = "cheap-tier"\n' > .claude/cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null   # folds round 1, advances to 2
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] a.py off by one\n- file: a.py:10\n- problem: still wrong\n- suggestion: s\n\n### F2-2 [MECHANICAL] b.py unrelated\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RFb2"
 SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null
-chk "a repeat of the previous round is not delegated" "escalated" "$(cat .claude/spar-fix-brief.md 2>/dev/null; echo escalated-absent)"
+chk "the new finding is delegated" "b.py:3" "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+# Exactly one word out, or "absent" matches a haystack that also says "present".
+chk "the repeat is not delegated" "absent" \
+  "$(awk '/stays with the session model/{exit} /a.py:10/{f=1} END{print (f?"present":"absent")}' .claude/spar-fix-brief.md)"
+chk "and the brief says why it stays" "stays with the session model" "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -434,7 +464,14 @@ chk "a repeat of the previous round is not delegated" "escalated" "$(cat .claude
 Run: `bash tests/test_stop_hook.sh`
 Expected: the brief checks FAIL.
 
-- [ ] **Step 3: Generate the brief**
+- [ ] **Step 3: Declare and tear down the artifact**
+
+Add the constant, the `cleanup()` entry, and both cancel lists before generating
+anything — a file the loop creates and never removes is the defect, and it is
+easier to add the teardown first than to remember it after the generator works.
+Add a check that a cancelled run leaves no brief behind.
+
+- [ ] **Step 4: Generate the brief**
 
 After `fold_registry`, when a writer tier is configured, write
 `.claude/spar-fix-brief.md`: one section per finding that is `[MECHANICAL]`, has a
@@ -444,7 +481,7 @@ basis, the suggestion as the fix direction, and the recommended tier. Findings
 that fail any of those tests are listed under a heading saying they stay with the
 session model and why.
 
-- [ ] **Step 4: Point the author at it, without overstating**
+- [ ] **Step 8: Point the author at it, without overstating**
 
 In `fight.md` and the Codex skill's loop protocol, extend the `[MECHANICAL]` step:
 when `.claude/spar-fix-brief.md` exists, the author may dispatch a fresh
@@ -452,12 +489,12 @@ cheaper-tier subagent per section and must re-read the result before responding 
 the response file is still the author's statement, and the next round re-reviews
 the fix regardless. State plainly that the hook cannot dispatch anything itself.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: `PASS=<n> FAIL=0`.
 
-- [ ] **Step 6: Prove the exclusions hold**
+- [ ] **Step 7: Prove the exclusions hold**
 
 Mutate the generator to include `[DESIGN]` findings and confirm that check fails;
 mutate it to ignore the previous round and confirm the escalation check fails.
