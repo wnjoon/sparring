@@ -263,7 +263,8 @@ git commit -m "feat(economics): optional per-family model, writer tier and effor
 
 **Interfaces:**
 - Consumes: `spar-config.sh <family> <lines>` from Task 1.
-- Produces: generated runners carrying `--model` and effort flags when configured, and carrying neither when not. The reviewer, judge, matcher and sweep runners all go through one helper so a family's flags cannot drift between them.
+- Produces: generated runners carrying `--model` and effort flags when configured, and carrying neither when not.
+- **The code has two emitters, not four.** `emit_runner` (`stop-hook.sh:601`) generates the reviewer, judge and matcher runners and branches on `$REVIEWER`; `emit_sweep_runner` (`:677`) generates the sweep and branches on `$AUTHOR`. Both call one flags helper, but they pass *different* families — the sweep is a fresh author-family instance, so a reviewer model must never reach it.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -276,6 +277,11 @@ printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n[effort]\nladder = [[0, "low"]]
 SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null
 chk "configured model reaches the codex runner" '--model gpt-5.6-sol' "$(cat .claude/spar-run-reviewer.sh)"
 chk "configured effort reaches the codex runner" 'model_reasoning_effort="low"' "$(cat .claude/spar-run-reviewer.sh)"
+
+# The judge and matcher come from the same emitter, so they must carry it too,
+# and the sweep must NOT carry the reviewer's model — it runs author-family.
+chk "the judge runner carries the same flags" '--model gpt-5.6-sol' "$(cat .claude/spar-run-judge.sh 2>/dev/null; echo no-judge-runner)"
+chk_absent "the sweep does not take the reviewer's model" 'gpt-5.6-sol' "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
 
 # With no config the runner is byte-identical to today's.
 in_review 1
@@ -323,10 +329,24 @@ economics_flags() { # $1=family  → prints the flags, or nothing
 }
 ```
 
-`shq` is a small single-quote escaper; `diff_line_count` counts lines in
-`$DIFF_SURFACE_FILE` (0 when absent). Splice `$(economics_flags claude)` into the
-`claude -p` invocations and `$(economics_flags codex)` into the `codex exec` ones,
-in the reviewer, judge, matcher and sweep emitters alike.
+`shq`, `diff_line_count` and `CONFIG_READER` do not exist yet and are part of
+this step: `shq` is a single-quote escaper, `diff_line_count` counts lines in
+`$DIFF_SURFACE_FILE` (0 when absent), and `CONFIG_READER` points at
+`$PLUGIN_ROOT/commands/spar-config.sh`. `DIFF_SURFACE_FILE`, `fold_registry` and
+`parse_findings` do already exist and are used as they are.
+
+Splice the result into both emitters, with the family each one actually uses:
+
+- `emit_runner` — `economics_flags "$REVIEWER"`, into the `claude -p` branch and
+  the `codex exec` branch. This covers the reviewer, the judge and the matcher,
+  which all come from this one function.
+- `emit_sweep_runner` — `economics_flags "$AUTHOR"`. The sweep is a fresh
+  author-family instance; passing `$REVIEWER` here would configure the wrong
+  model and, in a cross-model run, the wrong CLI's flags entirely.
+
+Note `emit_runner` writes `$DIFF_SURFACE_FILE` inside its claude branch, so
+`diff_line_count` must be called before that file is rebuilt, or read the diff
+independently — decide when implementing and say which in a comment.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -336,7 +356,10 @@ Expected: `PASS=<n> FAIL=0`, with the pre-existing 293 unchanged.
 - [ ] **Step 5: Prove the flags are earned**
 
 Mutate `economics_flags` to ignore `src` and confirm the no-config checks fail;
-mutate it to emit `--effort` for codex and confirm the codex effort check fails.
+mutate it to emit `--effort` for codex and confirm the codex effort check fails;
+and mutate `emit_sweep_runner` to pass `$REVIEWER` instead of `$AUTHOR` and
+confirm the sweep check fails. If that last one passes anyway, the test is not
+discriminating and needs a cross-model fixture where the two families differ.
 
 - [ ] **Step 6: Document the mechanism where both seats read it**
 
