@@ -284,9 +284,29 @@ SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null
 chk "configured model reaches the codex runner" '--model gpt-5.6-sol' "$(cat .claude/spar-run-reviewer.sh)"
 chk "configured effort reaches the codex runner" 'model_reasoning_effort="low"' "$(cat .claude/spar-run-reviewer.sh)"
 
-# The judge and matcher come from the same emitter, so they must carry it too,
-# and the sweep must NOT carry the reviewer's model — it runs author-family.
-chk "the judge runner carries the same flags" '--model gpt-5.6-sol' "$(cat .claude/spar-run-judge.sh 2>/dev/null; echo no-judge-runner)"
+# The judge comes from the same emitter, so it must carry the flags too — but a
+# judge runner only exists after a stalemate, so this needs the suite's own
+# mech_stalemate fixture (`tests/test_stop_hook.sh:365`) rather than a
+# round-1 tree, where the file would never exist and the check could never pass.
+mech_stalemate
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n' > .claude/cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null   # stalemate → judge
+chk "the judge runner carries the same flags" '--model gpt-5.6-sol' \
+  "$(cat .claude/spar-run-judge.sh 2>/dev/null)"
+
+# The sweep must NOT carry the reviewer's model — it runs author-family. Written
+# as a cross-model tree so the two families differ; with author == reviewer the
+# check would pass whichever family the emitter used. Round 3, because
+# should_sweep only fires from round 3 (`stop-hook.sh:777`) — at round 1 no sweep
+# runner is written at all and the check would pass without proving anything.
+# `field()` reads the whole state file, so appending the author line works.
+in_review 3
+printf 'author: claude\n' >> .claude/spar.local.md
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n[reviewer.claude]\nmodel = "claude-sonnet-5"\n' > .claude/cfg.toml
+printf 'STATUS: CONVERGED\n' > reviews/spar-20260721-120000-abc123-r3.md
+SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null   # round 3 → sweep dispatched
+chk "the sweep runner was actually generated" "present" \
+  "$([ -f .claude/spar-run-sweep.sh ] && echo present || echo absent)"
 chk "the sweep does not take the reviewer's model" "absent" \
   "$(grep -qF 'gpt-5.6-sol' .claude/spar-run-sweep.sh 2>/dev/null && echo present || echo absent)"
 
