@@ -59,6 +59,7 @@ INTENT_HARVESTER="${PLUGIN_ROOT}/commands/spar-harvest-intent.sh"
 INTENT_FILE=".claude/spar-intent-pointers.txt"
 QUEUE_WRITER="${PLUGIN_ROOT}/commands/spar-queue-pending.sh"
 REPORT_GEN="${PLUGIN_ROOT}/commands/spar-report.sh"
+CONFIG_READER="${PLUGIN_ROOT}/commands/spar-config.sh"
 SWEEP_RUNNER=".claude/spar-run-sweep.sh"
 SWEEP_PROMPT_FILE=".claude/spar-sweep-prompt.txt"
 SWEEP_RETRY_FILE=".claude/spar-sweep-retries"
@@ -598,8 +599,46 @@ deactivate_state() {
 # Emit a reviewer/judge/matcher runner for the resolved family.
 # codex: runs read-only in its own sandbox and inspects the diff itself.
 # claude: read-only tools + --safe-mode (isolated), so the hook provides the diff.
+# Economics flags for one family, as a string spliced into a generated runner.
+# Empty unless a config was actually read, which is what keeps a config-less
+# install byte-identical to before Phase 7 — an empty --model would be worse than
+# no flag at all.
+#
+# The family is a parameter, not $REVIEWER, because the two emitters do not agree
+# on it: emit_runner serves the reviewer, judge and matcher, while the sweep is a
+# fresh AUTHOR-family instance. Passing the reviewer's model to the sweep would,
+# in a cross-model run, hand one CLI the other's flags.
+shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+diff_line_count() {
+  [ -f "$DIFF_SURFACE_FILE" ] || { printf '0'; return 0; }
+  wc -l < "$DIFF_SURFACE_FILE" | tr -d ' '
+}
+
+economics_flags() { # $1=family → prints flags, or nothing
+  local fam="$1" k v model="" effort=""
+  [ -x "$CONFIG_READER" ] || return 0
+  while IFS='=' read -r k v; do
+    case "$k" in model) model="$v" ;; effort) effort="$v" ;; esac
+  done < <("$CONFIG_READER" "$fam" "$(diff_line_count)" 2>/dev/null)
+  # No separate "was it configured?" test: the reader returns empty values for
+  # every fallback, so an empty value IS the signal, and both suites pin that.
+  case "$fam" in
+    claude)
+      [ -n "$model" ] && printf ' --model %s' "$(shq "$model")"
+      [ -n "$effort" ] && printf ' --effort %s' "$(shq "$effort")"
+      ;;
+    codex)
+      [ -n "$model" ] && printf ' --model %s' "$(shq "$model")"
+      [ -n "$effort" ] && printf ' -c model_reasoning_effort=%s' "$(shq "\"$effort\"")"
+      ;;
+  esac
+  return 0
+}
+
 emit_runner() { # $1=runner_path  $2=prompt_file  $3=out_file
   local runner="$1" pf="$2" out="$3"
+  local ecoflags; ecoflags="$(economics_flags "$REVIEWER")"
   if [ "$REVIEWER" = "claude" ]; then
     # provide the change surface (claude has no shell): diff against the frozen baseline
     { echo "# Changes under review (git diff ${BASE}):"; git diff "${BASE}" 2>/dev/null;
@@ -634,7 +673,7 @@ if [ -e "${out}" ] || [ -L "${out}" ]; then
   exit 1
 fi
 { cat "${pf}"; echo; echo '--- Changes under review ---'; cat "${DIFF_SURFACE_FILE}"; } | \\
-  claude -p --safe-mode --tools Read Grep Glob > "\$tmp"
+  claude -p${ecoflags} --safe-mode --tools Read Grep Glob > "\$tmp"
 [ -s "\$tmp" ] || exit 1
 ln "\$tmp" "${out}" || exit 1
 EOF
@@ -665,7 +704,7 @@ if [ -e "${out}" ] || [ -L "${out}" ]; then
   echo "invalid pre-existing reviewer artifact" >&2
   exit 1
 fi
-codex exec --sandbox read-only --skip-git-repo-check \\
+codex exec${ecoflags} --sandbox read-only --skip-git-repo-check \\
   --output-last-message "\$tmp" < "${pf}"
 [ -s "\$tmp" ] || exit 1
 ln "\$tmp" "${out}" || exit 1
@@ -685,9 +724,9 @@ emit_sweep_runner() { # fresh author-family instance, always read-only
   # path must be absolute or the result lands in the throwaway snapshot.
   local sweep_invoke
   if [ "$AUTHOR" = codex ]; then
-    sweep_invoke='(cd "$snapshot" && codex exec --sandbox read-only --skip-git-repo-check --output-last-message "$source_root/$tmp")'
+    sweep_invoke="(cd \"\$snapshot\" && codex exec$(economics_flags codex) --sandbox read-only --skip-git-repo-check --output-last-message \"\$source_root/\$tmp\")"
   else
-    sweep_invoke='(cd "$snapshot" && claude -p --safe-mode --tools Read Grep Glob) > "$tmp"'
+    sweep_invoke="(cd \"\$snapshot\" && claude -p$(economics_flags claude) --safe-mode --tools Read Grep Glob) > \"\$tmp\""
   fi
   { echo "# Changes under closure sweep (git diff ${BASE}):"; git diff "${BASE}" 2>/dev/null;
     echo; echo "# Untracked files:"; git status --porcelain --untracked-files=all 2>/dev/null; } \

@@ -21,4 +21,4 @@
 # lowest first. A diff at or above a threshold takes that level.
 # claude accepts low|medium|high|xhigh|max; codex takes the same words through
 # -c model_reasoning_effort=.
-ladder = [[0, "low"], [200, "medium"], [1000, "high"]]
+# ladder = [[0, "low"], [200, "medium"], [1000, "high"]]

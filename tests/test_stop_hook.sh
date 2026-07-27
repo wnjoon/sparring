@@ -24,7 +24,10 @@ export PATH
 trap 'rm -rf "$STUB_BIN"' EXIT
 
 chk() { # $1=desc $2=expected-substring $3=actual
-  if echo "$3" | grep -qF "$2"; then echo "PASS: $1"; PASS=$((PASS+1))
+  # -- so a needle beginning with a dash is a pattern, not an option. Without it
+  # any assertion about a flag (--model, --effort) fails no matter what the
+  # haystack holds, which is a false failure that looks like a real one.
+  if echo "$3" | grep -qF -- "$2"; then echo "PASS: $1"; PASS=$((PASS+1))
   else echo "FAIL: $1"; echo "   want: $2"; echo "   got : $3"; FAIL=$((FAIL+1)); fi
 }
 chk_file() { # $1=desc $2=path
@@ -1670,6 +1673,69 @@ sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md 2
 CAPOUT=$(run_hook)
 chk "cap message warns against commit-and-re-run" 'empty diff' "$CAPOUT"
 chk "cap message asks what was never re-reviewed" 'never re-reviewed' "$CAPOUT"
+
+# ── Economics: reviewer model and effort on the generated runners ────────────
+# This suite has no chk_absent; absence is asserted as
+# chk "…" "absent" "$(grep -q … && echo present || echo absent)".
+
+fresh_dir; write_state task 0; mkdir -p reviews
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n[effort]\nladder = [[0, "low"]]\n' > .claude/cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null
+chk "configured model reaches the codex runner" "--model 'gpt-5.6-sol'" "$(cat .claude/spar-run-reviewer.sh)"
+chk "configured effort reaches the codex runner" "model_reasoning_effort='\"low\"'" "$(cat .claude/spar-run-reviewer.sh)"
+
+# The judge comes from the same emitter, so it must carry the flags too. A judge
+# runner only exists after a stalemate, so this uses the suite's own fixture
+# rather than a round-1 tree where the file would never exist.
+mech_stalemate
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n' > .claude/cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null
+chk "the judge runner carries the same flags" "--model 'gpt-5.6-sol'" \
+  "$(cat .claude/spar-run-judge.sh 2>/dev/null)"
+
+# The sweep must NOT carry the reviewer's model — it runs author-family. A
+# cross-model tree, so the two families differ; and round 3, because should_sweep
+# only fires from there. At round 1 no sweep runner exists and the absence check
+# would pass without proving anything.
+in_review 3
+printf 'author: claude\n' >> .claude/spar.local.md
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n[reviewer.claude]\nmodel = "claude-sonnet-5"\n' > .claude/cfg.toml
+printf 'STATUS: CONVERGED\n' > reviews/spar-20260721-120000-abc123-r3.md
+SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null
+chk "the sweep runner was actually generated" "present" \
+  "$([ -f .claude/spar-run-sweep.sh ] && echo present || echo absent)"
+chk "the sweep does not take the reviewer's model" "absent" \
+  "$(grep -qF 'gpt-5.6-sol' .claude/spar-run-sweep.sh 2>/dev/null && echo present || echo absent)"
+chk "the sweep takes the author's model instead" "--model 'claude-sonnet-5'" \
+  "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+
+# With no config the runner is what it was before Phase 7.
+fresh_dir; write_state task 0; mkdir -p reviews
+SPAR_CONFIG_FILE=/nonexistent run_hook >/dev/null
+chk "no config → no model flag" "absent" \
+  "$(grep -qF -- '--model' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+chk "no config → no effort flag" "absent" \
+  "$(grep -qF 'model_reasoning_effort' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# An unreadable config must not stop a review being dispatched.
+fresh_dir; write_state task 0; mkdir -p reviews
+printf 'not = = toml\n' > .claude/cfg.toml
+OUT=$(SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook)
+chk "broken config → the round is still dispatched" 'spar-run-reviewer.sh' "$OUT"
+chk "broken config → no half-written flag" "absent" \
+  "$(grep -qF -- '--model ' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# A model whose name carries shell metacharacters must not become shell.
+fresh_dir; write_state task 0; mkdir -p reviews
+printf '[reviewer.codex]\nmodel = "a$(touch pwned)b"\n' > .claude/cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null
+if bash -n .claude/spar-run-reviewer.sh 2>/dev/null; then SYN=ok; else SYN=unparseable; fi
+chk "metacharacter model → runner is valid shell" "ok" "$SYN"
+chk "metacharacter model → the value is quoted, not interpolated" \
+  "--model 'a\$(touch pwned)b'" "$(cat .claude/spar-run-reviewer.sh)"
+bash .claude/spar-run-reviewer.sh >/dev/null 2>&1 || true
+chk "metacharacter model → nothing executed" "absent" \
+  "$([ -e pwned ] && echo present || echo absent)"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

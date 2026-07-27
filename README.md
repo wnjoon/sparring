@@ -180,6 +180,10 @@ bench/                   effect benchmark (living report + tasks/oracles)
   the state file, the runner scripts — is exercised in a live session of each seat
   before the release that carries it. Green suites are not enough: they assert what
   the hook prints, not what each harness does with it.
+- Reviewer model and reasoning effort are optional per-family settings in
+  [plugins/spar/shared/config.toml](plugins/spar/shared/config.toml). Nothing is enabled
+  out of the box: with no value set, no flag is passed and the loop behaves as it did
+  before. Configuration selects the instrument, never the verdict.
 - The plan is the spec: [docs/superpowers/plans/](docs/superpowers/plans/). This README is updated in the same change whenever implementation diverges from it.
 - Decisions agreed for phases not yet implemented live in [docs/design-decisions.md](docs/design-decisions.md) — each phase's plan document starts from its section there.
 

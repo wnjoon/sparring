@@ -89,7 +89,15 @@ gatekeeper implementation.
    triggers it, and it is the deliberately reversible direction — rounds
    withheld can be granted by relaxing the rule, rounds granted in error cannot
    be taken back.
-8. After reviewer convergence, a final sweep fires for a risky touched
+8. Reviewer model and reasoning effort are configuration, not protocol
+   (`plugins/spar/shared/config.toml`, read per family). Absent or unreadable
+   configuration means exactly the behaviour that predates it — no flag is
+   passed rather than an empty one. Nothing configurable here can change who
+   declares convergence, who may write the convergence marker, or which findings
+   escalate: configuration selects the instrument, never the verdict. The final
+   sweep reads the AUTHOR family's settings, not the reviewer's, because it is a
+   fresh author-family instance.
+9. After reviewer convergence, a final sweep fires for a risky touched
    surface or risky repository, 3+ reviewer rounds, or any reviewer design
    finding. It is one fresh, read-only author-family instance, blind to
    the ledger and all loop history but allowed repository intent pointers.
@@ -97,11 +105,11 @@ gatekeeper implementation.
    most once. The sweep itself is not a reviewer round. Findings below the cap
    receive a separate response and re-enter at reviewer round `r+1`; findings
    at the cap terminate honestly as `sweep-findings-at-cap`.
-9. Every terminal path atomically writes one immutable outcome before cleanup:
+10. Every terminal path atomically writes one immutable outcome before cleanup:
    at least `converged`, `cap`, `error-bypass`, `cancelled`, `skipped`,
    `blocked-pending-user`, or `sweep-findings-at-cap`. Only `converged` asserts
    a clean review result.
-10. Every terminal that ends a real review — `converged`, `blocked-pending-user`,
+11. Every terminal that ends a real review — `converged`, `blocked-pending-user`,
     `cap`, `sweep-findings-at-cap`, and `skipped` — also gets an informational
     report, `reviews/spar-<id>-report.md`, since an unconverged run is exactly the
     one a human needs summarized. (`error-bypass` and `cancelled` get none: a

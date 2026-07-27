@@ -14,7 +14,7 @@ CFG="${SPAR_CONFIG_FILE:-$DIR/../shared/config.toml}"
 
 # `source=default` is the signal callers key on: it means nothing here was read
 # from a file, so they must add no flags at all rather than pass an empty one.
-emit_default() { printf 'model=\neffort=medium\nwriter=\nsource=default\n'; exit 0; }
+emit_default() { printf 'model=\neffort=\nwriter=\nsource=default\n'; exit 0; }
 
 # Only families the engine actually resolves. The ladder is family-independent,
 # so without this an unknown name would come back with source=config and a real
@@ -63,8 +63,10 @@ def s(table, key):
     return v if isinstance(v, str) and v.strip() else ""
 
 # Highest threshold at or below the diff size wins. A malformed ladder, or one
-# with no row at or below the size, leaves the default rather than guessing.
-effort = "medium"
+# with no row at or below the size, leaves this EMPTY: an unconfigured effort must
+# produce no flag at all, or a config that sets only a model would quietly change
+# how hard the reviewer thinks.
+effort = ""
 ladder = cfg.get("effort", {}).get("ladder") if isinstance(cfg.get("effort"), dict) else None
 if isinstance(ladder, list):
     picked = None

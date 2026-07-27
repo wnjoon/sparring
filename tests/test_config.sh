@@ -92,7 +92,8 @@ TOML
 OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" gemini 40); RC=$?
 chk "unknown family with a valid config → exit 0" "0" "$RC"
 chk "unknown family with a valid config → defaults" "source=default" "$OUT"
-chk "unknown family → does not take the ladder effort" "effort=medium" "$OUT"
+chk "unknown family → does not take the ladder effort" "effort=" "$OUT"
+chk_absent "unknown family → not the ladder's low either" "effort=low" "$OUT"
 chk_absent "unknown family → no model leaks from another family" "claude-sonnet-5" "$OUT"
 OUT=$(SPAR_CONFIG_FILE=/nonexistent bash "$C" gemini 40)
 chk "unknown family with no config → defaults too" "source=default" "$OUT"
@@ -113,5 +114,11 @@ CFG="$ROOT/plugins/spar/shared/config.toml"
 chk "shipped config exists" "present" "$([ -f "$CFG" ] && echo present || echo absent)"
 OUT=$(SPAR_CONFIG_FILE="$CFG" bash "$C" claude 100)
 chk "shipped config parses" "source=" "$OUT"
+# Out of the box nothing is enabled: the file exists so it can be edited, but it
+# must not change a single flag until someone uncomments a line.
+chk "shipped config enables no model" "model=" "$OUT"
+chk "shipped config enables no effort" "effort=" "$OUT"
+chk "shipped config enables no writer tier" "writer=" "$OUT"
+chk_absent "shipped config enables no ladder value" "effort=low" "$OUT"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
