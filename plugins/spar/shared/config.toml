@@ -1,0 +1,24 @@
+# sparring — model economics. Every value here is optional: delete this file and
+# the loop behaves exactly as it did before Phase 7. Judgment never delegates;
+# only typing does, so nothing here can change which model reads a review,
+# classifies a finding, or decides whether to reject it.
+
+[reviewer.claude]
+# model = "claude-sonnet-5"
+
+[reviewer.codex]
+# model = "gpt-5.6-sol"
+
+[writer.claude]
+# Fix execution only, and only for findings the hook screens as unambiguous.
+# tier = "claude-haiku-4-5-20251001"
+
+[writer.codex]
+# tier = "gpt-5.6-sol-mini"
+
+[effort]
+# Reviewer reasoning effort by changed-line count: [threshold, level] pairs,
+# lowest first. A diff at or above a threshold takes that level.
+# claude accepts low|medium|high|xhigh|max; codex takes the same words through
+# -c model_reasoning_effort=.
+ladder = [[0, "low"], [200, "medium"], [1000, "high"]]
