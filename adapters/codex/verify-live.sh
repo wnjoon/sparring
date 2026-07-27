@@ -454,7 +454,13 @@ TASK
   cat > "$want/checklist.md" <<'CHECK' || exit 3
 # Phase 6 live verification — your part
 
-Everything below needs a real interactive Codex session. Run it from:
+Everything below needs a real interactive Codex session.
+
+BEFORE YOU START — two things the isolated home does not inherit, both learned
+the hard way on the first real run:
+
+@@PRESTART@@
+Then:
 
     cd @@REPOQ@@
     CODEX_HOME=@@HOMEQ@@ codex
@@ -498,12 +504,45 @@ CHECK
   # workspace under a directory with a space would otherwise produce commands
   # that do not work, and one containing $(...) would produce commands that do
   # something else entirely.
-  WS="$want" RT="$REPO_ROOT" python3 - "$want/checklist.md" <<'PY' || exit 3
+  WS="$want" RT="$REPO_ROOT" \
+  REAL_CODEX_HOME="${CODEX_HOME:-$HOME/.codex}" CLAUDE_PATH="$(command -v claude || true)" \
+  python3 - "$want/checklist.md" <<'PY' || exit 3
 import os, re, shlex, sys
 ws, rt = os.environ["WS"], os.environ["RT"]
 p = sys.argv[1]
 t = open(p, encoding="utf-8").read()
+# Two things the isolated home starts without. Both stopped a real run: no
+# credentials means the login screen appears before item 1, and no claude on
+# PATH means the cross-model default degrades to codex-reviews-codex, which is
+# the one outcome this gate must not accept. The text is generated from what is
+# actually true on this machine rather than left as advice.
+auth = os.path.join(os.environ.get("REAL_CODEX_HOME", ""), "auth.json")
+claude = os.environ.get("CLAUDE_PATH", "")
+pre = []
+if os.path.exists(auth):
+    pre.append("1. CREDENTIALS. The isolated home has none, so Codex would ask you to log in\n"
+               "   before you reach item 1. Either copy yours in:\n\n"
+               "       cp %s %s\n\n"
+               "   or log in inside the isolated session — it stays in that home either way."
+               % (shlex.quote(auth), shlex.quote(os.path.join(ws, "home"))))
+else:
+    pre.append("1. CREDENTIALS. The isolated home has none and no auth.json was found to copy,\n"
+               "   so log in inside the isolated session. It stays in that home.")
+if claude:
+    pre.append("2. CROSS-MODEL REVIEW. This seat is Codex authoring and claude reviewing, but a\n"
+               "   non-interactive shell does not have claude on PATH, and the skill falls back\n"
+               "   to codex-reviews-codex — which does NOT satisfy item 4. Start the session with\n"
+               "   claude reachable:\n\n"
+               "       PATH=%s:$PATH CODEX_HOME=%s codex\n\n"
+               "   or pass --reviewer claude to spar-fight so it fails loudly instead of degrading."
+               % (shlex.quote(os.path.dirname(claude)), shlex.quote(os.path.join(ws, "home"))))
+else:
+    pre.append("2. CROSS-MODEL REVIEW. claude was not found on this machine at all. Item 4 needs\n"
+               "   Codex authoring and claude reviewing, so install it first — otherwise the run\n"
+               "   can only be codex-reviews-codex, which this gate does not accept.")
+
 values = {
+    "@@PRESTART@@": "\n\n".join(pre) + "\n",
     "@@REPOQ@@": shlex.quote(os.path.join(ws, "repo")),
     "@@HOMEQ@@": shlex.quote(os.path.join(ws, "home")),
     "@@SELFQ@@": shlex.quote(os.path.join(rt, "adapters", "codex", "verify-live.sh")),

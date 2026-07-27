@@ -240,6 +240,29 @@ chk_absent "dangling symlink target → clean does not claim there is nothing th
 chk "dangling symlink target → the link survives clean too" "present" \
   "$([ -L ./ws ] && echo present || echo absent)"
 
+# 6i. the checklist is generated from what is true on this machine. The isolated
+# home inherits neither credentials nor PATH, and both stopped a real run before
+# the item they were blocking.
+fresh
+mkdir -p ./.testcodex && printf '{}\n' > ./.testcodex/auth.json
+mkdir -p ./fakebin && printf '#!/bin/sh\nexit 0\n' > ./fakebin/claude && chmod +x ./fakebin/claude
+PATH="$PWD/fakebin:$PATH" bash "$V" setup --dir ./ws >/dev/null 2>&1
+CL="$(cat ./ws/checklist.md)"
+chk "checklist warns the isolated home has no credentials" "CREDENTIALS" "$CL"
+chk "checklist gives the copy command for the real auth.json" "auth.json" "$CL"
+chk "checklist warns about the cross-model default" "CROSS-MODEL REVIEW" "$CL"
+chk "checklist names the PATH that makes claude reachable" "fakebin" "$CL"
+chk "checklist says a same-model run does not satisfy item 4" "does NOT satisfy item 4" "$CL"
+
+# With claude absent the advice has to change, not just be omitted.
+fresh
+mkdir -p ./emptybin
+OUT_PATH="$PWD/emptybin:/usr/bin:/bin"
+PATH="$OUT_PATH" bash "$V" setup --dir ./ws >/dev/null 2>&1
+CL="$(cat ./ws/checklist.md 2>/dev/null)"
+chk "no claude on the machine → says so plainly" "was not found on this machine" "$CL"
+chk_absent "no claude on the machine → no PATH command that would not work" "PATH=" "$CL"
+
 # 7. clean removes exactly the workspace
 fresh
 bash "$V" setup --dir ./ws >/dev/null 2>&1
