@@ -22,7 +22,7 @@ TASKFILE=".claude/spar-fight-task.txt"
 SPAR_HOOK="${SPAR_FIGHT_SPAR_HOOK:-${PLUGIN_ROOT}/hooks/stop-hook.sh}"
 
 log(){ mkdir -p .claude; echo "[$(date -u +%FT%TZ)] $*" >> "$LOG"; }
-SPAR_DEC='{"decision":"approve"}'
+SPAR_DEC='{}'
 passthrough(){ printf '%s\n' "$SPAR_DEC"; exit 0; }
 block(){ jq -nc --arg r "$1" --arg s "${2:-sparring fight}" \
   '{decision:"block",reason:$r,systemMessage:$s}' 2>/dev/null \

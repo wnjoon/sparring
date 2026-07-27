@@ -79,7 +79,20 @@ SPAR_TASK="${SPAR_REST2#*$'\t'}"
 # Claude seat's: claude reviews when it is installed, and only a machine without
 # it falls back to same-family review.
 if [ -z "$SPAR_REVIEWER" ]; then
-  if command -v claude >/dev/null 2>&1; then SPAR_REVIEWER=claude; else SPAR_REVIEWER=codex; fi
+  if command -v claude >/dev/null 2>&1; then
+    SPAR_REVIEWER=claude
+  else
+    # Falling back to same-family review is a supported mode, but it is NOT what
+    # this seat is for, and a silent fallback reads as a cross-model run in the
+    # report afterwards. Measured in a real session: claude lives in ~/.local/bin,
+    # which a non-interactive shell does not have on PATH, so the default degraded
+    # without anyone noticing until the run was over.
+    SPAR_REVIEWER=codex
+    echo "warning: 'claude' is not on PATH, so this run will be codex reviewing codex." >&2
+    echo "         That is single-agent mode, not the cross-model pairing this seat exists for." >&2
+    echo "         For cross-model review, put claude on PATH (it is often in ~/.local/bin)" >&2
+    echo "         and start again, or pass --reviewer claude to fail loudly instead." >&2
+  fi
 fi
 command -v "$SPAR_REVIEWER" >/dev/null 2>&1 || { echo "Error: '$SPAR_REVIEWER' CLI not on PATH." >&2; exit 1; }
 

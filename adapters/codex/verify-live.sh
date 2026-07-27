@@ -382,12 +382,29 @@ TRUSTPY
       "no run report under $repo/reviews — the loop never reached a terminal path"
   else
     outcome="$(sed -n 's/^- outcome: *//p' "$rpt" | head -1)"
-    if [ "$outcome" = converged ]; then
-      say 4 "CONFIRMED" "$(basename "$rpt") records outcome: converged"
-    else
+    pairing="$(sed -n 's/^- reviewer: *//p' "$rpt" | head -1)"
+    rounds="$(sed -n 's/^- rounds: *//p' "$rpt" | head -1)"
+    raised="$(sed -n 's/^- raised: *//p' "$rpt" | head -1)"
+    # Converging is not the whole item. This seat exists so that Codex authors and
+    # claude -p reviews; a same-model run converging proves the machinery turns,
+    # not the thing Phase 6 claims. A real session degraded to codex-reviews-codex
+    # without anyone noticing, and this check counted it as a pass — so the
+    # pairing is now part of the verdict rather than a detail in the report.
+    if [ "$outcome" != converged ]; then
       say 4 "FAILED" "$(basename "$rpt") records outcome: ${outcome:-unreadable}, not converged"
       failed=1
+    elif ! printf '%s' "$pairing" | grep -qF cross-model; then
+      say 4 "FAILED" "$(basename "$rpt") converged, but the pairing was '${pairing:-unrecorded}' — this gate is about Codex authoring and claude -p reviewing, and a same-model run does not exercise it"
+      failed=1
+    else
+      say 4 "CONFIRMED" "$(basename "$rpt") records outcome: converged with $pairing${rounds:+, $rounds round(s)}${raised:+, raised $raised}"
     fi
+    # Stated, not scored: a first-round convergence is a legitimate result, but it
+    # means the FINDINGS -> fix -> blind re-review path never ran, so the gate's
+    # own wording is only partly demonstrated.
+    case "$raised" in
+      0*) printf '  note: no findings were raised, so the debate path (FINDINGS then a re-review) was not exercised by this run.\n\n' ;;
+    esac
   fi
   exit "$failed"
 fi

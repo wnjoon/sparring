@@ -56,7 +56,7 @@ run_hook() { echo '{}' | bash "$HOOK"; }
 
 # ── 1. no state file → approve ──
 fresh_dir
-chk "no state → approve" '"decision":"approve"' "$(run_hook)"
+chk "no state → approve" '{}' "$(run_hook)"
 
 # ── 2. active:false → approve + state removed ──
 fresh_dir; write_state task 0
@@ -69,7 +69,7 @@ chk "inactive → state removed" "gone" "$([ -f .claude/spar.local.md ] && echo 
 fresh_dir; write_state task 0
 sed -i '' 's/^review_id: .*/review_id: ..\/..\/evil/' .claude/spar.local.md 2>/dev/null \
   || sed -i 's/^review_id: .*/review_id: ..\/..\/evil/' .claude/spar.local.md
-chk "bad review_id → approve" '"decision":"approve"' "$(run_hook)"
+chk "bad review_id → approve" '{}' "$(run_hook)"
 
 # ── 4. phase=task → block, artifacts prepared, state advanced ──
 fresh_dir; write_state task 0
@@ -132,7 +132,7 @@ OUT=$(run_hook)
 chk "small safe change → reported skip" 'skipped' "$OUT"
 chk "skip → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
 chk "skip → durable outcome" 'reason: skipped' "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
-chk "skip → next stop approves" '"decision":"approve"' "$(run_hook)"
+chk "skip → next stop approves" '{}' "$(run_hook)"
 
 skip_repo
 OUT=$(run_hook)
@@ -203,7 +203,7 @@ RP5X="reviews/spar-20260721-120000-abc123-r5-response.md"
 in_review 1
 chk "review missing → block" '"decision":"block"' "$(run_hook)"
 run_hook >/dev/null
-chk "review missing 3rd → approve" '"decision":"approve"' "$(run_hook)"
+chk "review missing 3rd → approve" '{}' "$(run_hook)"
 
 # ── 5b. symlinked reviewer output is never trusted ──
 in_review 1
@@ -218,7 +218,7 @@ in_review 1
 printf 'STATUS: CONVERGED\n\nChecked diff, tests, security.\n' > "$RF1"
 sed -i '' 's/^sweep_done: false/sweep_done: true/; s/^sweep_result: not-run/sweep_result: clean/' .claude/spar.local.md 2>/dev/null \
   || sed -i 's/^sweep_done: false/sweep_done: true/; s/^sweep_result: not-run/sweep_result: clean/' .claude/spar.local.md
-chk "converged → approve" '"decision":"approve"' "$(run_hook)"
+chk "converged → approve" '{}' "$(run_hook)"
 chk "converged → state removed" "gone" "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
 chk "converged → durable outcome" "reason: converged" "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
@@ -255,14 +255,14 @@ OUT=$(run_hook)
 chk "cap → block with unconverged notice" 'unconverged' "$OUT"
 chk "cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
 chk "cap → durable outcome before cleanup" "reason: cap" "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
-chk "cap → next stop approves" '"decision":"approve"' "$(run_hook)"
+chk "cap → next stop approves" '{}' "$(run_hook)"
 
 # ── 10. CRLF status line tolerated ──
 in_review 1
 printf 'STATUS: CONVERGED\r\n' > "$RF1"
 sed -i '' 's/^sweep_done: false/sweep_done: true/; s/^sweep_result: not-run/sweep_result: clean/' .claude/spar.local.md 2>/dev/null \
   || sed -i 's/^sweep_done: false/sweep_done: true/; s/^sweep_result: not-run/sweep_result: clean/' .claude/spar.local.md
-chk "CRLF converged → approve" '"decision":"approve"' "$(run_hook)"
+chk "CRLF converged → approve" '{}' "$(run_hook)"
 
 # ── 11. invalid reviewer output → set aside + retry, 3rd → fail-open ──
 in_review 1
@@ -274,7 +274,7 @@ chk "invalid copy kept" "kept" "$([ -f "${RF1}.invalid-1" ] && echo kept || echo
 printf '\n' > "$RF1"
 run_hook >/dev/null
 printf 'still broken\n' > "$RF1"
-chk "invalid 3rd → fail open" '"decision":"approve"' "$(run_hook)"
+chk "invalid 3rd → fail open" '{}' "$(run_hook)"
 chk "invalid 3rd → error-bypass outcome" "reason: error-bypass" "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
 # ── 12. registry: DESIGN finding rejected once → recorded, streak 1, open ──
@@ -607,7 +607,7 @@ in_review 1
 printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] x\n- file: a.py:1\n' > "$RF1"
 printf '### F1-1: FIXED — y\n' > "$RP1"
 set_reviewer bogus
-chk "garbage reviewer → approve" '"decision":"approve"' "$(run_hook)"
+chk "garbage reviewer → approve" '{}' "$(run_hook)"
 
 # ── 38. same-family loop surfaces the reduced-coverage notice ──
 fresh_dir; write_state task 0; set_reviewer claude
@@ -651,7 +651,7 @@ sweep_review_repo() { # $1=round
 sweep_review_repo 1
 printf 'STATUS: CONVERGED\n' > "$RF1"
 OUT=$(run_hook)
-chk "no risk signal → convergence without sweep" '"decision":"approve"' "$OUT"
+chk "no risk signal → convergence without sweep" '{}' "$OUT"
 chk "no risk signal → outcome says sweep not triggered" 'sweep: not-triggered' \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
@@ -702,7 +702,7 @@ chk "live sweep snapshot hides reviews" 'review: absent' "$(cat "$SF")"
 
 # ── 42. clean sweep preserves reviewer convergence and records clean ──
 OUT=$(run_hook)
-chk "clean sweep → approve" '"decision":"approve"' "$OUT"
+chk "clean sweep → approve" '{}' "$OUT"
 chk "clean sweep → converged outcome" 'reason: converged' \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 chk "clean sweep → outcome records clean" 'sweep: clean' \
@@ -727,7 +727,7 @@ chk "post-sweep result persisted" 'sweep_result: findings' "$(cat .claude/spar.l
 RF2="reviews/spar-20260721-120000-abc123-r2.md"
 printf 'STATUS: CONVERGED\n' > "$RF2"
 OUT=$(run_hook)
-chk "post-sweep reviewer convergence → approve" '"decision":"approve"' "$OUT"
+chk "post-sweep reviewer convergence → approve" '{}' "$OUT"
 chk "post-sweep convergence keeps findings result" 'sweep: findings' \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
@@ -768,7 +768,7 @@ printf 'bad sweep\n' > "$SF"; run_hook >/dev/null
 printf 'still bad\n' > "$SF"; run_hook >/dev/null
 printf 'nope\n' > "$SF"
 OUT=$(run_hook)
-chk "invalid sweep 3x → fail-open approve" '"decision":"approve"' "$OUT"
+chk "invalid sweep 3x → fail-open approve" '{}' "$OUT"
 chk "invalid sweep 3x → error-bypass outcome" 'reason: error-bypass' \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 chk "invalid sweep 3x → sweep error recorded" 'sweep: error' \
@@ -809,7 +809,7 @@ run_hook >/dev/null   # fold r1 (streak 1), advance to r2
 printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$UFb"
 printf '### F2-1: REJECTED — still cohesive\n' > "$UPb"
 OUT=$(run_hook)       # fold r2 (streak 2) → parked → unattended terminal
-chk "unattended parked → approve (no gate hold)" '"decision":"approve"' "$OUT"
+chk "unattended parked → approve (no gate hold)" '{}' "$OUT"
 chk "unattended → no gate manifest" "gone" "$([ -f .claude/spar-gate-manifest.tsv ] && echo present || echo gone)"
 chk "unattended → pending queue written" "present" "$([ -f reviews/spar-pending.md ] && echo present || echo gone)"
 chk "queue keyed by review-id + fingerprint" "## 20260721-120000-abc123 :: mod.py | split the module" "$(cat reviews/spar-pending.md)"
@@ -832,7 +832,7 @@ chk "attended default → no pending queue" "gone" "$([ -f reviews/spar-pending.
 fresh_dir; write_state task 0
 sed -i '' 's/^sweep_result: not-run/sweep_result: not-run\nunattended: maybe/' .claude/spar.local.md 2>/dev/null \
   || sed -i 's/^sweep_result: not-run/sweep_result: not-run\nunattended: maybe/' .claude/spar.local.md
-chk "malformed unattended → approve" '"decision":"approve"' "$(run_hook)"
+chk "malformed unattended → approve" '{}' "$(run_hook)"
 chk "malformed unattended → error-bypass outcome" "reason: error-bypass" "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
 # U4. a finding parked in an EARLIER round (absent from the terminal round's
@@ -854,7 +854,7 @@ run_hook >/dev/null   # A parked, B streak 1; only_parked false → advance r3
 printf 'STATUS: FINDINGS\n\n### F3-1 [DESIGN] rename thing\n- file: x.py:2\n- problem: B-BODY-UNCLEAR\n- suggestion: rename\n' > "$U4r3"
 printf '### F3-1: REJECTED — clear enough\n' > "$U4p3"
 OUT=$(run_hook)   # B parked; only_parked(r3) true → unattended terminal
-chk "multi-round unattended → approve" '"decision":"approve"' "$OUT"
+chk "multi-round unattended → approve" '{}' "$OUT"
 chk "terminal-round finding B body preserved" "B-BODY-UNCLEAR" "$(cat reviews/spar-pending.md)"
 chk "earlier-round finding A body preserved (not empty)" "A-BODY-BIG" "$(cat reviews/spar-pending.md)"
 chk "both parked findings queued" "2" "$(grep -c '^## ' reviews/spar-pending.md)"
@@ -877,7 +877,7 @@ converged_no_sweep() {
 fresh_dir; write_state review 1; mkdir -p reviews
 converged_no_sweep
 OUT=$(run_hook)
-chk "converged → approve" '"decision":"approve"' "$OUT"
+chk "converged → approve" '{}' "$OUT"
 chk_file "converged → report generated" "$RPT"
 chk "report records the converged outcome" "outcome: converged" "$(cat "$RPT" 2>/dev/null)"
 chk "report has the result section" "## Result" "$(cat "$RPT" 2>/dev/null)"
@@ -916,7 +916,7 @@ fresh_dir; write_state review 1; mkdir -p reviews
 ln -s /dev/null "$RPT"
 converged_no_sweep
 OUT=$(run_hook)
-chk "failing generator → still approve" '"decision":"approve"' "$OUT"
+chk "failing generator → still approve" '{}' "$OUT"
 chk "failing generator → outcome still recorded" "reason: converged" \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
 chk "failing generator → still cleaned up" "gone" \
@@ -929,7 +929,7 @@ cp -R "$ROOT/plugins/spar/." "$FAKE_ROOT/"
 rm -f "$FAKE_ROOT/commands/spar-report.sh"
 converged_no_sweep
 OUT=$(CLAUDE_PLUGIN_ROOT="$FAKE_ROOT" bash "$HOOK" <<< '{}')
-chk "missing generator → still approve" '"decision":"approve"' "$OUT"
+chk "missing generator → still approve" '{}' "$OUT"
 chk "missing generator → outcome still recorded" "reason: converged" \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
 chk "missing generator → no report" "absent" "$([ -f "$RPT" ] && echo present || echo absent)"
@@ -1006,7 +1006,7 @@ fresh_dir; write_state review 1; mkdir -p reviews
 sed -i '' 's/^reviewer: codex/reviewer: bogus/' .claude/spar.local.md 2>/dev/null \
   || sed -i 's/^reviewer: codex/reviewer: bogus/' .claude/spar.local.md
 OUT=$(run_hook)
-chk "invalid reviewer → fail-open approve" '"decision":"approve"' "$OUT"
+chk "invalid reviewer → fail-open approve" '{}' "$OUT"
 chk "error-bypass → outcome still recorded" "reason: error-bypass" \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
 chk "error-bypass → no report by design" "absent" \
@@ -1088,7 +1088,7 @@ chk_absent_hook "claude -p" "$(cat .claude/spar-run-sweep.sh 2>/dev/null)" \
 
 # invalid author → internal-state error, fail open, never silently claude
 sweep_fixture; add_author bogus
-chk "invalid author → approve (fail open)" '"decision":"approve"' "$(run_hook)"
+chk "invalid author → approve (fail open)" '{}' "$(run_hook)"
 chk "invalid author → error-bypass outcome" "reason: error-bypass" \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md 2>/dev/null)"
 
@@ -1124,7 +1124,7 @@ chk "owner match → round dispatched" "spar-run-reviewer.sh" "$OUT"
 # foreign session → approve, and the run is left completely untouched
 fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
 OUT=$(payload sess-zzz | bash "$HOOK")
-chk "foreign session → approve" '"decision":"approve"' "$OUT"
+chk "foreign session → approve" '{}' "$OUT"
 chk "foreign session → state untouched" "phase: task" "$(cat .claude/spar.local.md 2>/dev/null)"
 chk "foreign session → no runner written" "absent" \
   "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
@@ -1138,23 +1138,23 @@ chk "no owner field → round dispatched" "spar-run-reviewer.sh" "$OUT"
 
 # owner set but payload carries no session id → treated as foreign, approve
 fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
-chk "no session id in payload → approve" '"decision":"approve"' "$(run_hook)"
+chk "no session id in payload → approve" '{}' "$(run_hook)"
 chk "no session id in payload → state untouched" "phase: task" \
   "$(cat .claude/spar.local.md 2>/dev/null)"
 
 # malformed JSON is NOT a session claim, even when the owner's id appears in it
 fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
 OUT=$(printf '{"session_id":"sess-aaa"' | bash "$HOOK")
-chk "truncated payload → approve" '"decision":"approve"' "$OUT"
+chk "truncated payload → approve" '{}' "$OUT"
 chk "truncated payload → state untouched" "phase: task" "$(cat .claude/spar.local.md 2>/dev/null)"
 chk "truncated payload → no runner written" "absent" \
   "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
 
 # a non-object payload carrying the id is not a claim either
 fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
-chk "array payload → approve" '"decision":"approve"' "$(printf '["sess-aaa"]' | bash "$HOOK")"
+chk "array payload → approve" '{}' "$(printf '["sess-aaa"]' | bash "$HOOK")"
 fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
-chk "non-string session_id → approve" '"decision":"approve"' \
+chk "non-string session_id → approve" '{}' \
   "$(printf '{"session_id":123}' | bash "$HOOK")"
 
 # with jq unavailable, ownership is unverifiable → treated as foreign: approve and
@@ -1177,7 +1177,7 @@ NOJQ=$(nojq_path)
 fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
 OUT=$(printf '{"session_id":"sess-aaa"' \
   | env -i PATH="$NOJQ" HOME="$HOME" CLAUDE_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" bash "$HOOK")
-chk "no jq + malformed owner payload → approve" '"decision":"approve"' "$OUT"
+chk "no jq + malformed owner payload → approve" '{}' "$OUT"
 chk "no jq → no round dispatched" "absent" \
   "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
 chk "no jq → the run survives, state untouched" "phase: task" \
@@ -1190,7 +1190,7 @@ chk "no jq → nothing recorded as an outcome" "absent" \
 fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
 OUT=$(printf '{"session_id":"sess-aaa"}' \
   | env -i PATH="$NOJQ" HOME="$HOME" CLAUDE_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" bash "$HOOK")
-chk "no jq + valid owner payload → approve" '"decision":"approve"' "$OUT"
+chk "no jq + valid owner payload → approve" '{}' "$OUT"
 chk "no jq + valid owner payload → state survives" "phase: task" \
   "$(cat .claude/spar.local.md 2>/dev/null)"
 chk "no jq + valid owner payload → no outcome written" "absent" \
@@ -1215,7 +1215,7 @@ fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
 sed -i '' 's/^active: true/active: false/' .claude/spar.local.md 2>/dev/null \
   || sed -i 's/^active: true/active: false/' .claude/spar.local.md
 OUT=$(payload sess-zzz | bash "$HOOK")
-chk "foreign session + inactive run → approve" '"decision":"approve"' "$OUT"
+chk "foreign session + inactive run → approve" '{}' "$OUT"
 chk "foreign session + inactive run → state NOT cleaned up" "present" \
   "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
 chk "foreign session + inactive run → no outcome written" "absent" \
@@ -1223,7 +1223,7 @@ chk "foreign session + inactive run → no outcome written" "absent" \
 
 # the owner still gets its own teardown when it stops
 OUT=$(payload sess-aaa | bash "$HOOK")
-chk "owner + inactive run → approve" '"decision":"approve"' "$OUT"
+chk "owner + inactive run → approve" '{}' "$OUT"
 chk "owner + inactive run → state cleaned up" "gone" \
   "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
 chk "owner + inactive run → outcome recorded" "reason: cap" \
@@ -1236,7 +1236,7 @@ fresh_dir; write_state task 0; mkdir -p reviews; add_owner sess-aaa
 sed -i '' 's/^review_id: .*/review_id: ..\/..\/evil/' .claude/spar.local.md 2>/dev/null \
   || sed -i 's/^review_id: .*/review_id: ..\/..\/evil/' .claude/spar.local.md
 OUT=$(payload sess-zzz | bash "$HOOK")
-chk "foreign session + corrupt state → approve (fail open)" '"decision":"approve"' "$OUT"
+chk "foreign session + corrupt state → approve (fail open)" '{}' "$OUT"
 chk "foreign session + corrupt state → corruption still handled" "gone" \
   "$([ -f .claude/spar.local.md ] && echo present || echo gone)"
 
@@ -1263,7 +1263,7 @@ owner_state() { # $1=extra sed expression applied to the state file
 # 1. healthy + foreign → untouched (gate is before the teardown)
 owner_state
 OUT=$(payload sess-zzz | bash "$HOOK")
-chk "contract: healthy+foreign → approve" '"decision":"approve"' "$OUT"
+chk "contract: healthy+foreign → approve" '{}' "$OUT"
 chk "contract: healthy+foreign → state kept" "present" \
   "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
 
@@ -1486,7 +1486,7 @@ set_field round $WRAP7
 printf 'STATUS: FINDINGS\n\n### F7-1 [MECHANICAL] planted\n' \
   > reviews/spar-20260721-120000-abc123-r7.md
 chk "round wrapping to a small value → fails open, does not adopt round 7" \
-  '"decision":"approve"' "$(run_hook 2>&1)"
+  '{}' "$(run_hook 2>&1)"
 
 # The hard cap's bound is twice the soft cap's, so doubling holds at every legal
 # max_rounds and an explicit override in that range is honoured, not shrunk.

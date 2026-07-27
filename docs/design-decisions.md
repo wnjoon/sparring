@@ -302,6 +302,20 @@ from this future-decisions document after landing.
   judged by `adapters/codex/verify-live.sh` (isolated CODEX_HOME, planted bug,
   per-item verdict); the trust prompt stays interactive, so items 1 and 2 also need
   the human's observation.
+- **First live run, 2026-07-27.** It settled the residual and found three defects
+  no test could have. Settled: the Codex `SessionStart` payload does carry a
+  `session_id`, it matches `CODEX_THREAD_ID`, the hook fires for a user-scope
+  registration in a project with no `.codex/` of its own, and it fires before a
+  skill's first action — activation succeeded on the marker. Found: (1) the Stop
+  hook's release output `{"decision":"approve"}` is rejected by Codex, whose Stop
+  wire accepts only `decision:"block"`, so a converged run ended with "hook
+  returned invalid stop hook JSON output" and never released the session — the
+  release path now emits `{}`, which both harnesses read as allow; (2) the
+  cross-model default degraded silently to codex-reviewing-codex because `claude`
+  lives in `~/.local/bin`, off a non-interactive shell's PATH — the skills now say
+  so loudly; (3) the harness counted that same-model convergence as a pass, so
+  item 4 now requires the report's pairing to be cross-model. Phase 6 is still not
+  done: the run that would close it has to be cross-model, and this one was not.
 - **Enforcement is proven per session, by a liveness marker.** Codex makes hook
   trust a per-session choice and exposes no way to query it; measured against
   0.144.1, an untrusted registration is *silently* skipped and the run completes

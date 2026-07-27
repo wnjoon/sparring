@@ -290,9 +290,10 @@ plant_state() { # $1=workspace $2=owner_session
   printf -- '---\nactive: false\nauthor: codex\nreviewer: claude\nowner_session: %s\n---\n' \
     "$2" > "$1/repo/.claude/spar.local.md"
 }
-plant_report() { # $1=workspace $2=outcome
+plant_report() { # $1=workspace $2=outcome [$3=pairing line] [$4=raised]
   mkdir -p "$1/repo/reviews"
-  printf -- '- outcome: %s\n- rounds: 2\n' "$2" \
+  printf -- '- outcome: %s\n- rounds: 2\n- reviewer: %s\n- raised: %s\n' \
+    "$2" "${3-claude — cross-model (codex author ↔ claude reviewer)}" "${4-2 (MECHANICAL 2, DESIGN 0)}" \
     > "$1/repo/reviews/spar-20260726-120000-aaaaaa-report.md"
 }
 # What a REAL finished run leaves: round files, a response, an outcome and a
@@ -827,6 +828,43 @@ chk_absent "mid-run agreement → never asks about a refusal that did not happen
 chk "mid-run agreement → item 4 still open, the loop has not finished" \
   "ITEM 4: NEEDS YOUR ANSWER" "$OUT"
 chk "mid-run agreement → exit 0" "0" "$RC"
+
+# 13aa. converging is not the whole of item 4. This seat exists so that Codex
+# authors and claude -p reviews; a same-model run proves the machinery turns, not
+# the claim. A real session degraded to codex-reviews-codex and the old check
+# counted it as a pass.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-same
+plant_run "$PWD/ws" converged
+plant_report "$PWD/ws" converged "codex — same-model (codex author ↔ codex reviewer)"
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "same-model convergence → item 4 failed" "ITEM 4: FAILED" "$OUT"
+chk "same-model convergence → the pairing is named" "same-model" "$OUT"
+chk "same-model convergence → nonzero exit" "1" "$RC"
+chk_absent "same-model convergence → never confirmed" "ITEM 4: CONFIRMED" "$OUT"
+
+# The cross-model pairing is what confirms it.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-cross
+plant_run "$PWD/ws" converged
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "cross-model convergence → item 4 confirmed" "ITEM 4: CONFIRMED" "$OUT"
+chk "cross-model convergence → evidence names the pairing" "cross-model" "$OUT"
+chk "cross-model convergence → exit 0" "0" "$RC"
+
+# A clean first round is a legitimate result, but it leaves the debate path
+# unexercised — stated as a note, not scored as a failure.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-nofind
+plant_run "$PWD/ws" converged
+plant_report "$PWD/ws" converged "claude — cross-model (codex author ↔ claude reviewer)" "0 (MECHANICAL 0, DESIGN 0)"
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "zero findings → still confirmed" "ITEM 4: CONFIRMED" "$OUT"
+chk "zero findings → the gap is stated" "was not exercised" "$OUT"
+chk "zero findings → not scored as a failure" "0" "$RC"
 
 # 14. every verdict carries its evidence, so no line stands unexplained
 fresh
