@@ -209,6 +209,14 @@ friends are irrelevant — the loop holds the session itself.
    - `STATUS: FINDINGS` → handle EVERY finding. `[MECHANICAL]` → fix it now, do not
      ask the user. `[DESIGN]` → decide on the merits and implement if you agree.
      Reject only with a reason grounded in the code or the task requirements.
+     If `.claude/spar-fix-brief.md` exists, the hook has written a self-contained
+     brief for the findings that can be handed off, one section each with a
+     recommended writer tier. The hook dispatches nothing; you may run a fresh
+     cheaper-tier agent per section, and you must read what it produced before
+     responding. The response file is your statement either way, and the next
+     round re-reviews the fix. Design calls, findings missing a location, a
+     basis or a fix direction, and anything the previous round already raised
+     stay with you.
 3. Write `reviews/spar-<id>-r<N>-response.md`, one section per finding ID:
    `### F<N>-<n>: FIXED — <what you did>` or
    `### F<N>-<n>: REJECTED — <grounded reason>`. Then stop again.

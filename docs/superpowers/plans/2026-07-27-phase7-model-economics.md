@@ -429,7 +429,7 @@ git commit -m "feat(economics): reviewer model and effort flags on the generated
   findings that no longer exist. The `.claude/spar*` git-exclude already covers
   the path, so nothing else is needed to keep it off the review surface.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```bash
 # A mechanical finding with a file:line becomes a delegable brief.
@@ -479,19 +479,19 @@ chk "the repeat is not delegated" "absent" \
 chk "and the brief says why it stays" "stays with the session model" "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: the brief checks FAIL.
 
-- [ ] **Step 3: Declare and tear down the artifact**
+- [x] **Step 3: Declare and tear down the artifact**
 
 Add the constant, the `cleanup()` entry, and both cancel lists before generating
 anything — a file the loop creates and never removes is the defect, and it is
 easier to add the teardown first than to remember it after the generator works.
 Add a check that a cancelled run leaves no brief behind.
 
-- [ ] **Step 4: Generate the brief**
+- [x] **Step 4: Generate the brief**
 
 After `fold_registry`, when a writer tier is configured, write
 `.claude/spar-fix-brief.md`: one section per finding that is `[MECHANICAL]`, has a
@@ -501,7 +501,7 @@ basis, the suggestion as the fix direction, and the recommended tier. Findings
 that fail any of those tests are listed under a heading saying they stay with the
 session model and why.
 
-- [ ] **Step 5: Point the author at it, without overstating**
+- [x] **Step 5: Point the author at it, without overstating**
 
 In `fight.md` and the Codex skill's loop protocol, extend the `[MECHANICAL]` step:
 when `.claude/spar-fix-brief.md` exists, the author may dispatch a fresh
@@ -509,17 +509,17 @@ cheaper-tier subagent per section and must re-read the result before responding 
 the response file is still the author's statement, and the next round re-reviews
 the fix regardless. State plainly that the hook cannot dispatch anything itself.
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: `PASS=<n> FAIL=0`.
 
-- [ ] **Step 7: Prove the exclusions hold**
+- [x] **Step 7: Prove the exclusions hold**
 
 Mutate the generator to include `[DESIGN]` findings and confirm that check fails;
 mutate it to ignore the previous round and confirm the escalation check fails.
 
-- [ ] **Step 8: Record the decision and commit**
+- [x] **Step 8: Record the decision and commit**
 
 Add to `docs/design-decisions.md` under Phase 7 what was built and what was
 deliberately not: the hook recommends and briefs, the author dispatches, and no

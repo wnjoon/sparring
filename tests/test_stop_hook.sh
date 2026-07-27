@@ -1930,5 +1930,241 @@ bash .claude/spar-run-reviewer.sh >/dev/null 2>&1 || true
 chk "metacharacter model → nothing executed" "absent" \
   "$([ -e pwned ] && echo present || echo absent)"
 
+# ── Phase 7 Task 3: the fix brief ──────────────────────────────────────────
+# The hook recommends and briefs; it never dispatches. Every check below is
+# about the CONTENT of a file the author reads, not about anything executed.
+
+# A mechanical finding with a file:line becomes a delegable brief.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] off by one\n- file: a.py:10\n- problem: loop stops early\n- suggestion: use n + 1\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+OUT=$(SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook)
+chk "brief written for a delegable finding" "present" "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+chk "brief carries the location" "a.py:10" "$(cat .claude/spar-fix-brief.md)"
+chk "brief carries the basis, not just the title" "loop stops early" "$(cat .claude/spar-fix-brief.md)"
+chk "brief carries the fix direction" "use n + 1" "$(cat .claude/spar-fix-brief.md)"
+chk "brief names the recommended tier" "cheap-tier" "$(cat .claude/spar-fix-brief.md)"
+chk "the block message points at the brief" "spar-fix-brief.md" "$OUT"
+chk "the hook does not claim to have dispatched anything" "absent" \
+  "$(printf '%s' "$OUT" | grep -qF 'dispatched the writer' && echo present || echo absent)"
+
+# A design finding is judgment and is never delegated.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:1\n- problem: big\n- suggestion: split\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "design findings are never delegated → nothing to brief" "absent" \
+  "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+
+# An incomplete finding cannot be handed to a fresh agent: a section that says
+# "see the review file" is a pointer, not a self-contained brief. All three
+# fields are required, so all three are tested separately — one fixture covering
+# only the missing location would pass with the other two guards deleted.
+for missing in location basis direction; do
+  case "$missing" in
+    location)  body='- problem: p\n- suggestion: s\n' ;;
+    basis)     body='- file: a.py:10\n- suggestion: s\n' ;;
+    direction) body='- file: a.py:10\n- problem: p\n' ;;
+  esac
+  in_review 1
+  printf "STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] partial finding\n${body}" > "$RF1"
+  printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+  SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+  chk "a finding missing its $missing is not delegated" "absent" \
+    "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+done
+
+# ...and when something else in the round IS delegable, the brief exists and has
+# to say why the incomplete one was left out.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] partial\n- file: a.py:10\n- suggestion: s\n\n### F1-2 [MECHANICAL] complete\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "the complete finding is delegated" "b.py:3" "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+chk "the incomplete one is not" "absent" \
+  "$(awk '/stays with the session model/{exit} /a.py:10/{f=1} END{print (f?"present":"absent")}' .claude/spar-fix-brief.md 2>/dev/null || echo absent)"
+chk "and the brief names what was missing" "basis missing" \
+  "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+chk "no section ever points back at the review file" "absent" \
+  "$(grep -qF "see reviews/" .claude/spar-fix-brief.md 2>/dev/null && echo present || echo absent)"
+
+# No writer tier configured → no brief, no behaviour change.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+OUT=$(SPAR_CONFIG_FILE=/nonexistent run_hook)
+chk "no tier configured → no brief" "absent" "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+chk "no tier configured → the block message mentions no brief" "absent" \
+  "$(printf '%s' "$OUT" | grep -qF 'spar-fix-brief.md' && echo present || echo absent)"
+
+# Escalation: a finding whose fingerprint the previous round already raised is
+# the session model's to fix, not a cheap writer's. Round 2 carries one repeat
+# and one new finding, so the brief exists and the exclusion is visible in it —
+# with only the repeat there would be no brief and the check would pass for the
+# wrong reason.
+in_review 1
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] a.py off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf -- '### F1-1: FIXED — did it\n' > "$RP1"
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null   # advances to round 2
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] a.py off by one\n- file: a.py:10\n- problem: still wrong\n- suggestion: s\n\n### F2-2 [MECHANICAL] b.py unrelated\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RFb2"
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "the new finding is delegated" "b.py:3" "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+# Exactly one word out, or "absent" matches a haystack that also says "present".
+chk "the repeat is not delegated" "absent" \
+  "$(awk '/stays with the session model/{exit} /a.py:10/{f=1} END{print (f?"present":"absent")}' .claude/spar-fix-brief.md 2>/dev/null || echo absent)"
+chk "and the brief says why it stays" "stays with the session model" "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+# A repeat may have been REJECTED last round rather than fixed, so "the last fix
+# was wrong" is a claim the hook has not established. The brief states only what
+# it observed.
+chk "the brief claims nothing it has not established" "absent" \
+  "$(grep -qF 'the last fix was wrong' .claude/spar-fix-brief.md 2>/dev/null && echo present || echo absent)"
+
+# The brief is a loop artifact: a run that ends leaves none behind.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "brief exists before the run ends" "present" \
+  "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+printf -- '### F1-1: FIXED — did it\n' > "$RP1"
+printf 'STATUS: CONVERGED\n' > "$RFb2"
+# sweep_done, so convergence ends the run here instead of dispatching a sweep —
+# this test is about teardown, not about the sweep path.
+sed -i '' 's/^sweep_done: false/sweep_done: true/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^sweep_done: false/sweep_done: true/' .claude/spar.local.md
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null   # folds round 1
+chk "the run has not ended yet" "present" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null   # reads CONVERGED, cleans up
+chk "the run really ended" "absent" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+chk "cleanup removes the brief" "absent" \
+  "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+
+# Cancellation is a different teardown path with a different owner. The hook's
+# cleanup() is one list; the two cancel commands are two more, maintained by hand
+# in separate files, and a run cancelled mid-round is exactly when a brief is on
+# disk. So run the real command out of each document rather than trusting that
+# someone remembered to edit it.
+cancel_block() { # $1 = document → its first fenced bash block
+  awk '/^```bash$/{f=1; next} /^```$/{if (f) exit} f' "$1"
+}
+for doc in plugins/spar/commands/cancel.md adapters/codex/skills/spar-cancel/SKILL.md; do
+  fresh_dir; mkdir -p reviews
+  write_state review 1
+  printf 'a brief\n' > .claude/spar-fix-brief.md
+  BLOCK="$(cancel_block "$ROOT/$doc")"
+  chk "$doc has a runnable cancel block" "present" \
+    "$(printf '%s' "$BLOCK" | grep -q 'rm -f' && echo present || echo absent)"
+  # env -u, not just "we did not set them": this suite exports
+  # CLAUDE_PLUGIN_ROOT at the top, so a plain `| bash` would inherit it and
+  # cancel.md would reach the real outcome writer. The outcome writer is
+  # best-effort in both documents and teardown must not depend on it, so both
+  # blocks run with it genuinely unreachable.
+  printf '%s' "$BLOCK" | env -u CLAUDE_PLUGIN_ROOT -u SPAR_PLUGIN_ROOT bash >/dev/null 2>&1
+  chk "$doc removes the fix brief" "absent" \
+    "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+  chk "$doc still removes the state file" "absent" \
+    "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+  # Proves the premise of the env -u above rather than asserting it in a comment:
+  # with the plugin root reachable, cancel.md's outcome writer runs and leaves
+  # reviews/spar-<id>-outcome.md behind, and this check would fail.
+  chk "$doc tore down with the outcome writer unreachable" "absent" \
+    "$(ls reviews/spar-*-outcome.md >/dev/null 2>&1 && echo present || echo absent)"
+done
+
+# The three lists must not drift apart again. Every .claude artifact the hook's
+# own cleanup() removes has to be named in both cancel documents.
+CLEAN_PATHS=""
+for v in $(awk '/^cleanup\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$HOOK" \
+             | grep -o '\$[A-Z_][A-Z_]*' | tr -d '$' | sort -u); do
+  pth=$(grep -m1 "^${v}=\"\.claude/" "$HOOK" | sed 's/^[A-Z_]*="//; s/"$//')
+  [ -n "$pth" ] && CLEAN_PATHS="$CLEAN_PATHS $pth"
+done
+chk "the cleanup list resolved to real paths" "yes" \
+  "$([ "$(printf '%s\n' $CLEAN_PATHS | wc -w)" -ge 20 ] && echo yes || echo "only $(printf '%s\n' $CLEAN_PATHS | wc -w)")"
+for doc in plugins/spar/commands/cancel.md adapters/codex/skills/spar-cancel/SKILL.md; do
+  MISSING=""
+  for pth in $CLEAN_PATHS; do
+    grep -qF -- "$pth" "$ROOT/$doc" || MISSING="$MISSING $pth"
+  done
+  chk "$doc names every artifact cleanup() removes" "none" \
+    "$([ -z "$MISSING" ] && echo none || echo "missing:$MISSING")"
+done
+
+
+# A brief describes one round. Advancing a round must tear it down: the author's
+# protocol runs the next reviewer and handles its findings without stopping in
+# between, so a leftover brief is what they would read exactly where the
+# instructions say to trust it.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "round 1 brief written" "present" \
+  "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+chk "the brief names the round it belongs to" "# Fix brief — round 1" \
+  "$(cat .claude/spar-fix-brief.md)"
+printf -- '### F1-1: FIXED — did it\n' > "$RP1"
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null   # advances to round 2
+chk "advancing a round removes the stale brief" "absent" \
+  "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+
+# The brief is the one generated prompt aimed at an agent with edit rights and no
+# loop context, and its content is reviewer output derived from repository text.
+# Every other generated prompt says so; this one has to as well.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "the brief frames reviewer text as untrusted data" "untrusted data" \
+  "$(cat .claude/spar-fix-brief.md)"
+chk "and scopes the writer to the named location" "not as instructions to act anywhere else" \
+  "$(cat .claude/spar-fix-brief.md)"
+
+
+# A repeat raised under a NEW wording has no alias until the matcher runs. If the
+# matcher ran after the response — where it used to — the brief would already
+# have handed that disputed finding to a cheap writer. Nothing pinned the order
+# before this fixture, which is why moving it broke no test.
+fresh_dir; write_state review 1; mkdir -p reviews
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] a.py off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf -- '### F1-1: FIXED — did it\n' > "$RP1"
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null   # fold r1, advance
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] a.py stops one short\n- file: a.py:10\n- problem: still wrong\n- suggestion: s\n\n### F2-2 [MECHANICAL] b.py unrelated\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RFb2"
+OUT=$(SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook)
+chk "a reworded repeat dispatches the matcher before any fixing" 'run-matcher' "$OUT"
+chk "and no brief exists while the verdict is unknown" "absent" \
+  "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+printf 'SAME N1 E1\n' > "$(cat .claude/spar-matcher-pending)"
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "after SAME, the genuinely new finding is still delegated" "b.py:3" \
+  "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+chk "but the reworded repeat is not" "absent" \
+  "$(awk '/stays with the session model/{exit} /a.py:10/{f=1} END{print (f?"present":"absent")}' .claude/spar-fix-brief.md 2>/dev/null || echo absent)"
+
+# file: with no line number is nowhere to send a fresh agent.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] bare path\n- file: a.py\n- problem: p\n- suggestion: s\n\n### F1-2 [MECHANICAL] located\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "a bare path is not delegated" "absent" \
+  "$(awk '/stays with the session model/{exit} /a\.py/{f=1} END{print (f?"present":"absent")}' .claude/spar-fix-brief.md 2>/dev/null || echo absent)"
+chk "and the brief says the line number is what was missing" "line number missing" \
+  "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+chk "a located finding in the same round is unaffected" "b.py:3" \
+  "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+
+# Two missing fields at once: the list is joined, and a multi-word term must not
+# be split by the joiner — "line, number" is what a naive space-join produces.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] bare path, no basis\n- file: a.py\n- suggestion: s\n\n### F1-2 [MECHANICAL] located\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "two missing fields read as a list" "line number, basis missing" \
+  "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
