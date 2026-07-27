@@ -262,6 +262,18 @@ chk_absent "fight skill never stamps the seat with a replace-only write" \
 chk "fight skill resolves flags instead of hardcoding them" "spar-fight-resolve.sh" "$FIGHT"
 chk_absent "fight skill has no placeholder task" "TASK_DESCRIPTION_GOES_HERE" "$FIGHT"
 
+# Falling back to same-family review is supported, but it is not what this seat
+# is for. A real session degraded to codex-reviews-codex because claude lives in
+# ~/.local/bin, which a non-interactive shell does not have on PATH — and nothing
+# said so until the run was over and the report read "same-model".
+for sk in spar-fight spar-ready; do
+  S="$(cat "$ROOT/adapters/codex/skills/$sk/SKILL.md" 2>/dev/null)"
+  chk "$sk warns when the cross-model default is unavailable" \
+    "'claude' is not on PATH" "$S"
+  chk "$sk names what the fallback actually is" "single-agent mode" "$S"
+  chk "$sk says where claude usually lives" ".local/bin" "$S"
+done
+
 READY="$(cat "$ROOT/adapters/codex/skills/spar-ready/SKILL.md" 2>/dev/null)"
 chk "ready skill creates the dedicated branch" "git checkout -b" "$READY"
 chk "ready skill resolves its flags" "spar-ready-resolve.sh" "$READY"

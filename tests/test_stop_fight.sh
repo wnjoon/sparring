@@ -17,7 +17,7 @@ setup(){
   cat > "$TMP/spar-approve.sh" <<'STUB'
 #!/usr/bin/env bash
 cat >/dev/null
-echo '{"decision":"approve"}'
+echo '{}'
 STUB
   cat > "$TMP/spar-block.sh" <<'STUB'
 #!/usr/bin/env bash
@@ -33,7 +33,7 @@ outcome(){ printf -- '---\nreason: %s\nreview_id: %s\nrounds: 2\nreviewer: codex
 
 # A: no plan, spar approves → pass through approve
 setup
-chk "A passthrough approve" '"approve"' "$(echo '{}' | bash "$HOOK")"
+chk "A passthrough release" '{}' "$(echo '{}' | bash "$HOOK")"
 teardown
 
 # A2: no plan, spar blocks → pass through block (spar-only unchanged)
@@ -165,7 +165,7 @@ unset SPAR_FIGHT_SPAR_HOOK
 rm -rf .claude
 ERRF=$(mktemp)
 OUT="$(echo '{}' | bash "$HOOK" 2>"$ERRF")"
-chk "no loop state → approve" '"approve"' "$OUT"
+chk "no loop state → approve" '{}' "$OUT"
 # Assert stderr is EMPTY, not merely free of one known message.
 if [ -s "$ERRF" ]; then
   echo "FAIL: no loop state → stderr must be empty"; echo "  got :$(cat "$ERRF")"; FAIL=$((FAIL+1))
@@ -182,7 +182,7 @@ setup
 unset SPAR_FIGHT_SPAR_HOOK
 rm -rf .claude; mkdir .claude
 OUT="$(echo '{}' | bash "$HOOK" 2>/dev/null)"
-chk "empty .claude/ → approve" '"approve"' "$OUT"
+chk "empty .claude/ → approve" '{}' "$OUT"
 chk "empty .claude/ → no log written" "absent" \
   "$([ -f .claude/spar-fight.log ] && echo present || echo absent)"
 # `chk ... ""` would always pass — grep -F "" matches everything. Test emptiness.

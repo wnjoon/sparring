@@ -5,9 +5,9 @@
 
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: v0.7.0 — the round cap now tells a deadlock from a review that is still finding real work. `max_rounds` (5) is a soft cap, passed while rounds stay productive; `hard_cap` (2 × max_rounds) always ends the run. Also ships the Codex-hosted author seat: `adapters/codex/install.sh` registers the same two hooks with Codex and installs the `spar-fight` / `spar-ready` / `spar-cancel` / `spar-report` skills — code complete, not yet run end to end with live models.**
+**Status: v0.8.0 — the Codex-hosted author seat is done, verified end to end against live models: Codex authored a fix, `claude -p` reviewed it blind and raised real findings, Codex fixed them, and the re-review converged. `adapters/codex/install.sh` registers the same two hooks with Codex and installs the author-seat skills; `adapters/codex/verify-live.sh` sets that run up and judges its artifacts.**
 
-Phases 1–5 and 8 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar:fight` gives you:
+Phases 1–6 and 8 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar:fight` gives you:
 
 - an **enforced** review loop that iterates until the *reviewer* declares convergence;
 - a **blind judge** that rules factual (`[MECHANICAL]`) stalemates;
@@ -25,7 +25,7 @@ Phases 1–5 and 8 are implemented; the core loop is verified end-to-end against
 
 
 
-Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phase 6 (the Codex-hosted mirror) is code complete — `adapters/codex/install.sh` registers the same two hooks with Codex and installs the author-seat skills — but it has not yet been run end to end with live models, so it is not claimed as done. Phase 7 (model economics) is design only. The two-level round cap arrived in v0.7.0 after three dogfooding runs ended at the cap with nothing contested — see [the design note](docs/superpowers/specs/2026-07-26-productive-round-extension-design.md). The [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
+Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phase 6 (the Codex-hosted mirror) closes in v0.8.0, after a live run in an isolated Codex home: trust accepted, the user-scope `SessionStart` hook firing before the skill's first action, and a planted off-by-one going FINDINGS → fix → blind re-review → CONVERGED with `claude -p` as the reviewer. That run also found three defects no test had, all fixed here. Phase 7 (model economics) is design only. The two-level round cap arrived in v0.7.0 after three dogfooding runs ended at the cap with nothing contested — see [the design note](docs/superpowers/specs/2026-07-26-productive-round-extension-design.md). The [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 
 ## Direction
 
@@ -136,7 +136,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 3 | Single-agent mode: same-family sparring (Claude reviewer/judge/matcher) so `/spar:fight` works without Codex — auto-detect + explicit override; cross-model stays the default | ✅ done |
 | 4 | Safe skip + changed-surface intent harvest + risk-triggered final sweep + durable exit reason | ✅ done |
 | 5 | Unattended mode + final report (`/spar:report`) | ✅ done |
-| 6 | Codex-hosted adapter: mirror the seats (Codex authors, `claude -p` reviews) and reuse the same Stop-hook gatekeeper via Codex's own `Stop` hook | 🔨 code complete, pending a live end-to-end run |
+| 6 | Codex-hosted adapter: mirror the seats (Codex authors, `claude -p` reviews) and reuse the same Stop-hook gatekeeper via Codex's own `Stop` hook | ✅ done |
 | 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
 | 8 | `/spar:ready` + `/spar:fight` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) fight loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | ✅ done |
 
@@ -171,6 +171,10 @@ bench/                   effect benchmark (living report + tasks/oracles)
 
 - `main` — releases only. `dev` — integration. `task/<n>-<name>` — one branch per plan task, merged into `dev`.
 - Tests are pure bash: `bash tests/test_<name>.sh`, or all of them with `for t in tests/test_*.sh; do bash "$t"; done`. CI ([.github/workflows/tests.yml](.github/workflows/tests.yml)) runs every suite on Linux and macOS for each push and pull request — no reviewer CLI required, since the suites stub it.
+- Phase 6's release gate is a scripted manual run: `bash adapters/codex/verify-live.sh setup`
+  builds an isolated Codex home with a planted bug and prints what to do, and
+  `… check` judges the artifacts afterwards. It does not make Phase 6 done — that
+  needs the run.
 - The plan is the spec: [docs/superpowers/plans/](docs/superpowers/plans/). This README is updated in the same change whenever implementation diverges from it.
 - Decisions agreed for phases not yet implemented live in [docs/design-decisions.md](docs/design-decisions.md) — each phase's plan document starts from its section there.
 

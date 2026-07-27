@@ -29,7 +29,13 @@ MATCHER_RETRY=".claude/spar-matcher-retries"
 ALIASES_FILE=".claude/spar-aliases.tsv"
 
 log() { mkdir -p "$(dirname "$LOG_FILE")"; echo "[$(date -u +%FT%TZ)] $*" >> "$LOG_FILE"; }
-approve() { printf '{"decision":"approve"}\n'; exit 0; }
+# Release the session by saying nothing about it. Codex rejects
+# decision:"approve" outright — its Stop wire accepts only decision:"block" —
+# and Claude Code treats an absent decision as allow, so an empty object is the
+# one shape both harnesses read as "carry on". Measured against Codex 0.144.1,
+# where the old output produced "hook returned invalid stop hook JSON output"
+# and left the session unreleased at the end of a converged run.
+approve() { printf '{}\n'; exit 0; }
 block() { # $1=reason $2=statusMessage
   jq -nc --arg r "$1" --arg s "${2:-sparring}" \
     '{decision:"block", reason:$r, systemMessage:$s}' 2>/dev/null \
@@ -135,7 +141,7 @@ unattended_block_terminal() { # $1=round
   approve
 }
 
-trap 'log "ERR trap line $LINENO"; record_outcome error-bypass error; cleanup; printf "{\"decision\":\"approve\"}\n"; exit 0' ERR
+trap 'log "ERR trap line $LINENO"; record_outcome error-bypass error; cleanup; printf "{}\n"; exit 0' ERR
 
 HOOK_INPUT=$(cat) # consume stdin (hook JSON)
 
