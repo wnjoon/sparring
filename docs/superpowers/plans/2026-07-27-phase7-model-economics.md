@@ -501,7 +501,7 @@ basis, the suggestion as the fix direction, and the recommended tier. Findings
 that fail any of those tests are listed under a heading saying they stay with the
 session model and why.
 
-- [ ] **Step 8: Point the author at it, without overstating**
+- [ ] **Step 5: Point the author at it, without overstating**
 
 In `fight.md` and the Codex skill's loop protocol, extend the `[MECHANICAL]` step:
 when `.claude/spar-fix-brief.md` exists, the author may dispatch a fresh
@@ -519,7 +519,7 @@ Expected: `PASS=<n> FAIL=0`.
 Mutate the generator to include `[DESIGN]` findings and confirm that check fails;
 mutate it to ignore the previous round and confirm the escalation check fails.
 
-- [ ] **Step 7: Record the decision and commit**
+- [ ] **Step 8: Record the decision and commit**
 
 Add to `docs/design-decisions.md` under Phase 7 what was built and what was
 deliberately not: the hook recommends and briefs, the author dispatches, and no
