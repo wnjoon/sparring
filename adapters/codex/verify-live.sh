@@ -4,6 +4,9 @@
 # prompt is interactive, so this harness deliberately stops short of pretending
 # to automate it — it makes the manual run cheap and repeatable instead.
 # Usage: verify-live.sh setup|check|clean [--dir <path>]
+# Requires python3. `check` additionally needs python3 3.11+ to read the trust
+# record itself (tomllib); on an older one that single item is handed back to the
+# human with the reason, and everything else still works.
 # Exit: 0 ok; 2 usage; 3 unsafe path or I/O failure.
 set -uo pipefail
 
@@ -128,32 +131,202 @@ if [ "$cmd" = check ]; then
   say() { printf 'ITEM %s: %s\n  %s\n\n' "$1" "$2" "$3"; }
 
   # Trust is durable: accepting the prompt writes a trusted_hash into the isolated
-  # config.toml, keyed by the hooks.json path and the event. Matched as a FIXED
-  # string against OUR hooks.json, so a trust record belonging to some other
-  # registration in the same file is not read as ours.
+  # config.toml, under a key of the form <hooks.json path>:<event>:<group>:<hook>.
+  # The file is parsed as TOML and the key matched by prefix against THIS
+  # workspace's hooks.json, so another registration's record in the same file is
+  # not read as ours.
+  # Every artifact below is evidence for a verdict, so each has to be something a
+  # genuine run could have produced. None of them is ever a symlink in a real run
+  # — session-start.sh writes the marker through a temp file and renames it, and
+  # the fight skill refuses a symlinked marker outright — so a link here means the
+  # evidence was planted, not observed. Ignored, and said out loud: silently
+  # treating it as absent would hide the tampering it is meant to catch.
+  real_file() { [ -f "$1" ] && [ ! -L "$1" ]; }
+  ignored=""
+  note_ignored() { ignored="${ignored}  ignored: $1
+"; }
+
+  # Checking only the leaf files leaves the way in one level up: if home, repo,
+  # the git directory, .claude or reviews is a symlink, every artifact under it
+  # is a perfectly regular file belonging to somewhere else. Containment is a
+  # property of the whole path, so the directories are verified before anything
+  # under them is read, and a violation is an unsafe workspace (exit 3) rather
+  # than a verdict — there is nothing here to judge.
+  require_real_dir() {  # $1=path (skipped when absent)
+    [ -e "$1" ] || [ -L "$1" ] || return 0
+    if [ -L "$1" ]; then
+      echo "error: $1 is a symlink; this workspace is not self-contained" >&2; exit 3
+    fi
+    [ -d "$1" ] || { echo "error: $1 is not a directory" >&2; exit 3; }
+    return 0
+  }
+  require_real_dir "$want/home"
+  require_real_dir "$want/repo"
+
+  # A symlink is the interesting case, but it is not the only one: a directory, a
+  # FIFO or a device at any of these paths is equally not something a run wrote,
+  # and skipping it without a word is the same silence this block exists to break.
+  reject_unless_regular() {   # $1=path → true when usable, false and noted otherwise
+    real_file "$1" && return 0
+    if [ -L "$1" ]; then note_ignored "$1 is a symlink"
+    elif [ -e "$1" ]; then note_ignored "$1 is not a regular file"
+    fi
+    return 1
+  }
+
   cfg="$want/home/config.toml"
   trusted=0
-  if [ -f "$cfg" ] && grep -qF "hooks.state.\"$want/home/hooks.json:" "$cfg" 2>/dev/null; then
-    trusted=1
+  trust_note=""
+  # Parsed as TOML, not pattern-matched. A substring test cannot tell
+  # [hooks.state."<path>:stop:0:0"] from a foreign parent table that merely
+  # contains that text, and it has no answer at all for a workspace path holding
+  # a character TOML escapes. Exit codes: 0 trusted, 1 not, 2 unparseable here,
+  # 3 malformed file. Anything but 0 or 1 leaves item 1 for the human rather than
+  # guessing in either direction.
+  if [ -e "$cfg" ] || [ -L "$cfg" ]; then
+    if ! reject_unless_regular "$cfg"; then
+      trust_note=" (the config it would be read from was ignored; see above)"
+    fi
+  fi
+  if real_file "$cfg"; then
+    # -I: no PYTHONPATH, no user site. The parser that decides whether the trust
+    # gate was exercised has to be the standard library's, not whatever a
+    # directory on the path happens to call tomllib.
+    trust_answer="$(CFG="$cfg" HOOKS="$want/home/hooks.json" python3 -I - <<'TRUSTPY'
+import os, sys
+
+# tomllib only, deliberately. A hand-rolled reader kept looking almost right and
+# being wrong — first on foreign parent tables, then on child tables like
+# [hooks.state."<key>".other], and it could return on a plausible hash before
+# noticing malformed TOML further down. Each hole was cheap to patch and the next
+# one was never visible; that is the wrong shape for the check that decides
+# whether the trust gate was exercised, where a false CONFIRMED is the failure
+# that matters.
+#
+# The answer is PRINTED, not inferred from the exit status. Python exits 1 for an
+# uncaught exception too, so reading 1 as "no trust record" would turn any
+# interpreter mishap into ITEM 1: FAILED — an accusation that the hooks ran
+# untrusted, on no evidence. A token nobody else can produce is unambiguous, and
+# anything unrecognised is treated as unreadable.
+def answer(token):
+    sys.stdout.write(token)
+    raise SystemExit(0)
+
+# The version, not the import. tomllib entered the standard library in 3.11; on
+# anything older an importable module of that name is something else wearing the
+# name, and this is the one verdict where a parser of unknown provenance must not
+# be the thing that says "trusted".
+if sys.version_info < (3, 11):
+    answer("NO_TOMLLIB")
+
+try:
+    import tomllib
+except Exception:
+    answer("NO_TOMLLIB")
+
+try:
+    with open(os.environ["CFG"], "rb") as fh:
+        data = tomllib.load(fh)
+except Exception:
+    answer("BAD_TOML")
+
+try:
+    state = data.get("hooks", {}).get("state", {})
+    prefix = os.environ["HOOKS"] + ":"
+    if isinstance(state, dict):
+        for key, entry in state.items():
+            if key.startswith(prefix) and isinstance(entry, dict):
+                h = entry.get("trusted_hash")
+                if isinstance(h, str) and h.strip():
+                    answer("TRUSTED")
+    answer("UNTRUSTED")
+except Exception:
+    answer("BAD_TOML")
+TRUSTPY
+)" || trust_answer=""
+    case "$trust_answer" in
+      TRUSTED)    trusted=1 ;;
+      UNTRUSTED)  ;;
+      NO_TOMLLIB) trust_note=" (reading it needs python3 3.11 or newer for tomllib; this one is older)" ;;
+      BAD_TOML)   trust_note=" ($cfg is not valid TOML)" ;;
+      *)          trust_note=" (the reader gave no usable answer, so nothing is known either way)" ;;
+    esac
   fi
 
+  # .git must be PRESENT, not merely unsuspicious. git searches upward, so a
+  # workspace whose own .git is gone silently adopts the enclosing repository —
+  # and the default workspace lives under a checkout of this very project, whose
+  # .git holds a spar-hook-live written by an unrelated session. That would
+  # confirm item 2 from a marker no harness run ever produced.
+  require_real_dir "$repo/.git"
+  [ -d "$repo/.git" ] || {
+    echo "error: $repo has no .git of its own; git would resolve to an enclosing repository" >&2
+    exit 3; }
   gitdir="$(git -C "$repo" rev-parse --git-dir 2>/dev/null)"
   case "$gitdir" in "") gitdir="$repo/.git" ;; /*) ;; *) gitdir="$repo/$gitdir" ;; esac
+  require_real_dir "$gitdir"
+  # Belt to that brace: whatever git reports must land inside the workspace, and
+  # the workspace must be the top of it, not a subdirectory of something larger.
+  repo_real="$(cd "$repo" 2>/dev/null && pwd -P)" || repo_real=""
+  gitdir_real="$(cd "$gitdir" 2>/dev/null && pwd -P)" || gitdir_real=""
+  top_real="$(cd "$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null && pwd -P)" \
+    || top_real=""
+  { [ -n "$repo_real" ] && [ -n "$gitdir_real" ]; } \
+    || { echo "error: could not resolve the scratch repository under $want" >&2; exit 3; }
+  case "$gitdir_real/" in
+    "$repo_real"/*) ;;
+    *) echo "error: the git directory for $repo resolves outside it ($gitdir_real)" >&2; exit 3 ;;
+  esac
+  [ "$top_real" = "$repo_real" ] || {
+    echo "error: $repo is not the top of its own git repository (top is ${top_real:-unknown})" >&2
+    exit 3; }
+  require_real_dir "$repo/.claude"
+  require_real_dir "$repo/reviews"
   marker="$gitdir/spar-hook-live"
-  seen=""; [ -f "$marker" ] && seen="$(head -1 "$marker")"
+  seen=""
+  if [ -e "$marker" ] || [ -L "$marker" ]; then
+    reject_unless_regular "$marker" && seen="$(head -1 "$marker")"
+  fi
+
+  state="$repo/.claude/spar.local.md"
+  owner=""
+  if [ -e "$state" ] || [ -L "$state" ]; then
+    reject_unless_regular "$state" \
+      && owner="$(sed -n 's/^owner_session: *//p' "$state" | head -1)"
+  fi
+  # Any round artifact proves activation happened; the outcome file and the
+  # report are written at terminal paths, the round files during the loop.
+  ran=""
+  for cand in "$repo"/reviews/spar-*-r[0-9]*.md "$repo"/reviews/spar-*-outcome.md; do
+    [ -e "$cand" ] || [ -L "$cand" ] || continue     # unmatched glob
+    reject_unless_regular "$cand" && ran="$cand"
+  done
+
+  rpt=""
+  for cand in "$repo"/reviews/spar-*-report.md; do
+    [ -e "$cand" ] || [ -L "$cand" ] || continue
+    reject_unless_regular "$cand" && rpt="$cand"
+  done
+
+  # Said once, before any verdict, so a planted artifact is visible up front
+  # rather than buried under whichever item happened to look for it.
+  [ -n "$ignored" ] && printf 'IGNORED EVIDENCE (not regular files):\n%s\n' "$ignored"
 
   # Item 1 — the trust path. The artifact settles "accepted". It cannot separate
   # "never prompted" from "declined", which is why the checklist asks for that.
   if [ "$trusted" = 1 ]; then
     say 1 "CONFIRMED" \
       "$cfg records a trusted_hash for this workspace's hooks.json — the prompt appeared and you accepted it"
+  elif [ -n "$trust_note" ]; then
+    say 1 "NEEDS YOUR ANSWER" \
+      "the trust record could not be read${trust_note} — were you asked to trust the hooks, and did you accept?"
   elif [ -n "$seen" ]; then
     say 1 "FAILED" \
       "a liveness marker exists but $cfg records no trusted_hash — the hooks ran without the trust path this gate exists to exercise"
     failed=1
   else
     say 1 "NEEDS YOUR ANSWER" \
-      "no trusted_hash in $cfg and no liveness marker — either no session ran, or you were never asked, or you declined; which was it?"
+      "no trusted_hash for this workspace in $cfg and no liveness marker — either no session ran, or you were never asked, or you declined; which was it?"
   fi
 
   # Item 2 — the user-scope registration firing for a project with no .codex/ of
@@ -171,22 +344,39 @@ if [ "$cmd" = check ]; then
 
   # Item 3 — SessionStart ordering. The marker must name the session the loop
   # recorded as its owner; a mismatch means activation read a stale one.
-  owner="$(sed -n 's/^owner_session: *//p' "$repo/.claude/spar.local.md" 2>/dev/null | head -1)"
-  if [ -z "$seen" ]; then
-    say 3 "NEEDS YOUR ANSWER" \
-      "no liveness marker, so ordering cannot be judged — did spar-fight refuse to start?"
-  elif [ -n "$owner" ] && [ "$owner" != "$seen" ]; then
+  # The loop state is NOT durable — cleanup() deletes it on every terminal path —
+  # so it cannot be what settles this after a finished run. What is durable, and
+  # is actually stronger, is that the run happened: the Codex spar-fight skill
+  # refuses to activate unless the marker names the session running right then
+  # (skills/spar-fight/SKILL.md), so any round artifact is proof that the gate was
+  # passed, and therefore that SessionStart fired before the skill's first action.
+  # owner_session is still compared when the state file is present, which is the
+  # case if check runs mid-loop rather than after it.
+  if [ -n "$owner" ] && [ -n "$seen" ] && [ "$owner" != "$seen" ]; then
     say 3 "FAILED" \
-      "marker names $seen but the loop recorded owner_session $owner — activation did not read this session's marker"
+      "marker names $seen but the live loop state records owner_session $owner — activation did not read this session's marker"
     failed=1
-  else
+  elif [ -n "$owner" ] && [ "$owner" = "$seen" ]; then
+    # Mid-run, before the first round file exists. The loop only writes
+    # owner_session after spar-fight's marker gate has passed, so a state file
+    # agreeing with the marker is the same proof a round artifact would be —
+    # and without this branch the run falls through to "nothing activated",
+    # which the state file sitting there disproves.
     say 3 "CONFIRMED" \
-      "marker names $seen${owner:+, matching the owner_session the loop recorded} — SessionStart fired before activation read it"
+      "the live loop state records owner_session $owner, matching the marker — spar-fight writes that field only after its marker gate, so SessionStart fired before activation"
+  elif [ -n "$ran" ]; then
+    say 3 "CONFIRMED" \
+      "$(basename "$ran") exists, so spar-fight activated — and it refuses to start unless the marker names the current session, so SessionStart fired before its first action"
+  elif [ -n "$seen" ]; then
+    say 3 "NEEDS YOUR ANSWER" \
+      "a marker names $seen but no round artifact exists — the hook ran and nothing activated; did spar-fight refuse, and what did it say?"
+  else
+    say 3 "NEEDS YOUR ANSWER" \
+      "no liveness marker and no round artifact, so ordering was never exercised"
   fi
 
   # Item 4 — the planted bug reaching CONVERGED. Only a terminal path writes a
   # report, so its absence means the loop never finished rather than that it lost.
-  rpt="$(ls "$repo"/reviews/spar-*-report.md 2>/dev/null | tail -1)"
   if [ -z "$rpt" ]; then
     say 4 "NEEDS YOUR ANSWER" \
       "no run report under $repo/reviews — the loop never reached a terminal path"
