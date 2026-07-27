@@ -139,6 +139,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 6 | Codex-hosted adapter: mirror the seats (Codex authors, `claude -p` reviews) and reuse the same Stop-hook gatekeeper via Codex's own `Stop` hook | ✅ done |
 | 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
 | 8 | `/spar:ready` + `/spar:fight` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) fight loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | ✅ done |
+| 9 | Plan review: one blind pass over a `/spar:ready` plan before it is fought — do its claims about the code hold, is every step satisfiable, does it cover the spec | planned |
 
 ## Install
 
@@ -179,6 +180,10 @@ bench/                   effect benchmark (living report + tasks/oracles)
   the state file, the runner scripts — is exercised in a live session of each seat
   before the release that carries it. Green suites are not enough: they assert what
   the hook prints, not what each harness does with it.
+- Reviewer model and reasoning effort are optional per-family settings in
+  [plugins/spar/shared/config.toml](plugins/spar/shared/config.toml). Nothing is enabled
+  out of the box: with no value set, no flag is passed and the loop behaves as it did
+  before. Configuration selects the instrument, never the verdict.
 - The plan is the spec: [docs/superpowers/plans/](docs/superpowers/plans/). This README is updated in the same change whenever implementation diverges from it.
 - Decisions agreed for phases not yet implemented live in [docs/design-decisions.md](docs/design-decisions.md) — each phase's plan document starts from its section there.
 

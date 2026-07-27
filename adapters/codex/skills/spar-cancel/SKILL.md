@@ -22,7 +22,8 @@ rm -f .claude/spar.local.md .claude/spar-run-reviewer.sh .claude/spar-reviewer-p
       .claude/spar-run-matcher.sh .claude/spar-matcher-prompt.txt .claude/spar-matcher-pending \
       .claude/spar-matcher-manifest.tsv .claude/spar-matcher-round .claude/spar-matcher-retries \
       .claude/spar-aliases.tsv .claude/spar-diff.txt .claude/spar-intent-pointers.txt \
-      .claude/spar-run-sweep.sh .claude/spar-sweep-prompt.txt .claude/spar-sweep-retries
+      .claude/spar-run-sweep.sh .claude/spar-sweep-prompt.txt .claude/spar-sweep-retries \
+      .claude/spar-fix-brief.md
 rmdir .claude/spar-sweep.lock 2>/dev/null || true
 echo "Sparring cancelled. Review artifacts in reviews/ were kept."
 ```

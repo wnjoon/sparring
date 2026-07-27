@@ -112,6 +112,14 @@ gatekeeper implementation.
     BEFORE cleanup (the ledger and registry it reads are deleted there), is
     fail-open (a failure only means "no report"), and is never part of
     enforcement. `/spar:report [id]` displays it.
+11. Reviewer model and reasoning effort are configuration, not protocol
+   (`plugins/spar/shared/config.toml`, read per family). Absent or unreadable
+   configuration means exactly the behaviour that predates it — no flag is
+   passed rather than an empty one. Nothing configurable here can change who
+   declares convergence, who may write the convergence marker, or which findings
+   escalate: configuration selects the instrument, never the verdict. The final
+   sweep reads the AUTHOR family's settings, not the reviewer's, because it is a
+   fresh author-family instance.
 
 ## Invariants
 

@@ -125,7 +125,16 @@ sparring Stop hook takes over from there.
      cap, sweep findings at the cap, safe skip) get the same report; use it when
      you report an unconverged result honestly.
    - First line `STATUS: FINDINGS` → handle EVERY finding:
-     - `[MECHANICAL]` → fix it now. Do not ask the user.
+     - `[MECHANICAL]` → fix it now. Do not ask the user. If
+       `.claude/spar-fix-brief.md` exists, the hook has written a self-contained
+       brief for the findings that can be handed off — one section each, with a
+       recommended writer tier. The hook cannot dispatch anything; you may run a
+       fresh cheaper-tier subagent per section, and you must read what it
+       produced before you respond. The response file is your statement either
+       way, and the next round re-reviews the fix regardless. Findings the brief
+       leaves out — design calls, findings missing a location, a basis or a
+       fix direction, and anything the previous round already raised — are yours
+       to write.
      - `[DESIGN]` → decide on the merits; implement it if you agree.
      - You may reject a finding ONLY with a reason grounded in the code or
        the task requirements — never because it is inconvenient or you are

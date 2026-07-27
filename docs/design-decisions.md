@@ -387,6 +387,126 @@ from this future-decisions document after landing.
   security / requirement fit) and a cross-family sweep when the other CLI
   exists.
 
+### What Phase 7 built, and what it deliberately did not
+
+The hook **recommends and briefs. The author dispatches.** A Stop hook returns
+JSON to its harness; it has no way to run a subagent, so anything that reads like
+"the writer has been dispatched" would be a lie in the block message. When at
+least one of a round's findings is delegable, `.claude/spar-fix-brief.md` is
+written with one self-contained section per finding — id, `file:line`, the
+reviewer's problem text as the verified basis, the suggestion as the fix
+direction, and the configured tier — and the block message points at it. The
+author may hand each section to a fresh cheaper-tier agent, must read what came
+back, and still authors the response file. The next round re-reviews the fix
+regardless, which is what makes a cheaper writer safe.
+
+Three exclusions, each the tiering contract rather than a heuristic. `[DESIGN]`
+findings are judgment and never delegate. A finding missing its location, its verified basis or its fix
+direction is not self-contained — the brief's whole premise is that its reader
+needs no conversation history, and a section that says "see the review" is a
+pointer, not a brief. And a finding the **previous round already raised** is
+unresolved — the last fix may have missed, or the author may have rejected it and
+the reviewer disagreed. Either way it is disputed or wrong twice over, which is
+the escalation case: it stays with the session model until a clean round. The
+brief says only that, because "the last fix was wrong" is not established for a
+repeat that was rejected rather than fixed. The brief lists the excluded findings and why,
+so the author sees the reasoning rather than an unexplained gap.
+
+The finding matcher moved ahead of the author's response. It reads only the
+review file and the registry — never a response — so its inputs are identical at
+either point, but its verdict is an **input to the brief**: a repeat raised under
+a new wording has no alias until the matcher runs, and the round it first appears
+in is exactly the round where handing it to a cheap writer is wrong. Running it
+afterwards produced the right verdict too late to use. The cost is one extra stop
+on rounds whose findings overlap an earlier round's files. Nothing in the suite
+pinned the old order, which is why the move broke no test and needed new ones.
+
+Reviewer effort scales with the changed-line count, counting the tracked diff and
+untracked files together — the review surface handed to both families is
+`git diff $BASE` plus the untracked listing, so sizing only the tracked half
+hands the cheapest tier to a task whose whole deliverable is new files.
+
+Not built, and not by omission: nothing here can move judgment. No configuration
+changes who declares convergence, who may write the convergence marker, or how
+the judge and gate work. The session model is not switchable by the plugin, and
+the docs say so rather than implying otherwise. Everything in `config.toml` ships
+commented out, so an install that sets nothing behaves exactly as it did before
+Phase 7 — the first cut shipped an active ladder, which silently changed every
+run's flags and broke two unrelated tests.
+
+**How the two CLIs fail, measured rather than assumed.** Both reject an unknown
+flag loudly and produce no output, so a renamed flag ends the round instead of
+degrading it. Two cases do not behave that way, and both were fixed here:
+
+- `claude --effort <nonsense>` warns on stderr and runs at the **default** effort
+  with exit 0. A typo in `config.toml` would silently undo the only thing the
+  ladder does. `spar-config.sh` now drops any effort outside
+  `low|medium|high|xhigh|max` and emits no flag. codex is stricter — it rejects
+  the value and the round fails — but neither behaviour is worth depending on.
+- `codex -c <unknown_key>=…` is accepted silently. That is the version-drift
+  path: if `model_reasoning_effort` is ever renamed, the flag becomes a no-op and
+  runs at default effort with nothing to notice. Not defensible from inside the
+  plugin; recorded so the next person knows where it would show up.
+
+And one defect the measurement turned up. `claude` reports a rejected `--model`
+on **stdout** and exits 1, while the generated runners checked only that the
+output file was non-empty. The error prose was therefore published as the round's
+review — a dead reviewer that produced a "result". Every runner (reviewer, judge,
+matcher, and both families' sweep) now checks the CLI's exit status before
+publishing. codex never hit this because it writes nothing when it fails, which
+is exactly why one family's behaviour is not evidence about the other's.
+
+Deliberately not added: recording or pinning CLI versions. Nothing in the repo
+did that for either family, and doing it for one because its binary happened to
+break would imply a guarantee that does not exist. The failure mode that matters
+is a flag whose *meaning* changes while its name stays — no version check catches
+that, and the live release gate is what does.
+
+What this phase cannot verify: whether a cheaper writer tier actually produces
+fixes that survive the next round. Only dogfooding answers it, and the loop is
+the instrument — if delegated fixes start causing the following round's findings,
+the escalation rule is what should catch it, and if it does not, the tier is
+wrong or the rule is.
+
+## Phase 9 — plan review (not yet designed)
+
+The plan is the one artifact in this system that no independent pass ever reads.
+`/spar:ready` stops so a human can review it, and that checkpoint was deliberate;
+a *machine* review was not considered rather than considered and rejected — Phase
+8's design says nothing about it.
+
+The gap is real and cost is measurable. Two plan defects in one day, both facts
+about the code rather than matters of taste, and both invisible to a human
+reading a long plan against a longer hook:
+
+- `2026-07-26-phase6-remaining.md` gave Task 3 an unsatisfiable placement
+  instruction. It was followed, the round cap was reached, and the plan had to be
+  corrected before the task could converge — a full loop spent on a defect that
+  predated the first line of code.
+- `2026-07-27-phase7-model-economics.md` told the implementer to splice flags into
+  "the reviewer, judge, matcher and sweep emitters". There are two emitters, and
+  they branch on different families — the sweep is author-family, so the reviewer's
+  model reaching it would misconfigure a cross-model run silently. Caught before
+  execution only because the plan's factual claims were checked by hand.
+
+That the loop's own premise applies here is the argument: the author never grades
+its own work. A plan is authored work, and today it is graded by its author until
+execution proves otherwise.
+
+**Shape, when it is designed.** One blind pass, not a convergence loop — a plan
+has no tests to converge on, and iterating a document with a model is how plans
+grow rather than improve. The brief is bounded to what a reader with the
+repository can check and a human cannot cheaply: does every claim the plan makes
+about existing code hold; is every step satisfiable as written; does it cover the
+spec; and does anything in a task body collide with the `### ` extractor. Findings
+come back to the author to act on before `/spar:fight`, not to a debate. Cost is
+one reviewer call per plan, against a loop's worth of rounds when a plan is wrong.
+
+**Open questions.** Whether it belongs inside `/spar:ready` (always) or as an
+opt-in flag; whether the reviewer family should be the cross-model one or the
+author's own, given the pass is about facts rather than judgment; and whether a
+plan that fails should block `/spar:fight` or merely warn.
+
 ## Cross-cutting stances
 
 - **Round cap = circuit breaker, not a quality mechanism.** Healthy loops end

@@ -24,7 +24,10 @@ export PATH
 trap 'rm -rf "$STUB_BIN"' EXIT
 
 chk() { # $1=desc $2=expected-substring $3=actual
-  if echo "$3" | grep -qF "$2"; then echo "PASS: $1"; PASS=$((PASS+1))
+  # -- so a needle beginning with a dash is a pattern, not an option. Without it
+  # any assertion about a flag (--model, --effort) fails no matter what the
+  # haystack holds, which is a false failure that looks like a real one.
+  if echo "$3" | grep -qF -- "$2"; then echo "PASS: $1"; PASS=$((PASS+1))
   else echo "FAIL: $1"; echo "   want: $2"; echo "   got : $3"; FAIL=$((FAIL+1)); fi
 }
 chk_file() { # $1=desc $2=path
@@ -32,7 +35,12 @@ chk_file() { # $1=desc $2=path
   else echo "FAIL: $1 ($2 missing)"; FAIL=$((FAIL+1)); fi
 }
 
-fresh_dir() { d=$(mktemp -d); cd "$d" || exit 1; git init -q; mkdir -p .claude; }
+# The excludes match what /spar:fight's setup writes. Without them a test tree's
+# own state files show up as untracked, which real runs never see — and the
+# effort ladder, which sizes the untracked half of the review surface, would be
+# measuring the harness.
+fresh_dir() { d=$(mktemp -d); cd "$d" || exit 1; git init -q; mkdir -p .claude
+  printf 'reviews/spar-*\n.claude/spar*\n' >> "$(git rev-parse --git-common-dir)/info/exclude"; }
 
 write_state() { # $1=phase $2=round
   cat > .claude/spar.local.md <<EOF
@@ -51,6 +59,23 @@ sweep_result: not-run
 Add a fizzbuzz function with tests
 EOF
 }
+
+# These effort-ladder fixtures are deliberately tiny, which is exactly what the
+# heuristic small-change skip ends before any runner is written. include_dirty is
+# the supported switch for that skip and changes nothing about `git diff $BASE`,
+# so it isolates the fixture to the thing under test. Before untracked files were
+# counted, the fixtures' own config file happened to defeat the skip — an
+# accident, not a guarantee.
+no_skip() {
+  sed -i '' 's/^reviewer: codex$/reviewer: codex\ninclude_dirty: true/' .claude/spar.local.md 2>/dev/null \
+    || sed -i 's/^reviewer: codex$/reviewer: codex\ninclude_dirty: true/' .claude/spar.local.md
+}
+
+# Most tests must not read the repository's own shared/config.toml: it is the file
+# README tells users to edit, and a developer uncommenting a model would fail
+# assertions about family resolution with a message pointing at the wrong thing.
+# The one test that DOES exercise the shipped file names it explicitly.
+export SPAR_CONFIG_FILE=/nonexistent
 
 run_hook() { echo '{}' | bash "$HOOK"; }
 
@@ -1670,6 +1695,513 @@ sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md 2
 CAPOUT=$(run_hook)
 chk "cap message warns against commit-and-re-run" 'empty diff' "$CAPOUT"
 chk "cap message asks what was never re-reviewed" 'never re-reviewed' "$CAPOUT"
+
+# ── Economics: reviewer model and effort on the generated runners ────────────
+# This suite has no chk_absent; absence is asserted as
+# chk "…" "absent" "$(grep -q … && echo present || echo absent)".
+
+fresh_dir; write_state task 0; mkdir -p reviews
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n[effort]\nladder = [[0, "low"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "configured model reaches the codex runner" "--model 'gpt-5.6-sol'" "$(cat .claude/spar-run-reviewer.sh)"
+chk "configured effort reaches the codex runner" "model_reasoning_effort='\"low\"'" "$(cat .claude/spar-run-reviewer.sh)"
+
+# The judge comes from the same emitter, so it must carry the flags too. A judge
+# runner only exists after a stalemate, so this uses the suite's own fixture
+# rather than a round-1 tree where the file would never exist.
+mech_stalemate
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "the judge runner carries the same flags" "--model 'gpt-5.6-sol'" \
+  "$(cat .claude/spar-run-judge.sh 2>/dev/null)"
+
+# The sweep must NOT carry the reviewer's model — it runs author-family. A
+# cross-model tree, so the two families differ; and round 3, because should_sweep
+# only fires from there. At round 1 no sweep runner exists and the absence check
+# would pass without proving anything.
+in_review 3
+printf 'author: claude\n' >> .claude/spar.local.md
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n[reviewer.claude]\nmodel = "claude-sonnet-5"\n' > .claude/spar-cfg.toml
+printf 'STATUS: CONVERGED\n' > reviews/spar-20260721-120000-abc123-r3.md
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "the sweep runner was actually generated" "present" \
+  "$([ -f .claude/spar-run-sweep.sh ] && echo present || echo absent)"
+chk "the sweep does not take the reviewer's model" "absent" \
+  "$(grep -qF 'gpt-5.6-sol' .claude/spar-run-sweep.sh 2>/dev/null && echo present || echo absent)"
+chk "the sweep takes the author's model instead" "--model 'claude-sonnet-5'" \
+  "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+
+# The ladder must see the size of THIS change. A real commit and a real edit, with
+# a threshold above zero — every other economics fixture uses [[0, …]], which
+# selects the same tier whatever the count is and so cannot detect a wrong one.
+fresh_dir; mkdir -p reviews
+printf 'one\n' > f.txt
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+BASE_SHA="$(git rev-parse HEAD)"
+write_state task 0
+sed -i '' "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md
+no_skip
+printf 'one\ntwo\nthree\nfour\nfive\n' > f.txt
+printf '[effort]\nladder = [[0, "low"], [1, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "a nonempty change picks the higher rung" "model_reasoning_effort='\"high\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+chk "and not the zero rung" "absent" \
+  "$(grep -qF "model_reasoning_effort='\"low\"'" .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# The unit is CHANGED lines, not diff output lines. A three-line file rewritten
+# whole is 6 changed lines and 11 lines of diff output, so a rung boundary at 8
+# separates the two: counting output would pick the higher rung for a change the
+# documentation calls smaller than the threshold.
+fresh_dir; mkdir -p reviews
+printf 'a\nb\nc\n' > f.txt
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+BASE_SHA="$(git rev-parse HEAD)"
+write_state task 0
+sed -i '' "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md
+no_skip
+printf 'x\ny\nz\n' > f.txt
+printf '[effort]\nladder = [[0, "low"], [8, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "6 changed lines stay below a threshold of 8" "model_reasoning_effort='\"low\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+chk "counting diff output lines instead would have crossed it" "absent" \
+  "$(grep -qF "model_reasoning_effort='\"high\"'" .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# Untracked files are part of the surface both families read, so they are part of
+# the size. A task that only adds files has a zero tracked diff, which is the case
+# where handing it the cheapest tier is most wrong.
+fresh_dir; mkdir -p reviews
+printf 'one\n' > f.txt
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+BASE_SHA="$(git rev-parse HEAD)"
+write_state task 0
+sed -i '' "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md
+no_skip
+# Nothing tracked is touched; the whole change is one new 12-line file.
+printf 'l\nl\nl\nl\nl\nl\nl\nl\nl\nl\nl\nl\n' > added.txt
+printf '[effort]\nladder = [[0, "low"], [8, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "a new untracked file counts toward the rung" "model_reasoning_effort='\"high\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+chk "counting only the tracked diff would have read it as empty" "absent" \
+  "$(grep -qF "model_reasoning_effort='\"low\"'" .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# A file whose last line has no trailing newline still has that line. Eight lines
+# written with seven newlines sits exactly on the rung boundary: counting newline
+# characters gives seven and picks the lower rung, which is also the number git
+# would not agree with — numstat calls an unterminated final line 1 on the tracked
+# side of this same total.
+fresh_dir; mkdir -p reviews
+printf 'one\n' > f.txt
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+BASE_SHA="$(git rev-parse HEAD)"
+write_state task 0
+sed -i '' "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md
+no_skip
+printf 'l\nl\nl\nl\nl\nl\nl\nl' > added.txt   # 8 lines, 7 newlines
+printf '[effort]\nladder = [[0, "low"], [8, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "an unterminated final line still counts" "model_reasoning_effort='\"high\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+chk "counting newline characters would have missed it" "absent" \
+  "$(grep -qF "model_reasoning_effort='\"low\"'" .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# ...but the loop's own artifacts are not. Setup excludes them from the surface
+# listing, and --exclude-standard is what keeps the same files out of the count.
+# A fresh tree: the run above left state behind, and a second dispatch into it
+# would take a different branch and leave the previous runner in place.
+fresh_dir; mkdir -p reviews
+printf 'one\n' > f.txt
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+BASE_SHA="$(git rev-parse HEAD)"
+write_state task 0
+sed -i '' "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md
+no_skip
+# Same 12 lines as the file above, in a path the loop excludes.
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do printf 'noise\n'; done > reviews/spar-x-r1.md
+printf '[effort]\nladder = [[0, "low"], [8, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "an excluded review artifact does not inflate the count" "model_reasoning_effort='\"low\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+
+# An empty change takes the zero rung, so the check above is about the count and
+# not about the ladder always returning its last row.
+fresh_dir; mkdir -p reviews
+printf 'one\n' > f.txt
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+BASE_SHA="$(git rev-parse HEAD)"
+write_state task 0
+sed -i '' "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md
+no_skip
+printf '[effort]\nladder = [[0, "low"], [1, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "no change takes the zero rung" "model_reasoning_effort='\"low\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+
+# The shipped config must add nothing. This is the end-to-end half of the same
+# claim tests/test_config.sh makes about the reader, and it is the only test here
+# that reads the repository's real file.
+fresh_dir; write_state task 0; mkdir -p reviews
+SPAR_CONFIG_FILE="$ROOT/plugins/spar/shared/config.toml" run_hook >/dev/null
+chk "shipped config → no model flag on the runner" "absent" \
+  "$(grep -qF -- '--model' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+chk "shipped config → no effort flag on the runner" "absent" \
+  "$(grep -qF 'model_reasoning_effort' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# The reader's documented signal is source=, so the hook must honour it even when
+# the values disagree. A stub reader is the only way to produce that combination:
+# the real one never emits a value under source=default, which is exactly why
+# relying on emptiness instead would be untestable.
+fresh_dir; write_state task 0; mkdir -p reviews
+cat > .claude/fake-reader.sh <<'READER'
+#!/bin/sh
+printf 'model=should-not-appear\neffort=high\nwriter=\nsource=default\n'
+READER
+chmod +x .claude/fake-reader.sh
+SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
+chk "source=default → values are ignored, whatever they say" "absent" \
+  "$(grep -qF -- 'should-not-appear' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+chk "source=default → no effort flag either" "absent" \
+  "$(grep -qF 'model_reasoning_effort' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# And the same stub with source=config must be honoured, so the check above
+# cannot pass by ignoring the reader altogether.
+fresh_dir; write_state task 0; mkdir -p reviews
+cat > .claude/fake-reader.sh <<'READER'
+#!/bin/sh
+printf 'model=stub-model\neffort=\nwriter=\nsource=config\n'
+READER
+chmod +x .claude/fake-reader.sh
+SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
+chk "source=config → the value is used" "--model 'stub-model'" "$(cat .claude/spar-run-reviewer.sh)"
+
+# The claude branch has its own flag spelling (--effort, not -c …), and nothing
+# above exercises it: the codex checks would pass with the claude branch missing
+# or misspelled entirely. Driven through the sweep, which is the claude-family
+# path in a cross-model tree.
+in_review 3
+printf 'author: claude\n' >> .claude/spar.local.md
+printf '[reviewer.claude]\nmodel = "claude-sonnet-5"\n[effort]\nladder = [[0, "xhigh"]]\n' > .claude/spar-cfg.toml
+printf 'STATUS: CONVERGED\n' > reviews/spar-20260721-120000-abc123-r3.md
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "claude effort becomes --effort, not -c" "--effort 'xhigh'" \
+  "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+chk "claude branch does not borrow the codex spelling" "absent" \
+  "$(grep -qF 'model_reasoning_effort' .claude/spar-run-sweep.sh 2>/dev/null && echo present || echo absent)"
+
+# With no config the runner is what it was before Phase 7.
+fresh_dir; write_state task 0; mkdir -p reviews
+SPAR_CONFIG_FILE=/nonexistent run_hook >/dev/null
+chk "no config → no model flag" "absent" \
+  "$(grep -qF -- '--model' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+chk "no config → no effort flag" "absent" \
+  "$(grep -qF 'model_reasoning_effort' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# An unreadable config must not stop a review being dispatched.
+fresh_dir; write_state task 0; mkdir -p reviews
+printf 'not = = toml\n' > .claude/spar-cfg.toml
+OUT=$(SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook)
+chk "broken config → the round is still dispatched" 'spar-run-reviewer.sh' "$OUT"
+chk "broken config → no half-written flag" "absent" \
+  "$(grep -qF -- '--model ' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# A model whose name carries shell metacharacters must not become shell.
+fresh_dir; write_state task 0; mkdir -p reviews
+printf '[reviewer.codex]\nmodel = "a$(touch pwned)b"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+if bash -n .claude/spar-run-reviewer.sh 2>/dev/null; then SYN=ok; else SYN=unparseable; fi
+chk "metacharacter model → runner is valid shell" "ok" "$SYN"
+chk "metacharacter model → the value is quoted, not interpolated" \
+  "--model 'a\$(touch pwned)b'" "$(cat .claude/spar-run-reviewer.sh)"
+bash .claude/spar-run-reviewer.sh >/dev/null 2>&1 || true
+chk "metacharacter model → nothing executed" "absent" \
+  "$([ -e pwned ] && echo present || echo absent)"
+
+# ── Phase 7 Task 3: the fix brief ──────────────────────────────────────────
+# The hook recommends and briefs; it never dispatches. Every check below is
+# about the CONTENT of a file the author reads, not about anything executed.
+
+# A mechanical finding with a file:line becomes a delegable brief.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] off by one\n- file: a.py:10\n- problem: loop stops early\n- suggestion: use n + 1\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+OUT=$(SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook)
+chk "brief written for a delegable finding" "present" "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+chk "brief carries the location" "a.py:10" "$(cat .claude/spar-fix-brief.md)"
+chk "brief carries the basis, not just the title" "loop stops early" "$(cat .claude/spar-fix-brief.md)"
+chk "brief carries the fix direction" "use n + 1" "$(cat .claude/spar-fix-brief.md)"
+chk "brief names the recommended tier" "cheap-tier" "$(cat .claude/spar-fix-brief.md)"
+chk "the block message points at the brief" "spar-fix-brief.md" "$OUT"
+chk "the hook does not claim to have dispatched anything" "absent" \
+  "$(printf '%s' "$OUT" | grep -qF 'dispatched the writer' && echo present || echo absent)"
+
+# A design finding is judgment and is never delegated.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:1\n- problem: big\n- suggestion: split\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "design findings are never delegated → nothing to brief" "absent" \
+  "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+
+# An incomplete finding cannot be handed to a fresh agent: a section that says
+# "see the review file" is a pointer, not a self-contained brief. All three
+# fields are required, so all three are tested separately — one fixture covering
+# only the missing location would pass with the other two guards deleted.
+for missing in location basis direction; do
+  case "$missing" in
+    location)  body='- problem: p\n- suggestion: s\n' ;;
+    basis)     body='- file: a.py:10\n- suggestion: s\n' ;;
+    direction) body='- file: a.py:10\n- problem: p\n' ;;
+  esac
+  in_review 1
+  printf "STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] partial finding\n${body}" > "$RF1"
+  printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+  SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+  chk "a finding missing its $missing is not delegated" "absent" \
+    "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+done
+
+# ...and when something else in the round IS delegable, the brief exists and has
+# to say why the incomplete one was left out.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] partial\n- file: a.py:10\n- suggestion: s\n\n### F1-2 [MECHANICAL] complete\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "the complete finding is delegated" "b.py:3" "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+chk "the incomplete one is not" "absent" \
+  "$(awk '/stays with the session model/{exit} /a.py:10/{f=1} END{print (f?"present":"absent")}' .claude/spar-fix-brief.md 2>/dev/null || echo absent)"
+chk "and the brief names what was missing" "basis missing" \
+  "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+chk "no section ever points back at the review file" "absent" \
+  "$(grep -qF "see reviews/" .claude/spar-fix-brief.md 2>/dev/null && echo present || echo absent)"
+
+# No writer tier configured → no brief, no behaviour change.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+OUT=$(SPAR_CONFIG_FILE=/nonexistent run_hook)
+chk "no tier configured → no brief" "absent" "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+chk "no tier configured → the block message mentions no brief" "absent" \
+  "$(printf '%s' "$OUT" | grep -qF 'spar-fix-brief.md' && echo present || echo absent)"
+
+# Escalation: a finding whose fingerprint the previous round already raised is
+# the session model's to fix, not a cheap writer's. Round 2 carries one repeat
+# and one new finding, so the brief exists and the exclusion is visible in it —
+# with only the repeat there would be no brief and the check would pass for the
+# wrong reason.
+in_review 1
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] a.py off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf -- '### F1-1: FIXED — did it\n' > "$RP1"
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null   # advances to round 2
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] a.py off by one\n- file: a.py:10\n- problem: still wrong\n- suggestion: s\n\n### F2-2 [MECHANICAL] b.py unrelated\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RFb2"
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "the new finding is delegated" "b.py:3" "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+# Exactly one word out, or "absent" matches a haystack that also says "present".
+chk "the repeat is not delegated" "absent" \
+  "$(awk '/stays with the session model/{exit} /a.py:10/{f=1} END{print (f?"present":"absent")}' .claude/spar-fix-brief.md 2>/dev/null || echo absent)"
+chk "and the brief says why it stays" "stays with the session model" "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+# A repeat may have been REJECTED last round rather than fixed, so "the last fix
+# was wrong" is a claim the hook has not established. The brief states only what
+# it observed.
+chk "the brief claims nothing it has not established" "absent" \
+  "$(grep -qF 'the last fix was wrong' .claude/spar-fix-brief.md 2>/dev/null && echo present || echo absent)"
+
+# The brief is a loop artifact: a run that ends leaves none behind.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "brief exists before the run ends" "present" \
+  "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+printf -- '### F1-1: FIXED — did it\n' > "$RP1"
+printf 'STATUS: CONVERGED\n' > "$RFb2"
+# sweep_done, so convergence ends the run here instead of dispatching a sweep —
+# this test is about teardown, not about the sweep path.
+sed -i '' 's/^sweep_done: false/sweep_done: true/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^sweep_done: false/sweep_done: true/' .claude/spar.local.md
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null   # folds round 1
+chk "the run has not ended yet" "present" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null   # reads CONVERGED, cleans up
+chk "the run really ended" "absent" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+chk "cleanup removes the brief" "absent" \
+  "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+
+# Cancellation is a different teardown path with a different owner. The hook's
+# cleanup() is one list; the two cancel commands are two more, maintained by hand
+# in separate files, and a run cancelled mid-round is exactly when a brief is on
+# disk. So run the real command out of each document rather than trusting that
+# someone remembered to edit it.
+cancel_block() { # $1 = document → its first fenced bash block
+  awk '/^```bash$/{f=1; next} /^```$/{if (f) exit} f' "$1"
+}
+for doc in plugins/spar/commands/cancel.md adapters/codex/skills/spar-cancel/SKILL.md; do
+  fresh_dir; mkdir -p reviews
+  write_state review 1
+  printf 'a brief\n' > .claude/spar-fix-brief.md
+  BLOCK="$(cancel_block "$ROOT/$doc")"
+  chk "$doc has a runnable cancel block" "present" \
+    "$(printf '%s' "$BLOCK" | grep -q 'rm -f' && echo present || echo absent)"
+  # env -u, not just "we did not set them": this suite exports
+  # CLAUDE_PLUGIN_ROOT at the top, so a plain `| bash` would inherit it and
+  # cancel.md would reach the real outcome writer. The outcome writer is
+  # best-effort in both documents and teardown must not depend on it, so both
+  # blocks run with it genuinely unreachable.
+  printf '%s' "$BLOCK" | env -u CLAUDE_PLUGIN_ROOT -u SPAR_PLUGIN_ROOT bash >/dev/null 2>&1
+  chk "$doc removes the fix brief" "absent" \
+    "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+  chk "$doc still removes the state file" "absent" \
+    "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+  # Proves the premise of the env -u above rather than asserting it in a comment:
+  # with the plugin root reachable, cancel.md's outcome writer runs and leaves
+  # reviews/spar-<id>-outcome.md behind, and this check would fail.
+  chk "$doc tore down with the outcome writer unreachable" "absent" \
+    "$(ls reviews/spar-*-outcome.md >/dev/null 2>&1 && echo present || echo absent)"
+done
+
+# The three lists must not drift apart again. Every .claude artifact the hook's
+# own cleanup() removes has to be named in both cancel documents.
+CLEAN_PATHS=""
+for v in $(awk '/^cleanup\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$HOOK" \
+             | grep -o '\$[A-Z_][A-Z_]*' | tr -d '$' | sort -u); do
+  pth=$(grep -m1 "^${v}=\"\.claude/" "$HOOK" | sed 's/^[A-Z_]*="//; s/"$//')
+  [ -n "$pth" ] && CLEAN_PATHS="$CLEAN_PATHS $pth"
+done
+chk "the cleanup list resolved to real paths" "yes" \
+  "$([ "$(printf '%s\n' $CLEAN_PATHS | wc -w)" -ge 20 ] && echo yes || echo "only $(printf '%s\n' $CLEAN_PATHS | wc -w)")"
+for doc in plugins/spar/commands/cancel.md adapters/codex/skills/spar-cancel/SKILL.md; do
+  MISSING=""
+  for pth in $CLEAN_PATHS; do
+    grep -qF -- "$pth" "$ROOT/$doc" || MISSING="$MISSING $pth"
+  done
+  chk "$doc names every artifact cleanup() removes" "none" \
+    "$([ -z "$MISSING" ] && echo none || echo "missing:$MISSING")"
+done
+
+
+# A brief describes one round. Advancing a round must tear it down: the author's
+# protocol runs the next reviewer and handles its findings without stopping in
+# between, so a leftover brief is what they would read exactly where the
+# instructions say to trust it.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "round 1 brief written" "present" \
+  "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+chk "the brief names the round it belongs to" "# Fix brief — round 1" \
+  "$(cat .claude/spar-fix-brief.md)"
+printf -- '### F1-1: FIXED — did it\n' > "$RP1"
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null   # advances to round 2
+chk "advancing a round removes the stale brief" "absent" \
+  "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+
+# The brief is the one generated prompt aimed at an agent with edit rights and no
+# loop context, and its content is reviewer output derived from repository text.
+# Every other generated prompt says so; this one has to as well.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "the brief frames reviewer text as untrusted data" "untrusted data" \
+  "$(cat .claude/spar-fix-brief.md)"
+chk "and scopes the writer to the named location" "not as instructions to act anywhere else" \
+  "$(cat .claude/spar-fix-brief.md)"
+
+
+# A repeat raised under a NEW wording has no alias until the matcher runs. If the
+# matcher ran after the response — where it used to — the brief would already
+# have handed that disputed finding to a cheap writer. Nothing pinned the order
+# before this fixture, which is why moving it broke no test.
+fresh_dir; write_state review 1; mkdir -p reviews
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] a.py off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf -- '### F1-1: FIXED — did it\n' > "$RP1"
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null   # fold r1, advance
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] a.py stops one short\n- file: a.py:10\n- problem: still wrong\n- suggestion: s\n\n### F2-2 [MECHANICAL] b.py unrelated\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RFb2"
+OUT=$(SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook)
+chk "a reworded repeat dispatches the matcher before any fixing" 'run-matcher' "$OUT"
+chk "and no brief exists while the verdict is unknown" "absent" \
+  "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
+printf 'SAME N1 E1\n' > "$(cat .claude/spar-matcher-pending)"
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "after SAME, the genuinely new finding is still delegated" "b.py:3" \
+  "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+chk "but the reworded repeat is not" "absent" \
+  "$(awk '/stays with the session model/{exit} /a.py:10/{f=1} END{print (f?"present":"absent")}' .claude/spar-fix-brief.md 2>/dev/null || echo absent)"
+
+# file: with no line number is nowhere to send a fresh agent.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] bare path\n- file: a.py\n- problem: p\n- suggestion: s\n\n### F1-2 [MECHANICAL] located\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "a bare path is not delegated" "absent" \
+  "$(awk '/stays with the session model/{exit} /a\.py/{f=1} END{print (f?"present":"absent")}' .claude/spar-fix-brief.md 2>/dev/null || echo absent)"
+chk "and the brief says the line number is what was missing" "line number missing" \
+  "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+chk "a located finding in the same round is unaffected" "b.py:3" \
+  "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+
+# Two missing fields at once: the list is joined, and a multi-word term must not
+# be split by the joiner — "line, number" is what a naive space-join produces.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] bare path, no basis\n- file: a.py\n- suggestion: s\n\n### F1-2 [MECHANICAL] located\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RF1"
+printf '[writer.claude]\ntier = "cheap-tier"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "two missing fields read as a list" "line number, basis missing" \
+  "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
+
+
+# ── A failed reviewer CLI must not publish a review ─────────────────────────
+# claude reports a rejected --model on STDOUT and exits 1, so the runner's
+# redirect captures the error prose. A size check alone then publishes it as the
+# round's review: the reviewer is dead and the loop reads a "result".
+fake_cli() { # $1=name $2=body → a CLI earlier on PATH than the suite's stubs
+  FAKE_BIN=$(mktemp -d)
+  printf '%s\n' '#!/bin/sh' "$2" > "$FAKE_BIN/$1"
+  chmod +x "$FAKE_BIN/$1"
+}
+
+for fam in claude codex; do
+  fresh_dir; write_state task 0; mkdir -p reviews
+  sed -i '' "s/^reviewer: codex/reviewer: $fam/" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^reviewer: codex/reviewer: $fam/" .claude/spar.local.md
+  no_skip
+  printf 'a\nb\nc\n' > f.txt
+  run_hook >/dev/null
+  chk "$fam runner generated" "present" \
+    "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
+  # Both families are given a CLI that FAILS while still producing bytes — the
+  # only shape a size check cannot tell apart from a real review. claude writes
+  # them to stdout; codex writes the file it was told to write.
+  if [ "$fam" = claude ]; then
+    fake_cli claude "printf 'There is an issue with the selected model.\n'; exit 1"
+  else
+    fake_cli codex 'for a in "$@"; do case "$prev" in --output-last-message) printf "partial\n" > "$a";; esac; prev="$a"; done; exit 1'
+  fi
+  ( PATH="$FAKE_BIN:$PATH"; bash .claude/spar-run-reviewer.sh >/dev/null 2>&1 )
+  RC=$?
+  rm -rf "$FAKE_BIN"
+  chk "$fam: a failing CLI makes the runner fail" "nonzero" \
+    "$([ "$RC" -ne 0 ] && echo nonzero || echo "zero")"
+  chk "$fam: and no review file is published" "absent" \
+    "$(ls reviews/spar-*-r1.md >/dev/null 2>&1 && echo present || echo absent)"
+done
+
 
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
