@@ -79,6 +79,41 @@ OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 40)
 chk_absent "non-string model is dropped" "model=42" "$OUT"
 chk "bad ladder → no effort emitted" "effort=" "$OUT"
 
+# 5b. an effort the CLIs do not know is dropped, not passed through.
+# claude accepts `--effort banana` with exit 0, warns on stderr and runs at its
+# DEFAULT effort — indistinguishable from a working ladder unless someone reads
+# the terminal. A typo here must therefore produce no flag at all.
+fresh
+cat > cfg.toml <<'TOML'
+[effort]
+ladder = [[0, "hgih"]]
+TOML
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 40)
+chk_absent "a misspelt effort is not passed through" "hgih" "$OUT"
+WANT_NO_EFFORT="$(printf 'model=\neffort=\nwriter=\nsource=config')"
+chk "a misspelt effort emits no effort at all" "identical" \
+  "$([ "$OUT" = "$WANT_NO_EFFORT" ] && echo identical || printf 'differs: %s' "$OUT")"
+
+# Every documented word still works, or the guard is a blocklist by accident.
+fresh
+for lvl in low medium high xhigh max; do
+  printf '[effort]\nladder = [[0, "%s"]]\n' "$lvl" > cfg.toml
+  OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 40)
+  chk "effort $lvl survives the whitelist" "effort=$lvl" "$OUT"
+done
+
+# A valid rung below an invalid one still wins on its own terms: the guard drops
+# the value, it does not fall back to a different rung.
+fresh
+cat > cfg.toml <<'TOML'
+[effort]
+ladder = [[0, "low"], [10, "enormous"]]
+TOML
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 5)
+chk "a rung below the bad one is unaffected" "effort=low" "$OUT"
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 50)
+chk_absent "and the bad rung emits nothing rather than the lower one" "effort=low" "$OUT"
+
 # 6. an unknown family is not an error — and must not pick up a real config.
 # Tested against a VALID config: with a nonexistent one the check passes whether
 # or not the family is validated, which is how this was missed the first time.

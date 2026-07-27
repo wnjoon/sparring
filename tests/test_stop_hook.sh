@@ -2166,5 +2166,42 @@ chk "two missing fields read as a list" "line number, basis missing" \
   "$(cat .claude/spar-fix-brief.md 2>/dev/null)"
 
 
+# ── A failed reviewer CLI must not publish a review ─────────────────────────
+# claude reports a rejected --model on STDOUT and exits 1, so the runner's
+# redirect captures the error prose. A size check alone then publishes it as the
+# round's review: the reviewer is dead and the loop reads a "result".
+fake_cli() { # $1=name $2=body → a CLI earlier on PATH than the suite's stubs
+  FAKE_BIN=$(mktemp -d)
+  printf '%s\n' '#!/bin/sh' "$2" > "$FAKE_BIN/$1"
+  chmod +x "$FAKE_BIN/$1"
+}
+
+for fam in claude codex; do
+  fresh_dir; write_state task 0; mkdir -p reviews
+  sed -i '' "s/^reviewer: codex/reviewer: $fam/" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^reviewer: codex/reviewer: $fam/" .claude/spar.local.md
+  no_skip
+  printf 'a\nb\nc\n' > f.txt
+  run_hook >/dev/null
+  chk "$fam runner generated" "present" \
+    "$([ -f .claude/spar-run-reviewer.sh ] && echo present || echo absent)"
+  # Both families are given a CLI that FAILS while still producing bytes — the
+  # only shape a size check cannot tell apart from a real review. claude writes
+  # them to stdout; codex writes the file it was told to write.
+  if [ "$fam" = claude ]; then
+    fake_cli claude "printf 'There is an issue with the selected model.\n'; exit 1"
+  else
+    fake_cli codex 'for a in "$@"; do case "$prev" in --output-last-message) printf "partial\n" > "$a";; esac; prev="$a"; done; exit 1'
+  fi
+  ( PATH="$FAKE_BIN:$PATH"; bash .claude/spar-run-reviewer.sh >/dev/null 2>&1 )
+  RC=$?
+  rm -rf "$FAKE_BIN"
+  chk "$fam: a failing CLI makes the runner fail" "nonzero" \
+    "$([ "$RC" -ne 0 ] && echo nonzero || echo "zero")"
+  chk "$fam: and no review file is published" "absent" \
+    "$(ls reviews/spar-*-r1.md >/dev/null 2>&1 && echo present || echo absent)"
+done
+
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

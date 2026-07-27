@@ -20,5 +20,7 @@
 # Reviewer reasoning effort by changed-line count: [threshold, level] pairs,
 # lowest first. A diff at or above a threshold takes that level.
 # claude accepts low|medium|high|xhigh|max; codex takes the same words through
-# -c model_reasoning_effort=.
+# -c model_reasoning_effort=. Anything else is dropped and no effort flag is
+# emitted — claude would otherwise warn on stderr and quietly run at its default,
+# which looks identical to a working ladder.
 # ladder = [[0, "low"], [200, "medium"], [1000, "high"]]

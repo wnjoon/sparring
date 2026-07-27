@@ -80,6 +80,15 @@ if isinstance(ladder, list):
     if picked:
         effort = picked[1]
 
+# The two CLIs disagree on what an unrecognised effort does, and the softer of the
+# two is the dangerous one: `claude --effort banana` warns on stderr and runs at
+# the DEFAULT effort with exit 0, so a typo in config.toml silently undoes the one
+# thing this setting exists to do. (codex rejects the value and the round fails
+# loudly, which at least gets noticed.) Neither is worth relying on, so an effort
+# that is not one of the documented words is dropped here and no flag is emitted.
+if effort not in ("low", "medium", "high", "xhigh", "max"):
+    effort = ""
+
 # A newline in any value would forge an extra key=value line in the caller's
 # read loop, so the whole result is refused rather than partially emitted.
 vals = (("model", s("reviewer", "model")), ("effort", effort),

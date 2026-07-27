@@ -707,8 +707,14 @@ if [ -e "${out}" ] || [ -L "${out}" ]; then
   echo "invalid pre-existing reviewer artifact" >&2
   exit 1
 fi
-{ cat "${pf}"; echo; echo '--- Changes under review ---'; cat "${DIFF_SURFACE_FILE}"; } | \\
-  claude -p${ecoflags} --safe-mode --tools Read Grep Glob > "\$tmp"
+# The exit status, not just the file size. claude reports a rejected --model on
+# STDOUT and exits 1, so the redirect captures the error prose and a size check
+# alone would publish it as a review — a dead reviewer that produced "output".
+if ! { cat "${pf}"; echo; echo '--- Changes under review ---'; cat "${DIFF_SURFACE_FILE}"; } | \\
+  claude -p${ecoflags} --safe-mode --tools Read Grep Glob > "\$tmp"; then
+  echo "reviewer CLI exited non-zero" >&2
+  exit 1
+fi
 [ -s "\$tmp" ] || exit 1
 ln "\$tmp" "${out}" || exit 1
 EOF
@@ -739,8 +745,11 @@ if [ -e "${out}" ] || [ -L "${out}" ]; then
   echo "invalid pre-existing reviewer artifact" >&2
   exit 1
 fi
-codex exec${ecoflags} --sandbox read-only --skip-git-repo-check \\
-  --output-last-message "\$tmp" < "${pf}"
+if ! codex exec${ecoflags} --sandbox read-only --skip-git-repo-check \\
+  --output-last-message "\$tmp" < "${pf}"; then
+  echo "reviewer CLI exited non-zero" >&2
+  exit 1
+fi
 [ -s "\$tmp" ] || exit 1
 ln "\$tmp" "${out}" || exit 1
 EOF
@@ -816,7 +825,10 @@ while IFS= read -r -d '' path; do
 done < "\$manifest"
 
 { cat "\$source_root/${SWEEP_PROMPT_FILE}"; echo; echo '--- Changes under sweep ---'; cat "\$source_root/${DIFF_SURFACE_FILE}"; } | \\
-  ${sweep_invoke}
+  if ! ${sweep_invoke}; then
+  echo "sweep CLI exited non-zero" >&2
+  exit 1
+fi
 [ -s "\$tmp" ] || exit 1
 ln "\$tmp" "${out}" || exit 1
 EOF

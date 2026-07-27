@@ -434,6 +434,34 @@ commented out, so an install that sets nothing behaves exactly as it did before
 Phase 7 — the first cut shipped an active ladder, which silently changed every
 run's flags and broke two unrelated tests.
 
+**How the two CLIs fail, measured rather than assumed.** Both reject an unknown
+flag loudly and produce no output, so a renamed flag ends the round instead of
+degrading it. Two cases do not behave that way, and both were fixed here:
+
+- `claude --effort <nonsense>` warns on stderr and runs at the **default** effort
+  with exit 0. A typo in `config.toml` would silently undo the only thing the
+  ladder does. `spar-config.sh` now drops any effort outside
+  `low|medium|high|xhigh|max` and emits no flag. codex is stricter — it rejects
+  the value and the round fails — but neither behaviour is worth depending on.
+- `codex -c <unknown_key>=…` is accepted silently. That is the version-drift
+  path: if `model_reasoning_effort` is ever renamed, the flag becomes a no-op and
+  runs at default effort with nothing to notice. Not defensible from inside the
+  plugin; recorded so the next person knows where it would show up.
+
+And one defect the measurement turned up. `claude` reports a rejected `--model`
+on **stdout** and exits 1, while the generated runners checked only that the
+output file was non-empty. The error prose was therefore published as the round's
+review — a dead reviewer that produced a "result". Every runner (reviewer, judge,
+matcher, and both families' sweep) now checks the CLI's exit status before
+publishing. codex never hit this because it writes nothing when it fails, which
+is exactly why one family's behaviour is not evidence about the other's.
+
+Deliberately not added: recording or pinning CLI versions. Nothing in the repo
+did that for either family, and doing it for one because its binary happened to
+break would imply a guarantee that does not exist. The failure mode that matters
+is a flag whose *meaning* changes while its name stays — no version check catches
+that, and the live release gate is what does.
+
 What this phase cannot verify: whether a cheaper writer tier actually produces
 fixes that survive the next round. Only dogfooding answers it, and the loop is
 the instrument — if delegated fixes start causing the following round's findings,
