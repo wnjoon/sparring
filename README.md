@@ -175,6 +175,10 @@ bench/                   effect benchmark (living report + tasks/oracles)
   builds an isolated Codex home with a planted bug and prints what to do, and
   `… check` judges the artifacts afterwards. It does not make Phase 6 done — that
   needs the run.
+- A change to a surface both seats share — the Stop hook's output or exit contract,
+  the state file, the runner scripts — is exercised in a live session of each seat
+  before the release that carries it. Green suites are not enough: they assert what
+  the hook prints, not what each harness does with it.
 - The plan is the spec: [docs/superpowers/plans/](docs/superpowers/plans/). This README is updated in the same change whenever implementation diverges from it.
 - Decisions agreed for phases not yet implemented live in [docs/design-decisions.md](docs/design-decisions.md) — each phase's plan document starts from its section there.
 

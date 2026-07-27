@@ -453,6 +453,27 @@ from this future-decisions document after landing.
     reviewer blind to the earlier rounds — a restart, not a resume. The cap
     message therefore tells the author what was never re-reviewed and explicitly
     warns against the commit-and-re-run path.
+- **Release gate: whatever the change touches, both seats, live.** Some surfaces
+  are shared by the Claude-hosted and Codex-hosted seats — the Stop hook's output
+  and exit contract, the state file's shape, the runner scripts. A change to one
+  of those is a change to both, and it must be exercised in a live session of
+  every seat it touches before the release that carries it, not only the seat
+  that motivated the change.
+  - The rule exists because v0.8.0 broke it. That release changed the Stop hook's
+    release output from `{"decision":"approve"}` to `{}` — a fix for Codex, which
+    rejects `approve` — and shipped after a live Codex run and a green test suite,
+    with the Claude side unexercised. It was checked afterwards and was fine:
+    `claude` only ever compares `decision === "block"`, so anything else reads as
+    allow. Fine by luck, not by process. The same change could as easily have left
+    every Claude session unable to stop.
+  - Tests do not substitute. All 21 suites were green on the broken-for-Codex
+    version too, because they assert what the hook prints, not what the harness
+    reading it does with that. The seats' acceptance rules are the other side of a
+    boundary the suite cannot see across.
+  - Not every change needs this. A fix confined to one adapter, or to prompts,
+    docs or tests, does not touch the shared contract. The trigger is the surface,
+    not the size.
+
 - **Simplicity guard.** Invariants stay at 4. Every absorbed idea lands as
   hook code + tests or a small prompt change — never as prose rules the
   model must remember. When a new rule seems needed, first ask "can structure
