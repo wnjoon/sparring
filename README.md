@@ -139,6 +139,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 6 | Codex-hosted adapter: mirror the seats (Codex authors, `claude -p` reviews) and reuse the same Stop-hook gatekeeper via Codex's own `Stop` hook | ✅ done |
 | 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
 | 8 | `/spar:ready` + `/spar:fight` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) fight loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | ✅ done |
+| 9 | Plan review: one blind pass over a `/spar:ready` plan before it is fought — do its claims about the code hold, is every step satisfiable, does it cover the spec | planned |
 
 ## Install
 

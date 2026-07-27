@@ -387,6 +387,45 @@ from this future-decisions document after landing.
   security / requirement fit) and a cross-family sweep when the other CLI
   exists.
 
+## Phase 9 — plan review (not yet designed)
+
+The plan is the one artifact in this system that no independent pass ever reads.
+`/spar:ready` stops so a human can review it, and that checkpoint was deliberate;
+a *machine* review was not considered rather than considered and rejected — Phase
+8's design says nothing about it.
+
+The gap is real and cost is measurable. Two plan defects in one day, both facts
+about the code rather than matters of taste, and both invisible to a human
+reading a long plan against a longer hook:
+
+- `2026-07-26-phase6-remaining.md` gave Task 3 an unsatisfiable placement
+  instruction. It was followed, the round cap was reached, and the plan had to be
+  corrected before the task could converge — a full loop spent on a defect that
+  predated the first line of code.
+- `2026-07-27-phase7-model-economics.md` told the implementer to splice flags into
+  "the reviewer, judge, matcher and sweep emitters". There are two emitters, and
+  they branch on different families — the sweep is author-family, so the reviewer's
+  model reaching it would misconfigure a cross-model run silently. Caught before
+  execution only because the plan's factual claims were checked by hand.
+
+That the loop's own premise applies here is the argument: the author never grades
+its own work. A plan is authored work, and today it is graded by its author until
+execution proves otherwise.
+
+**Shape, when it is designed.** One blind pass, not a convergence loop — a plan
+has no tests to converge on, and iterating a document with a model is how plans
+grow rather than improve. The brief is bounded to what a reader with the
+repository can check and a human cannot cheaply: does every claim the plan makes
+about existing code hold; is every step satisfiable as written; does it cover the
+spec; and does anything in a task body collide with the `### ` extractor. Findings
+come back to the author to act on before `/spar:fight`, not to a debate. Cost is
+one reviewer call per plan, against a loop's worth of rounds when a plan is wrong.
+
+**Open questions.** Whether it belongs inside `/spar:ready` (always) or as an
+opt-in flag; whether the reviewer family should be the cross-model one or the
+author's own, given the pass is about facts rather than judgment; and whether a
+plan that fails should block `/spar:fight` or merely warn.
+
 ## Cross-cutting stances
 
 - **Round cap = circuit breaker, not a quality mechanism.** Healthy loops end
