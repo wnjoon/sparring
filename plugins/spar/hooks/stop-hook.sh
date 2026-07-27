@@ -59,7 +59,7 @@ INTENT_HARVESTER="${PLUGIN_ROOT}/commands/spar-harvest-intent.sh"
 INTENT_FILE=".claude/spar-intent-pointers.txt"
 QUEUE_WRITER="${PLUGIN_ROOT}/commands/spar-queue-pending.sh"
 REPORT_GEN="${PLUGIN_ROOT}/commands/spar-report.sh"
-CONFIG_READER="${PLUGIN_ROOT}/commands/spar-config.sh"
+CONFIG_READER="${SPAR_CONFIG_READER:-${PLUGIN_ROOT}/commands/spar-config.sh}"
 SWEEP_RUNNER=".claude/spar-run-sweep.sh"
 SWEEP_PROMPT_FILE=".claude/spar-sweep-prompt.txt"
 SWEEP_RETRY_FILE=".claude/spar-sweep-retries"
@@ -596,9 +596,6 @@ deactivate_state() {
     && mv "$tmp" "$STATE_FILE"
 }
 
-# Emit a reviewer/judge/matcher runner for the resolved family.
-# codex: runs read-only in its own sandbox and inspects the diff itself.
-# claude: read-only tools + --safe-mode (isolated), so the hook provides the diff.
 # Economics flags for one family, as a string spliced into a generated runner.
 # Empty unless a config was actually read, which is what keeps a config-less
 # install byte-identical to before Phase 7 — an empty --model would be worse than
@@ -610,19 +607,52 @@ deactivate_state() {
 # in a cross-model run, hand one CLI the other's flags.
 shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
+# Measured from git, not from $DIFF_SURFACE_FILE. That file is written only in
+# emit_runner's claude branch, so a codex run never has one, the first dispatch of
+# any run has none yet, and a later dispatch would read the PREVIOUS round's
+# surface. Every one of those yields a number unrelated to the change being
+# reviewed, and the ladder would pick a tier from it.
+#
+# numstat, not `| wc -l`: both sides of this contract say "changed lines", and raw
+# diff output also counts context, file headers and hunk markers — two to three
+# times the real number on a multi-file edit, so a configured threshold of 200
+# would fire at around 80 changed lines. The guard drops binary rows, which
+# numstat reports as "-".
+#
+# Untracked files count too. The review surface handed to both families is the
+# diff PLUS `git status --untracked-files=all`, so a task whose whole deliverable
+# is new files has a real review surface and a tracked-diff count of zero — the
+# ladder would hand the largest reviews the cheapest tier. --exclude-standard is
+# what keeps the loop's own artifacts out: setup adds `reviews/spar-*` and
+# `.claude/spar*` to .git/info/exclude, the same list the surface listing honours.
 diff_line_count() {
-  [ -f "$DIFF_SURFACE_FILE" ] || { printf '0'; return 0; }
-  wc -l < "$DIFF_SURFACE_FILE" | tr -d ' '
+  local tracked untracked=0 f
+  tracked=$(git diff --numstat "${BASE}" 2>/dev/null \
+    | awk '{ if ($1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/) n += $1 + $2 } END { print n+0 }')
+  while IFS= read -r -d '' f; do
+    # Regular files only: a symlink's target is not part of the review, and a
+    # fifo would hang the read.
+    { [ -f "$f" ] && [ ! -L "$f" ]; } || continue
+    # awk's NR, not `wc -l`: wc counts newline characters, so a file whose last
+    # line is unterminated loses that line and a one-line file with no trailing
+    # newline counts zero. numstat calls that same line 1 on the tracked side, and
+    # the two halves of this number have to agree.
+    untracked=$(( untracked + $(awk 'END { print NR+0 }' "$f" 2>/dev/null || echo 0) ))
+  done < <(git ls-files --others --exclude-standard -z 2>/dev/null)
+  printf '%s\n' "$(( ${tracked:-0} + untracked ))"
 }
 
 economics_flags() { # $1=family → prints flags, or nothing
-  local fam="$1" k v model="" effort=""
+  local fam="$1" k v model="" effort="" src=""
   [ -x "$CONFIG_READER" ] || return 0
   while IFS='=' read -r k v; do
-    case "$k" in model) model="$v" ;; effort) effort="$v" ;; esac
+    case "$k" in model) model="$v" ;; effort) effort="$v" ;; source) src="$v" ;; esac
   done < <("$CONFIG_READER" "$fam" "$(diff_line_count)" 2>/dev/null)
-  # No separate "was it configured?" test: the reader returns empty values for
-  # every fallback, so an empty value IS the signal, and both suites pin that.
+  # source= is the reader's documented signal, so it is what this honours. Reading
+  # "the values happen to be empty" instead would make this correct only for as
+  # long as the reader keeps that undocumented property — a coupling that holds
+  # today and would break silently the day a fallback grows a value.
+  [ "$src" = config ] || return 0
   case "$fam" in
     claude)
       [ -n "$model" ] && printf ' --model %s' "$(shq "$model")"
@@ -636,6 +666,9 @@ economics_flags() { # $1=family → prints flags, or nothing
   return 0
 }
 
+# Emit a reviewer/judge/matcher runner for the resolved family.
+# codex: runs read-only in its own sandbox and inspects the diff itself.
+# claude: read-only tools + --safe-mode (isolated), so the hook provides the diff.
 emit_runner() { # $1=runner_path  $2=prompt_file  $3=out_file
   local runner="$1" pf="$2" out="$3"
   local ecoflags; ecoflags="$(economics_flags "$REVIEWER")"

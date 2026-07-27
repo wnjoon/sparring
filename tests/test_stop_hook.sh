@@ -35,7 +35,12 @@ chk_file() { # $1=desc $2=path
   else echo "FAIL: $1 ($2 missing)"; FAIL=$((FAIL+1)); fi
 }
 
-fresh_dir() { d=$(mktemp -d); cd "$d" || exit 1; git init -q; mkdir -p .claude; }
+# The excludes match what /spar:fight's setup writes. Without them a test tree's
+# own state files show up as untracked, which real runs never see — and the
+# effort ladder, which sizes the untracked half of the review surface, would be
+# measuring the harness.
+fresh_dir() { d=$(mktemp -d); cd "$d" || exit 1; git init -q; mkdir -p .claude
+  printf 'reviews/spar-*\n.claude/spar*\n' >> "$(git rev-parse --git-common-dir)/info/exclude"; }
 
 write_state() { # $1=phase $2=round
   cat > .claude/spar.local.md <<EOF
@@ -54,6 +59,23 @@ sweep_result: not-run
 Add a fizzbuzz function with tests
 EOF
 }
+
+# These effort-ladder fixtures are deliberately tiny, which is exactly what the
+# heuristic small-change skip ends before any runner is written. include_dirty is
+# the supported switch for that skip and changes nothing about `git diff $BASE`,
+# so it isolates the fixture to the thing under test. Before untracked files were
+# counted, the fixtures' own config file happened to defeat the skip — an
+# accident, not a guarantee.
+no_skip() {
+  sed -i '' 's/^reviewer: codex$/reviewer: codex\ninclude_dirty: true/' .claude/spar.local.md 2>/dev/null \
+    || sed -i 's/^reviewer: codex$/reviewer: codex\ninclude_dirty: true/' .claude/spar.local.md
+}
+
+# Most tests must not read the repository's own shared/config.toml: it is the file
+# README tells users to edit, and a developer uncommenting a model would fail
+# assertions about family resolution with a message pointing at the wrong thing.
+# The one test that DOES exercise the shipped file names it explicitly.
+export SPAR_CONFIG_FILE=/nonexistent
 
 run_hook() { echo '{}' | bash "$HOOK"; }
 
@@ -1679,8 +1701,8 @@ chk "cap message asks what was never re-reviewed" 'never re-reviewed' "$CAPOUT"
 # chk "…" "absent" "$(grep -q … && echo present || echo absent)".
 
 fresh_dir; write_state task 0; mkdir -p reviews
-printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n[effort]\nladder = [[0, "low"]]\n' > .claude/cfg.toml
-SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n[effort]\nladder = [[0, "low"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
 chk "configured model reaches the codex runner" "--model 'gpt-5.6-sol'" "$(cat .claude/spar-run-reviewer.sh)"
 chk "configured effort reaches the codex runner" "model_reasoning_effort='\"low\"'" "$(cat .claude/spar-run-reviewer.sh)"
 
@@ -1688,8 +1710,8 @@ chk "configured effort reaches the codex runner" "model_reasoning_effort='\"low\
 # runner only exists after a stalemate, so this uses the suite's own fixture
 # rather than a round-1 tree where the file would never exist.
 mech_stalemate
-printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n' > .claude/cfg.toml
-SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
 chk "the judge runner carries the same flags" "--model 'gpt-5.6-sol'" \
   "$(cat .claude/spar-run-judge.sh 2>/dev/null)"
 
@@ -1699,15 +1721,186 @@ chk "the judge runner carries the same flags" "--model 'gpt-5.6-sol'" \
 # would pass without proving anything.
 in_review 3
 printf 'author: claude\n' >> .claude/spar.local.md
-printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n[reviewer.claude]\nmodel = "claude-sonnet-5"\n' > .claude/cfg.toml
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n[reviewer.claude]\nmodel = "claude-sonnet-5"\n' > .claude/spar-cfg.toml
 printf 'STATUS: CONVERGED\n' > reviews/spar-20260721-120000-abc123-r3.md
-SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
 chk "the sweep runner was actually generated" "present" \
   "$([ -f .claude/spar-run-sweep.sh ] && echo present || echo absent)"
 chk "the sweep does not take the reviewer's model" "absent" \
   "$(grep -qF 'gpt-5.6-sol' .claude/spar-run-sweep.sh 2>/dev/null && echo present || echo absent)"
 chk "the sweep takes the author's model instead" "--model 'claude-sonnet-5'" \
   "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+
+# The ladder must see the size of THIS change. A real commit and a real edit, with
+# a threshold above zero — every other economics fixture uses [[0, …]], which
+# selects the same tier whatever the count is and so cannot detect a wrong one.
+fresh_dir; mkdir -p reviews
+printf 'one\n' > f.txt
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+BASE_SHA="$(git rev-parse HEAD)"
+write_state task 0
+sed -i '' "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md
+no_skip
+printf 'one\ntwo\nthree\nfour\nfive\n' > f.txt
+printf '[effort]\nladder = [[0, "low"], [1, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "a nonempty change picks the higher rung" "model_reasoning_effort='\"high\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+chk "and not the zero rung" "absent" \
+  "$(grep -qF "model_reasoning_effort='\"low\"'" .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# The unit is CHANGED lines, not diff output lines. A three-line file rewritten
+# whole is 6 changed lines and 11 lines of diff output, so a rung boundary at 8
+# separates the two: counting output would pick the higher rung for a change the
+# documentation calls smaller than the threshold.
+fresh_dir; mkdir -p reviews
+printf 'a\nb\nc\n' > f.txt
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+BASE_SHA="$(git rev-parse HEAD)"
+write_state task 0
+sed -i '' "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md
+no_skip
+printf 'x\ny\nz\n' > f.txt
+printf '[effort]\nladder = [[0, "low"], [8, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "6 changed lines stay below a threshold of 8" "model_reasoning_effort='\"low\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+chk "counting diff output lines instead would have crossed it" "absent" \
+  "$(grep -qF "model_reasoning_effort='\"high\"'" .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# Untracked files are part of the surface both families read, so they are part of
+# the size. A task that only adds files has a zero tracked diff, which is the case
+# where handing it the cheapest tier is most wrong.
+fresh_dir; mkdir -p reviews
+printf 'one\n' > f.txt
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+BASE_SHA="$(git rev-parse HEAD)"
+write_state task 0
+sed -i '' "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md
+no_skip
+# Nothing tracked is touched; the whole change is one new 12-line file.
+printf 'l\nl\nl\nl\nl\nl\nl\nl\nl\nl\nl\nl\n' > added.txt
+printf '[effort]\nladder = [[0, "low"], [8, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "a new untracked file counts toward the rung" "model_reasoning_effort='\"high\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+chk "counting only the tracked diff would have read it as empty" "absent" \
+  "$(grep -qF "model_reasoning_effort='\"low\"'" .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# A file whose last line has no trailing newline still has that line. Eight lines
+# written with seven newlines sits exactly on the rung boundary: counting newline
+# characters gives seven and picks the lower rung, which is also the number git
+# would not agree with — numstat calls an unterminated final line 1 on the tracked
+# side of this same total.
+fresh_dir; mkdir -p reviews
+printf 'one\n' > f.txt
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+BASE_SHA="$(git rev-parse HEAD)"
+write_state task 0
+sed -i '' "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md
+no_skip
+printf 'l\nl\nl\nl\nl\nl\nl\nl' > added.txt   # 8 lines, 7 newlines
+printf '[effort]\nladder = [[0, "low"], [8, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "an unterminated final line still counts" "model_reasoning_effort='\"high\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+chk "counting newline characters would have missed it" "absent" \
+  "$(grep -qF "model_reasoning_effort='\"low\"'" .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# ...but the loop's own artifacts are not. Setup excludes them from the surface
+# listing, and --exclude-standard is what keeps the same files out of the count.
+# A fresh tree: the run above left state behind, and a second dispatch into it
+# would take a different branch and leave the previous runner in place.
+fresh_dir; mkdir -p reviews
+printf 'one\n' > f.txt
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+BASE_SHA="$(git rev-parse HEAD)"
+write_state task 0
+sed -i '' "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md
+no_skip
+# Same 12 lines as the file above, in a path the loop excludes.
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do printf 'noise\n'; done > reviews/spar-x-r1.md
+printf '[effort]\nladder = [[0, "low"], [8, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "an excluded review artifact does not inflate the count" "model_reasoning_effort='\"low\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+
+# An empty change takes the zero rung, so the check above is about the count and
+# not about the ladder always returning its last row.
+fresh_dir; mkdir -p reviews
+printf 'one\n' > f.txt
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+BASE_SHA="$(git rev-parse HEAD)"
+write_state task 0
+sed -i '' "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md 2>/dev/null \
+  || sed -i "s/^base_sha: .*/base_sha: $BASE_SHA/" .claude/spar.local.md
+no_skip
+printf '[effort]\nladder = [[0, "low"], [1, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "no change takes the zero rung" "model_reasoning_effort='\"low\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+
+# The shipped config must add nothing. This is the end-to-end half of the same
+# claim tests/test_config.sh makes about the reader, and it is the only test here
+# that reads the repository's real file.
+fresh_dir; write_state task 0; mkdir -p reviews
+SPAR_CONFIG_FILE="$ROOT/plugins/spar/shared/config.toml" run_hook >/dev/null
+chk "shipped config → no model flag on the runner" "absent" \
+  "$(grep -qF -- '--model' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+chk "shipped config → no effort flag on the runner" "absent" \
+  "$(grep -qF 'model_reasoning_effort' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# The reader's documented signal is source=, so the hook must honour it even when
+# the values disagree. A stub reader is the only way to produce that combination:
+# the real one never emits a value under source=default, which is exactly why
+# relying on emptiness instead would be untestable.
+fresh_dir; write_state task 0; mkdir -p reviews
+cat > .claude/fake-reader.sh <<'READER'
+#!/bin/sh
+printf 'model=should-not-appear\neffort=high\nwriter=\nsource=default\n'
+READER
+chmod +x .claude/fake-reader.sh
+SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
+chk "source=default → values are ignored, whatever they say" "absent" \
+  "$(grep -qF -- 'should-not-appear' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+chk "source=default → no effort flag either" "absent" \
+  "$(grep -qF 'model_reasoning_effort' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+# And the same stub with source=config must be honoured, so the check above
+# cannot pass by ignoring the reader altogether.
+fresh_dir; write_state task 0; mkdir -p reviews
+cat > .claude/fake-reader.sh <<'READER'
+#!/bin/sh
+printf 'model=stub-model\neffort=\nwriter=\nsource=config\n'
+READER
+chmod +x .claude/fake-reader.sh
+SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
+chk "source=config → the value is used" "--model 'stub-model'" "$(cat .claude/spar-run-reviewer.sh)"
+
+# The claude branch has its own flag spelling (--effort, not -c …), and nothing
+# above exercises it: the codex checks would pass with the claude branch missing
+# or misspelled entirely. Driven through the sweep, which is the claude-family
+# path in a cross-model tree.
+in_review 3
+printf 'author: claude\n' >> .claude/spar.local.md
+printf '[reviewer.claude]\nmodel = "claude-sonnet-5"\n[effort]\nladder = [[0, "xhigh"]]\n' > .claude/spar-cfg.toml
+printf 'STATUS: CONVERGED\n' > reviews/spar-20260721-120000-abc123-r3.md
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "claude effort becomes --effort, not -c" "--effort 'xhigh'" \
+  "$(cat .claude/spar-run-sweep.sh 2>/dev/null)"
+chk "claude branch does not borrow the codex spelling" "absent" \
+  "$(grep -qF 'model_reasoning_effort' .claude/spar-run-sweep.sh 2>/dev/null && echo present || echo absent)"
 
 # With no config the runner is what it was before Phase 7.
 fresh_dir; write_state task 0; mkdir -p reviews
@@ -1719,16 +1912,16 @@ chk "no config → no effort flag" "absent" \
 
 # An unreadable config must not stop a review being dispatched.
 fresh_dir; write_state task 0; mkdir -p reviews
-printf 'not = = toml\n' > .claude/cfg.toml
-OUT=$(SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook)
+printf 'not = = toml\n' > .claude/spar-cfg.toml
+OUT=$(SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook)
 chk "broken config → the round is still dispatched" 'spar-run-reviewer.sh' "$OUT"
 chk "broken config → no half-written flag" "absent" \
   "$(grep -qF -- '--model ' .claude/spar-run-reviewer.sh && echo present || echo absent)"
 
 # A model whose name carries shell metacharacters must not become shell.
 fresh_dir; write_state task 0; mkdir -p reviews
-printf '[reviewer.codex]\nmodel = "a$(touch pwned)b"\n' > .claude/cfg.toml
-SPAR_CONFIG_FILE="$PWD/.claude/cfg.toml" run_hook >/dev/null
+printf '[reviewer.codex]\nmodel = "a$(touch pwned)b"\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
 if bash -n .claude/spar-run-reviewer.sh 2>/dev/null; then SYN=ok; else SYN=unparseable; fi
 chk "metacharacter model → runner is valid shell" "ok" "$SYN"
 chk "metacharacter model → the value is quoted, not interpolated" \

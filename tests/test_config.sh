@@ -14,7 +14,7 @@ fresh
 OUT=$(SPAR_CONFIG_FILE=/nonexistent bash "$C" claude 40); RC=$?
 chk "missing config → exit 0" "0" "$RC"
 chk "missing config → says it used defaults" "source=default" "$OUT"
-chk "missing config → still names an effort" "effort=" "$OUT"
+chk "missing config → names no effort" "effort=" "$OUT"
 chk "missing config → writer tier present" "writer=" "$OUT"
 chk_absent "missing config → invents no model" "model=null" "$OUT"
 
@@ -77,7 +77,7 @@ ladder = "not a ladder"
 TOML
 OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 40)
 chk_absent "non-string model is dropped" "model=42" "$OUT"
-chk "bad ladder → default effort still emitted" "effort=" "$OUT"
+chk "bad ladder → no effort emitted" "effort=" "$OUT"
 
 # 6. an unknown family is not an error — and must not pick up a real config.
 # Tested against a VALID config: with a nonexistent one the check passes whether
@@ -92,8 +92,9 @@ TOML
 OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" gemini 40); RC=$?
 chk "unknown family with a valid config → exit 0" "0" "$RC"
 chk "unknown family with a valid config → defaults" "source=default" "$OUT"
-chk "unknown family → does not take the ladder effort" "effort=" "$OUT"
-chk_absent "unknown family → not the ladder's low either" "effort=low" "$OUT"
+WANT_DEFAULT="$(printf 'model=\neffort=\nwriter=\nsource=default')"
+chk "unknown family → the whole default line set, not just some of it" "identical" \
+  "$([ "$OUT" = "$WANT_DEFAULT" ] && echo identical || printf 'differs: %s' "$OUT")"
 chk_absent "unknown family → no model leaks from another family" "claude-sonnet-5" "$OUT"
 OUT=$(SPAR_CONFIG_FILE=/nonexistent bash "$C" gemini 40)
 chk "unknown family with no config → defaults too" "source=default" "$OUT"
@@ -115,10 +116,11 @@ chk "shipped config exists" "present" "$([ -f "$CFG" ] && echo present || echo a
 OUT=$(SPAR_CONFIG_FILE="$CFG" bash "$C" claude 100)
 chk "shipped config parses" "source=" "$OUT"
 # Out of the box nothing is enabled: the file exists so it can be edited, but it
-# must not change a single flag until someone uncomments a line.
-chk "shipped config enables no model" "model=" "$OUT"
-chk "shipped config enables no effort" "effort=" "$OUT"
-chk "shipped config enables no writer tier" "writer=" "$OUT"
-chk_absent "shipped config enables no ladder value" "effort=low" "$OUT"
+# must not change a single flag until someone uncomments a line. Compared whole —
+# chk is a substring match, so "model=" alone passes for "model=claude-sonnet-5"
+# and would pin nothing.
+WANT="$(printf 'model=\neffort=\nwriter=\nsource=config')"
+chk "shipped config enables nothing at all" "identical" \
+  "$([ "$OUT" = "$WANT" ] && echo identical || printf 'differs: %s' "$OUT")"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

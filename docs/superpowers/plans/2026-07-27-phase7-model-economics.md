@@ -266,7 +266,7 @@ git commit -m "feat(economics): optional per-family model, writer tier and effor
 - Produces: generated runners carrying `--model` and effort flags when configured, and carrying neither when not.
 - **The code has two emitters, not four.** `emit_runner` (`stop-hook.sh:601`) generates the reviewer, judge and matcher runners and branches on `$REVIEWER`; `emit_sweep_runner` (`:677`) generates the sweep and branches on `$AUTHOR`. Both call one flags helper, but they pass *different* families — the sweep is a fresh author-family instance, so a reviewer model must never reach it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_stop_hook.sh` before the tally. Fixtures use `printf`
 one-liners so no line here begins with a heading marker. **That suite has no
@@ -327,12 +327,12 @@ chk "broken config → no half-written flag" "absent" \
   "$(grep -qF -- '--model ' .claude/spar-run-reviewer.sh && echo present || echo absent)"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: the four positive checks FAIL; the rest of the suite still passes.
 
-- [ ] **Step 3: Add one flag helper and use it in every emitter**
+- [x] **Step 3: Add one flag helper and use it in every emitter**
 
 In `stop-hook.sh`, next to the other helpers:
 
@@ -378,12 +378,12 @@ Note `emit_runner` writes `$DIFF_SURFACE_FILE` inside its claude branch, so
 `diff_line_count` must be called before that file is rebuilt, or read the diff
 independently — decide when implementing and say which in a comment.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: `PASS=<n> FAIL=0`, with the pre-existing 293 unchanged.
 
-- [ ] **Step 5: Prove the flags are earned**
+- [x] **Step 5: Prove the flags are earned**
 
 Mutate `economics_flags` to ignore `src` and confirm the no-config checks fail;
 mutate it to emit `--effort` for codex and confirm the codex effort check fails;
@@ -391,14 +391,14 @@ and mutate `emit_sweep_runner` to pass `$REVIEWER` instead of `$AUTHOR` and
 confirm the sweep check fails. If that last one passes anyway, the test is not
 discriminating and needs a cross-model fixture where the two families differ.
 
-- [ ] **Step 6: Document the mechanism where both seats read it**
+- [x] **Step 6: Document the mechanism where both seats read it**
 
 Add a numbered item to `plugins/spar/shared/policy.md` stating that reviewer
 model and effort are configuration, that absence means today's behaviour, and
 that no configuration can change who declares convergence. Add one line to
 `README.md` under Development naming `plugins/spar/shared/config.toml`.
 
-- [ ] **Step 7: Run the whole suite and commit**
+- [x] **Step 7: Run the whole suite and commit**
 
 ```bash
 for t in tests/test_*.sh; do bash "$t" >/dev/null || echo "FAILED: $t"; done
