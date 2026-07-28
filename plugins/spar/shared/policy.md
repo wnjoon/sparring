@@ -43,8 +43,13 @@ gatekeeper implementation.
 4. Author fixes every MECHANICAL finding on sight, and decides DESIGN findings
    on the merits. A MECHANICAL finding may be rejected only with a reason
    grounded in the code or the task requirements — never for convenience —
-   which is why item 6 has a MECHANICAL stalemate path at all; and write a response file (`FIXED — ...` / `REJECTED — <grounded
-   reason>` per finding) before the hook prepares the next round.
+   which is why item 6 has a MECHANICAL stalemate path at all. The author then
+   writes a response file (`FIXED — ...` / `REJECTED — <grounded reason>` per
+   finding) before the hook prepares the next round. The block message that
+   demands that file also carries fix guidance — revert-and-check, find every
+   place the rule is written, narrow a definition all the way. It is advice, not
+   an enforced field: the hook can verify a verification claim is *present* and
+   never that it is *true*, and the next round re-reviews the fix either way.
 5. Exit is released only by reviewer convergence, the round cap, or explicit
    cancel. The cap has two levels. The **soft cap** (`max_rounds`, default 5) is
    passed when the round that reached it was *productive* — every finding answered

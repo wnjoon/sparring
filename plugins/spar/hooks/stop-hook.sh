@@ -1522,7 +1522,16 @@ file is your statement either way, and the next round re-reviews the fix."
 Read ${RF}. Fix every [MECHANICAL] finding. Decide each [DESIGN] finding on
 the merits. Then write ${RESP} with one section per finding ID:
 'FIXED — <what you did>' or 'REJECTED — <reason grounded in code or the task
-requirements>'. Then stop again.${BRIEF_NOTE}" \
+requirements>'. Then stop again.
+
+Three things this loop keeps paying for:
+
+- Undo your fix and check which tests fail. One that passes either way is not
+  testing it.
+- Find every place the rule you changed is written down: code, its comment, the
+  docs, the other seat's copy where one exists.
+- If you narrowed a definition, narrow all of it. \"Not empty\" and \"well formed\"
+  are different rules.${BRIEF_NOTE}" \
         "sparring [${REVIEW_ID}] round ${ROUND}: respond to findings"
     fi
 

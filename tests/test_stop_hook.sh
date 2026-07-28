@@ -2568,5 +2568,24 @@ chk "matcher.md names no task placeholder" "absent" \
   "$(grep -qF '{{TASK}}' "$ROOT/plugins/spar/shared/prompts/matcher.md" && echo present || echo absent)"
 
 
+# ── the author is told how to fix ───────────────────────────────────────────
+# Advice, not a required field. The behavioural control below is what proves the
+# response contract did not change: an ordinary FIXED response must still be
+# accepted and still advance the round.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] off by one\n- file: a.py:10\n- problem: p\n- suggestion: s\n' > "$RF1"
+OUT=$(run_hook)
+chk "the fix message names the revert check" "Undo your fix" "$OUT"
+chk "the fix message names the every-place check" "every place" "$OUT"
+# The qualifier is load-bearing: the engine is shared between seats and only the
+# command and skill documents are mirrored, so an unconditional "the other
+# seat's copy" tells the author to look for a file that often does not exist.
+chk "and qualifies the mirrored copy" "where one exists" "$OUT"
+chk "the fix message names the whole-definition check" "narrow all of it" "$OUT"
+printf -- '### F1-1: FIXED — did it\n' > "$RP1"
+OUT=$(run_hook)
+chk "an ordinary response is still accepted and advances the round" 'round 2' "$OUT"
+
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
