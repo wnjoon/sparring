@@ -16,6 +16,7 @@ chk "missing config → exit 0" "0" "$RC"
 chk "missing config → says it used defaults" "source=default" "$OUT"
 chk "missing config → names no effort" "effort=" "$OUT"
 chk "missing config → writer tier present" "writer=" "$OUT"
+chk "missing config → reports nothing configured" "configured=no" "$OUT"
 chk_absent "missing config → invents no model" "model=null" "$OUT"
 
 # 2. a config supplies per-family values
@@ -90,7 +91,7 @@ ladder = [[0, "hgih"]]
 TOML
 OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 40)
 chk_absent "a misspelt effort is not passed through" "hgih" "$OUT"
-WANT_NO_EFFORT="$(printf 'model=\neffort=\nwriter=\nsource=config')"
+WANT_NO_EFFORT="$(printf 'model=\neffort=\nwriter=\nconfigured=no\nsource=config')"
 chk "a misspelt effort emits no effort at all" "identical" \
   "$([ "$OUT" = "$WANT_NO_EFFORT" ] && echo identical || printf 'differs: %s' "$OUT")"
 
@@ -114,6 +115,60 @@ chk "a rung below the bad one is unaffected" "effort=low" "$OUT"
 OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 50)
 chk_absent "and the bad rung emits nothing rather than the lower one" "effort=low" "$OUT"
 
+# 5c. a quoted ladder key is valid TOML and must behave identically. The engine
+# asks the reader whether anything is configured; a raw grep for `ladder =` here
+# would miss this form and silently switch the install's effort ladder off.
+fresh
+cat > cfg.toml <<'TOML'
+[effort]
+"ladder" = [[0, "low"], [200, "high"]]
+TOML
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 500)
+chk "a quoted ladder key still selects an effort" "effort=high" "$OUT"
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 10)
+chk "and still picks the lower rung below the threshold" "effort=low" "$OUT"
+
+# 5d. a ladder whose HIGHEST rung is invalid still counts as configured. The
+# engine asks this before deciding whether to measure a diff at all, so an answer
+# derived from tier selection would disable a perfectly good lower rung.
+fresh
+cat > cfg.toml <<'TOML'
+[effort]
+ladder = [[0, "low"], [10, "invalid"]]
+TOML
+for pair in "0 yes" "5 yes" "50 yes"; do
+  set -- $pair
+  OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude "$1")
+  chk "a bad top rung still reports configured at size $1" "configured=yes" "$OUT"
+done
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 5)
+chk "and the valid lower rung is still selected" "effort=low" "$OUT"
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 50)
+chk_absent "while the bad rung still emits nothing" "effort=low" "$OUT"
+
+# 5e. a padded level is not one of the documented words. It must be rejected on
+# the value as written — trimming for the membership test while emitting the
+# original would put whitespace inside a CLI argument.
+fresh
+cat > cfg.toml <<'TOML'
+[effort]
+ladder = [[0, " high "]]
+TOML
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 40)
+chk_absent "a padded level is not emitted" "high" "$OUT"
+chk "a padded level emits no effort at all" "effort=" "$OUT"
+chk "and a ladder holding only padded levels is not 'configured'" "configured=no" "$OUT"
+# A well-formed sibling rung still works, so this is about the value, not the file.
+fresh
+cat > cfg.toml <<'TOML'
+[effort]
+ladder = [[0, "low"], [10, " high "]]
+TOML
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 5)
+chk "a clean rung beside a padded one still selects" "effort=low" "$OUT"
+OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" claude 50)
+chk_absent "and the padded rung still emits nothing" "high" "$OUT"
+
 # 6. an unknown family is not an error — and must not pick up a real config.
 # Tested against a VALID config: with a nonexistent one the check passes whether
 # or not the family is validated, which is how this was missed the first time.
@@ -127,7 +182,7 @@ TOML
 OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" gemini 40); RC=$?
 chk "unknown family with a valid config → exit 0" "0" "$RC"
 chk "unknown family with a valid config → defaults" "source=default" "$OUT"
-WANT_DEFAULT="$(printf 'model=\neffort=\nwriter=\nsource=default')"
+WANT_DEFAULT="$(printf 'model=\neffort=\nwriter=\nconfigured=no\nsource=default')"
 chk "unknown family → the whole default line set, not just some of it" "identical" \
   "$([ "$OUT" = "$WANT_DEFAULT" ] && echo identical || printf 'differs: %s' "$OUT")"
 chk_absent "unknown family → no model leaks from another family" "claude-sonnet-5" "$OUT"
@@ -139,10 +194,10 @@ chk "claude still reads it" "source=config" "$OUT"
 OUT=$(SPAR_CONFIG_FILE="$PWD/cfg.toml" bash "$C" codex 40)
 chk "codex still reads it" "source=config" "$OUT"
 
-# 7. output is exactly four key=value lines, nothing else
+# 7. output is exactly five key=value lines, nothing else
 fresh
 OUT=$(SPAR_CONFIG_FILE=/nonexistent bash "$C" claude 40)
-chk "exactly four lines" "4" "$(printf '%s\n' "$OUT" | grep -c '=')"
+chk "exactly five lines" "5" "$(printf '%s\n' "$OUT" | grep -c '=')"
 chk_absent "no stray prose" " " "$(printf '%s\n' "$OUT" | tr -d '\n')"
 
 # 8. the shipped config parses and every family it names is one we support
@@ -154,7 +209,7 @@ chk "shipped config parses" "source=" "$OUT"
 # must not change a single flag until someone uncomments a line. Compared whole —
 # chk is a substring match, so "model=" alone passes for "model=claude-sonnet-5"
 # and would pin nothing.
-WANT="$(printf 'model=\neffort=\nwriter=\nsource=config')"
+WANT="$(printf 'model=\neffort=\nwriter=\nconfigured=no\nsource=config')"
 chk "shipped config enables nothing at all" "identical" \
   "$([ "$OUT" = "$WANT" ] && echo identical || printf 'differs: %s' "$OUT")"
 

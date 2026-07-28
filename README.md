@@ -94,7 +94,9 @@ Everything below runs today. `/spar:ready` turns a spec into a checkbox plan; `/
               │    → final sweep: fresh blind Claude subagent re-verifies
               │      diff + requirements
               │        ├─ clean            → converged exit
-              │        └─ findings at cap  → sweep-findings-at-cap exit
+              │        └─ findings         → respond, re-enter the loop at
+              │                              round r+1; at the hard cap instead
+              │                              → sweep-findings-at-cap exit
               └─ otherwise → converged exit
 
   The soft cap is passed only while rounds stay productive, because it exists to

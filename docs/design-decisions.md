@@ -117,6 +117,26 @@ retirement by Phase 2's conveyance boundary.
    `RULING: UPHELD` (finding stands, author must fix — may no longer reject)
    or `RULING: DISMISSED` (finding dropped; recorded as an adjudicated
    decision in the ledger).
+   **From the judge's introduction until 2026-07-28 it was unreachable for a
+   re-worded stalemate** — the kind the matcher exists to detect. The commit that
+   added `prepare_judge` shipped the defect, and the helper that fixes it,
+   `resolve_finding_text`, was not written until v0.5.0 and then only for the
+   parked-finding path.
+   The rejection streak accumulates against the *canonical* fingerprint, but the
+   round that completes it may carry the finding under a new wording — that is
+   exactly what the matcher exists to detect. `prepare_judge` looked the text up
+   with `extract_finding` against the current round and that fingerprint only,
+   found nothing, and returned failure, so the hook escalated to the user
+   instead. The parked-finding path already had `resolve_finding_text`, which
+   tries the aliases and then walks back through earlier rounds; the judge was
+   simply never given it. It has it now. The first dispatch this repository ever
+   needed hit the defect. Zero judge dispatches across the 29 runs recorded at that
+   point is consistent with it, and **that signal was not investigated at the
+   time** — a machine that never fires reads as a machine that is not needed. The
+   count was taken from `reviews/` on 2026-07-28 and the directory has grown
+   since, so the figure is a dated observation rather than something the tree
+   still shows. The code path, unlike the count, is still there to read.
+
 4. Stalemate on a genuine design choice → **parked** (status `parked`): leave
    that surface unmodified and continue the loop on everything else; the
    question is batched for the single end-of-loop gate. There is no separate
@@ -562,6 +582,21 @@ plan that fails should block `/spar:fight` or merely warn.
     Deliberately the strict form (any repeat) rather than a "third appearance"
     counter: the evidence is two runs, relaxing later is easy, and rounds lost to
     a rule that was too generous cannot be recovered.
+  - **The sweep did not obey this cap until 2026-07-28.** The sweep-findings
+    branch predates the two-level cap and kept comparing against `max_rounds`,
+    so a run that had legitimately extended past the soft cap was ended the
+    moment the sweep spoke — with rounds still available and a block message
+    claiming a budget that was not exhausted. It cost a real run on 2026-07-28:
+    round 6 of 10, sweep findings, plan abandoned with three tasks unstarted.
+    The hard cap is now the only cap the *sweep* consults. The soft cap still
+    ends a non-productive round, exactly as described above — that terminal is
+    live and tested (`tests/test_stop_hook.sh:1406`, `:1412`), not stale
+    duplication.
+    Routing adds one sweep response and one reviewer round; what that round
+    finds is bounded by the ordinary cap, and the sweep cannot re-arm because
+    `set_sweep_state` marks it done and the convergence branch checks
+    `SWEEP_DONE` first. This is the same failure the loop keeps producing — a
+    rule changed in one place and left standing in another.
   - **Why the rounds must be granted inside the run.** There is no cheap manual
     continuation, and the obvious-looking one is wrong: a fresh `/spar:fight`
     sets `base_sha` to HEAD, and the reviewer sees `git diff $BASE`. Commit the

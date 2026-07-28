@@ -308,16 +308,29 @@ sweep_response_file() { echo "reviews/spar-${REVIEW_ID}-sweep-response.md"; }
 is_regular_artifact() { [ -f "$1" ] && [ ! -L "$1" ]; }
 artifact_path_exists() { [ -e "$1" ] || [ -L "$1" ]; }
 
-# ── finding registry (Phase 2a: deterministic fingerprint) ──────────────────
-# Parse reviewer findings → "id<TAB>tag<TAB>file<TAB>normalized-title" per line.
-parse_findings() { # $1 = review file
+# ── finding grammar (ONE implementation) ────────────────────────────────────
+# Every consumer of a reviewer finding reads it through here. The title
+# normalisation below IS the fingerprint definition: two copies that drift make
+# the same finding compute two different fingerprints, so the rejection streak
+# never accumulates and stalemate detection silently stops working.
+#
+# US (\037) between fields, never tab: a finding with no `- file:` line leaves
+# an empty column, bash treats tab as IFS whitespace, and `read` would collapse
+# the empty column and shift every later field left — which put the title in the
+# file position and made the matcher's file prefilter compare titles to paths.
+parse_findings_all() { # $1 = review → id·tag·loc·file·canon·problem·suggestion
   awk '
+    function norm(s) { s = tolower(s); gsub(/[^a-z0-9]+/, " ", s)
+                       gsub(/^ +| +$/, "", s); return s }
+    function grab(s) { sub(/^-[ ]*[a-z]+:[ ]*/, "", s); gsub(/\t/, " ", s)
+                       gsub(/^[ ]+|[ ]+$/, "", s); return s }
     function flush() {
       if (id != "") {
-        t = tolower(title); gsub(/[^a-z0-9]+/, " ", t); gsub(/^ +| +$/, "", t)
-        printf "%s\t%s\t%s\t%s\n", id, tag, file, t
+        f = loc; sub(/:[0-9]+.*$/, "", f); gsub(/^[ ]+|[ ]+$/, "", f)
+        printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\n",
+               id, tag, loc, f, norm(title), prob, sugg
       }
-      id=""; tag=""; file=""; title=""
+      id=""; tag=""; loc=""; title=""; prob=""; sugg=""
     }
     /^### F[0-9]+-[0-9]+/ {
       flush()
@@ -327,19 +340,23 @@ parse_findings() { # $1 = review file
       else if (match($0, /\[DESIGN\]/)) tag="DESIGN"
       title=$0
       sub(/^### F[0-9]+-[0-9]+[ ]*(\[[A-Z]+\][ ]*)?/, "", title)
+      gsub(/\t/, " ", title)
       next
     }
-    /^-[ ]*file:/ {
-      if (id != "" && file == "") {
-        file=$0
-        sub(/^-[ ]*file:[ ]*/, "", file)
-        sub(/:[0-9]+.*$/, "", file)
-        gsub(/^[ ]+|[ ]+$/, "", file)
-      }
-      next
-    }
+    /^-[ ]*file:/       { if (id != "" && loc  == "") loc  = grab($0); next }
+    /^-[ ]*problem:/    { if (id != "" && prob == "") prob = grab($0); next }
+    /^-[ ]*suggestion:/ { if (id != "" && sugg == "") sugg = grab($0); next }
     END { flush() }
   ' "$1" 2>/dev/null
+}
+
+# The four-field projection the registry helpers use: id, tag, file, canon.
+parse_findings() { # $1 = review file
+  local id tag loc file canon prob sugg
+  while IFS=$'\037' read -r id tag loc file canon prob sugg; do
+    [ -n "$id" ] || continue
+    printf '%s\037%s\037%s\037%s\n' "$id" "$tag" "$file" "$canon"
+  done < <(parse_findings_all "$1")
 }
 
 # Parse author response → "id<TAB>FIXED|REJECTED|UNKNOWN" per finding.
@@ -390,7 +407,7 @@ fold_registry() { # $1 = round
   local dmap; dmap=$(mktemp) || return 0
   parse_responses "$resp" > "$dmap"
   local id tag file nt disp fp
-  while IFS=$'\t' read -r id tag file nt; do
+  while IFS=$'\037' read -r id tag file nt; do
     [ -n "$id" ] || continue
     disp=$(awk -F'\t' -v i="$id" '$1==i{print $2; exit}' "$dmap")
     [ -n "$disp" ] || disp="UNKNOWN"
@@ -507,7 +524,7 @@ strict_fixed_ids() { # $1 = response file
 #     away from the matcher.
 fingerprints_of() { # $1 = review file → one canonical fingerprint per line
   local id tag file nt
-  while IFS=$'\t' read -r id tag file nt; do
+  while IFS=$'\037' read -r id tag file nt; do
     [ -n "$id" ] || continue
     resolve_alias "${file} | ${nt}"; printf '\n'
   done < <(parse_findings "$1")
@@ -544,7 +561,7 @@ round_was_productive() { # $1 = round
   local fixed; fixed=$(mktemp) || return 1
   strict_fixed_ids "$resp" > "$fixed"
   local id tag file nt any=0 ok=1
-  while IFS=$'\t' read -r id tag file nt; do
+  while IFS=$'\037' read -r id tag file nt; do
     [ -n "$id" ] || continue
     any=1
     grep -qxF -- "$id" "$fixed" || { ok=0; break; }
@@ -558,7 +575,7 @@ round_was_productive() { # $1 = round
 only_parked_this_round() { # $1=round
   local rf; rf=$(review_file "$1"); [ -f "$rf" ] || return 1
   local any=0 nonparked=0 id tag file nt fp
-  while IFS=$'\t' read -r id tag file nt; do
+  while IFS=$'\037' read -r id tag file nt; do
     [ -n "$id" ] || continue
     any=1; fp=$(resolve_alias "${file} | ${nt}")
     [ "$(registry_status "$fp")" = "parked" ] || nonparked=1
@@ -644,9 +661,30 @@ diff_line_count() {
   printf '%s\n' "$(( ${tracked:-0} + untracked ))"
 }
 
+# Does this install configure anything at all? The reader answers that on its
+# `configured=` line, which is size-independent by contract, so a count of 0
+# answers it exactly as a real count would — and measuring one here would defeat
+# the point. Without this an install that configures nothing — the shipped
+# default, where config.toml is entirely comments — paid a git diff, a git
+# ls-files, an awk per untracked file and a python spawn on every runner
+# emission to produce no flags at all.
+economics_configured() { # $1=family
+  local k v cfgd=""
+  [ -x "$CONFIG_READER" ] || return 1
+  # The reader answers this itself, because nothing here can. Inferring it from
+  # the other lines fails two ways: a ladder yields no effort below its lowest
+  # rung, and a malformed top rung yields none at any size — so an empty
+  # `effort=` is not evidence that no ladder exists. Re-parsing the TOML with a
+  # `grep` fails a third way, on `"ladder" = …`.
+  while IFS='=' read -r k v; do
+    case "$k" in configured) cfgd="$v" ;; esac
+  done < <("$CONFIG_READER" "$1" 0 2>/dev/null)
+  [ "$cfgd" = yes ]
+}
+
 economics_flags() { # $1=family → prints flags, or nothing
   local fam="$1" k v model="" effort="" src=""
-  [ -x "$CONFIG_READER" ] || return 0
+  economics_configured "$fam" || return 0
   while IFS='=' read -r k v; do
     case "$k" in model) model="$v" ;; effort) effort="$v" ;; source) src="$v" ;; esac
   done < <("$CONFIG_READER" "$fam" "$(diff_line_count)" 2>/dev/null)
@@ -931,29 +969,25 @@ $(cat "$INTENT_FILE")"
 }
 
 # Extract the markdown block of the finding whose fingerprint matches $2.
+# The fingerprint comparison is delegated to parse_findings so the title
+# normalisation has exactly one definition; this pass only slices the text.
 extract_finding() { # $1=review file  $2=fingerprint
-  awk -v target="$2" '
-    function norm(s){ s=tolower(s); gsub(/[^a-z0-9]+/," ",s); gsub(/^ +| +$/,"",s); return s }
-    function flush(){
-      if (hdr!=""){
-        f=file; sub(/:[0-9]+.*$/,"",f); gsub(/^[ ]+|[ ]+$/,"",f)
-        if ((f " | " norm(title))==target) printf "%s", buf
-      }
-      hdr=""; title=""; file=""; buf=""
-    }
+  local want_id="" id tag file canon
+  while IFS=$'\037' read -r id tag file canon; do
+    [ "${file} | ${canon}" = "$2" ] || continue
+    want_id="$id"; break
+  done < <(parse_findings "$1")
+  [ -n "$want_id" ] || return 0
+  awk -v want="$want_id" '
     /^### F[0-9]+-[0-9]+/ {
-      flush()
-      hdr=$0; buf=$0 "\n"
-      title=$0; sub(/^### F[0-9]+-[0-9]+[ ]*(\[[A-Z]+\][ ]*)?/,"",title)
+      # hit=0 before exit: awk runs END on the way out, and END emits the buffer
+      # too, so leaving the flag set prints the same block a second time.
+      if (hit) { printf "%s", buf; hit = 0; exit }
+      hit = ($2 == want); buf = hit ? $0 "\n" : ""
       next
     }
-    {
-      if (hdr!=""){
-        buf=buf $0 "\n"
-        if (file=="" && $0 ~ /^-[ ]*file:/){ file=$0; sub(/^-[ ]*file:[ ]*/,"",file) }
-      }
-    }
-    END { flush() }
+    { if (hit) buf = buf $0 "\n" }
+    END { if (hit) printf "%s", buf }
   ' "$1" 2>/dev/null
 }
 
@@ -994,7 +1028,13 @@ prepare_judge() { # $1=fingerprint
   local fp="$1"
   local tpl_dir="${PLUGIN_ROOT}/shared/prompts"
   [ -f "$tpl_dir/judge.md" ] || { log "judge template missing"; return 1; }
-  local finding; finding=$(extract_finding "$(review_file "$ROUND")" "$fp")
+  # resolve_finding_text, not extract_finding: the streak is held against the
+  # CANONICAL fingerprint, while the round that completed it may carry only the
+  # re-worded variant — which is precisely the case the matcher exists to
+  # create. It also searches earlier rounds, for the same reason the parked-
+  # finding path does. Without it the one stalemate this repository has ever
+  # produced fell through to the user rather than the blind adjudicator.
+  local finding; finding=$(resolve_finding_text "$fp" "$ROUND")
   [ -n "$finding" ] || { log "cannot extract finding for judge: $fp"; return 1; }
   local prompt; prompt=$(cat "$tpl_dir/judge.md")
   prompt=${prompt//\{\{TASK\}\}/$TASK}
@@ -1023,7 +1063,7 @@ build_matcher() { # $1=round
   [ -n "$existing" ] || return 1
 
   local new_fps="" id tag file nt fp
-  while IFS=$'\t' read -r id tag file nt; do
+  while IFS=$'\037' read -r id tag file nt; do
     [ -n "$id" ] || continue
     fp=$(resolve_alias "${file} | ${nt}")
     awk -F'\t' -v fp="$fp" '$1==fp{f=1} END{exit !f}' "$REGISTRY_FILE" 2>/dev/null && continue
@@ -1139,45 +1179,6 @@ Then stop again." "sparring [${REVIEW_ID}] round ${n}: finding-matcher"
   echo "$n" > "$MATCHER_ROUND"
 }
 
-# Findings with every field a fresh agent needs. parse_findings deliberately
-# drops the line number — a fingerprint has to survive a fix that shifts lines —
-# but a brief is read by someone who has to open the file, so this keeps it.
-#
-# US (\037), not tab, between fields: a finding with no `- file:` line leaves an
-# empty column, and bash treats tab as IFS whitespace, so `read` would collapse
-# two empty columns into one and shift every field left. The existing tab-
-# separated parsers never produce an empty middle column, which is why they are
-# safe and this is not. Tabs inside the prose are flattened to spaces.
-parse_findings_verbose() { # $1 = review → id·tag·loc·file·canon-title·problem·suggestion
-  awk '
-    function grab(s) { sub(/^-[ ]*[a-z]+:[ ]*/, "", s); gsub(/\t/, " ", s)
-                       gsub(/^[ ]+|[ ]+$/, "", s); return s }
-    function flush() {
-      if (id != "") {
-        t = tolower(title); gsub(/[^a-z0-9]+/, " ", t); gsub(/^ +| +$/, "", t)
-        f = loc; sub(/:[0-9]+.*$/, "", f)
-        printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\n", id, tag, loc, f, t, prob, sugg
-      }
-      id=""; tag=""; loc=""; title=""; prob=""; sugg=""
-    }
-    /^### F[0-9]+-[0-9]+/ {
-      flush()
-      id=$2
-      tag="UNKNOWN"
-      if (match($0, /\[MECHANICAL\]/)) tag="MECHANICAL"
-      else if (match($0, /\[DESIGN\]/)) tag="DESIGN"
-      title=$0
-      sub(/^### F[0-9]+-[0-9]+[ ]*(\[[A-Z]+\][ ]*)?/, "", title)
-      gsub(/\t/, " ", title)
-      next
-    }
-    /^-[ ]*file:/       { if (id != "" && loc  == "") loc  = grab($0); next }
-    /^-[ ]*problem:/    { if (id != "" && prob == "") prob = grab($0); next }
-    /^-[ ]*suggestion:/ { if (id != "" && sugg == "") sugg = grab($0); next }
-    END { flush() }
-  ' "$1" 2>/dev/null
-}
-
 # Write a self-contained fix brief for one round, or nothing.
 #
 # Three exclusions, and each is the tiering contract rather than a heuristic:
@@ -1204,7 +1205,7 @@ build_fix_brief() { # $1 = round → 0 if a brief was written
   local n="$1" rf tier="" src="" k v
   rm -f "$FIX_BRIEF"
   rf=$(review_file "$n"); [ -f "$rf" ] || return 1
-  [ -x "$CONFIG_READER" ] || return 1
+  economics_configured "$AUTHOR" || return 1
   while IFS='=' read -r k v; do
     case "$k" in writer) tier="$v" ;; source) src="$v" ;; esac
   done < <("$CONFIG_READER" "$AUTHOR" "$(diff_line_count)" 2>/dev/null)
@@ -1261,7 +1262,7 @@ build_fix_brief() { # $1 = round → 0 if a brief was written
       printf -- '- fix direction: %s\n' "$sugg"
       printf -- '- recommended tier: %s\n\n' "$tier"
     } >> "$dele"
-  done < <(parse_findings_verbose "$rf")
+  done < <(parse_findings_all "$rf")
 
   if [ "$any" = 0 ]; then
     local tmp; tmp=$(mktemp "${FIX_BRIEF}.tmp.XXXXXX") || { rm -f "$dele" "$stay"; return 1; }
@@ -1694,16 +1695,23 @@ bash ${SWEEP_RUNNER}
 \`\`\`" "sparring [${REVIEW_ID}]: invalid sweep output"
     fi
     rm -f "$SWEEP_RETRY_FILE"
-    if [ "$ROUND" -ge "$MAX_ROUNDS" ]; then
-      log "sweep findings at round cap $MAX_ROUNDS"
+    # The hard cap, not the soft one. The reviewer-round cap extends past the
+    # soft cap while rounds stay productive, and a run that took that extension
+    # still has rounds to spend — ending here discards them, and the message
+    # below would claim a budget that was not exhausted. Routing costs one sweep
+    # response and one reviewer round; what that round finds is bounded by the
+    # ordinary cap, and the sweep cannot re-arm because set_sweep_state marks it
+    # done and the convergence branch checks SWEEP_DONE before sweeping again.
+    if [ "$ROUND" -ge "$HARD_CAP" ]; then
+      log "sweep findings at hard cap $HARD_CAP"
       set_sweep_state true findings
       record_outcome sweep-findings-at-cap findings
       generate_report
       deactivate_state
-      block "The final sweep found unresolved issues, but the loop already used
-all ${MAX_ROUNDS} reviewer rounds. Do not fix them inside this loop. Report
+      block "The final sweep found unresolved issues, but the loop has reached
+its hard cap of ${HARD_CAP} rounds. Do not fix them inside this loop. Report
 ${SF} as an unconverged/blocked result; the sweep findings were not silently
-dropped." "sparring [${REVIEW_ID}]: sweep findings at cap"
+dropped." "sparring [${REVIEW_ID}]: sweep findings at hard cap"
     fi
     if ! is_regular_artifact "$SRESP"; then
       block "The final sweep found issues. Read ${SF}, handle every finding,

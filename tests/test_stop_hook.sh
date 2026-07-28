@@ -756,8 +756,12 @@ chk "post-sweep reviewer convergence → approve" '{}' "$OUT"
 chk "post-sweep convergence keeps findings result" 'sweep: findings' \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
-# ── 44. sweep findings at cap → honest blocked outcome, no response/fix loop ──
+# ── 44. sweep findings at the HARD cap → honest blocked outcome, no fix loop ──
+# hard_cap is pinned to 5 so the two caps coincide: below the hard cap the
+# findings are routed instead, which the block further down now covers.
 sweep_review_repo 5
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md
 mkdir -p src/auth
 printf 'session\n' > src/auth/session.sh
 RF5="reviews/spar-20260721-120000-abc123-r5.md"
@@ -765,9 +769,9 @@ printf 'STATUS: CONVERGED\n' > "$RF5"
 run_hook >/dev/null
 printf 'SWEEP: FINDINGS\n\n### S-1 [MECHANICAL] cap issue\n' > "$SF"
 OUT=$(run_hook)
-chk "sweep findings at cap → blocked report" 'at cap' "$OUT"
-chk "sweep findings at cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
-chk "sweep findings at cap → durable reason" 'reason: sweep-findings-at-cap' \
+chk "sweep findings at the hard cap → blocked report" 'hard cap' "$OUT"
+chk "sweep findings at the hard cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+chk "sweep findings at the hard cap → durable reason" 'reason: sweep-findings-at-cap' \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
 # ── 45. history triggers: 3+ rounds and any prior design finding ──
@@ -984,14 +988,16 @@ chk "cap report captured the ledger decision" "#### P1: keep the flag" "$(cat "$
 chk "cap report survives the deactivated-loop cleanup" "present" \
   "$(run_hook >/dev/null; [ -f "$RPT" ] && echo present || echo absent)"
 
-# T3. sweep findings at the cap → report generated with the sweep recorded
+# T3. sweep findings at the HARD cap → report generated with the sweep recorded
 fresh_dir; write_state review 5; mkdir -p reviews
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md
 sed -i '' 's/^phase: review/phase: sweep/' .claude/spar.local.md 2>/dev/null \
   || sed -i 's/^phase: review/phase: sweep/' .claude/spar.local.md
 printf 'SWEEP: FINDINGS\n\n### S-1 [MECHANICAL] missing test\n- file: a.py:1\n- problem: p\n- suggestion: s\n' \
   > reviews/spar-20260721-120000-abc123-sweep.md
 OUT=$(run_hook)
-chk "sweep findings at cap → still blocks" 'at cap' "$OUT"
+chk "sweep findings at the hard cap → still blocks" 'hard cap' "$OUT"
 chk_file "sweep-findings-at-cap → report generated" "$RPT"
 chk "report names the sweep-findings-at-cap outcome" "outcome: sweep-findings-at-cap" \
   "$(cat "$RPT" 2>/dev/null)"
@@ -1868,7 +1874,7 @@ chk "shipped config → no effort flag on the runner" "absent" \
 fresh_dir; write_state task 0; mkdir -p reviews
 cat > .claude/fake-reader.sh <<'READER'
 #!/bin/sh
-printf 'model=should-not-appear\neffort=high\nwriter=\nsource=default\n'
+printf 'model=should-not-appear\neffort=high\nwriter=\nconfigured=no\nsource=default\n'
 READER
 chmod +x .claude/fake-reader.sh
 SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
@@ -1882,7 +1888,7 @@ chk "source=default → no effort flag either" "absent" \
 fresh_dir; write_state task 0; mkdir -p reviews
 cat > .claude/fake-reader.sh <<'READER'
 #!/bin/sh
-printf 'model=stub-model\neffort=\nwriter=\nsource=config\n'
+printf 'model=stub-model\neffort=\nwriter=\nconfigured=yes\nsource=config\n'
 READER
 chmod +x .claude/fake-reader.sh
 SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
@@ -2201,6 +2207,199 @@ for fam in claude codex; do
   chk "$fam: and no review file is published" "absent" \
     "$(ls reviews/spar-*-r1.md >/dev/null 2>&1 && echo present || echo absent)"
 done
+
+
+# ── one finding grammar ─────────────────────────────────────────────────────
+# A finding with no `- file:` line must still parse with its title in the title
+# column. Tab-separated output collapses the empty file column and shifts the
+# title left, which corrupts the fingerprint and makes the matcher's file
+# prefilter compare a title against a file name.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] some title here\n- problem: p\n- suggestion: s\n\n### F1-2 [MECHANICAL] located finding\n- file: a.py:10\n- problem: q\n- suggestion: t\n' > "$RF1"
+printf -- '### F1-1: REJECTED — not a defect\n### F1-2: REJECTED — not a defect\n' > "$RP1"
+run_hook >/dev/null
+chk "a finding with no location keeps an empty file column" \
+  "$(printf ' | some title here')" "$(cut -f1 .claude/spar-registry.tsv | head -1)"
+chk "and the located finding is unaffected" \
+  "$(printf 'a.py | located finding')" "$(cut -f1 .claude/spar-registry.tsv | sed -n 2p)"
+
+
+# Extracting a finding that is followed by another must emit its block once.
+# awk runs END on the way out of `exit`, so a flag left set prints the buffer a
+# second time — and the judge prompt is where that text lands.
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] first finding\n- file: a.py:10\n- problem: unmistakable-first\n- suggestion: s\n\n### F1-2 [MECHANICAL] second finding\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RF1"
+printf -- '### F1-1: REJECTED — no\n### F1-2: REJECTED — no\n' > "$RP1"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] first finding\n- file: a.py:10\n- problem: unmistakable-first\n- suggestion: s\n\n### F2-2 [MECHANICAL] second finding\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RFb2"
+printf -- '### F2-1: REJECTED — no\n### F2-2: REJECTED — no\n' > "$RPb2"
+run_hook >/dev/null
+chk "a judge was dispatched" "present" \
+  "$([ -f .claude/spar-judge-prompt.txt ] && echo present || echo absent)"
+chk "the extracted finding appears exactly once in the judge prompt" "1" \
+  "$(grep -c 'unmistakable-first' .claude/spar-judge-prompt.txt 2>/dev/null || echo 0)"
+
+
+# ── economics: a default install measures nothing ───────────────────────────
+# Instrumented at the only place the cost actually lands: the git scans. The
+# reader is also stubbed, because asserting on its arguments alone cannot show
+# this — economics_configured deliberately probes it with the constant 0, and a
+# constant argument cannot tell a measured count from an unmeasured one.
+fresh_dir; write_state task 0; mkdir -p reviews
+no_skip
+printf 'a\nb\nc\n' > f.txt
+mkdir -p .claude/shim
+REALGIT="$(command -v git)"
+cat > .claude/shim/git <<SHIM
+#!/usr/bin/env bash
+case " \$* " in
+  *" --numstat "*)          printf 'numstat\n' >> "$PWD/.claude/scans.txt" ;;
+  *" --others "*)           printf 'ls-files\n' >> "$PWD/.claude/scans.txt" ;;
+esac
+exec "$REALGIT" "\$@"
+SHIM
+chmod +x .claude/shim/git
+cat > .claude/fake-reader.sh <<'READER'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$PWD/.claude/reader-calls.txt"
+printf 'model=\neffort=\nwriter=\nconfigured=no\nsource=default\n'
+READER
+chmod +x .claude/fake-reader.sh
+run_unconfigured() {
+  ( PATH="$PWD/.claude/shim:$PATH"
+    SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null )
+}
+run_unconfigured
+chk "one unconfigured hook run consults the reader at most once" "ok" \
+  "$(n=$(wc -l < .claude/reader-calls.txt 2>/dev/null || echo 0); n=${n// /}; [ "$n" -le 1 ] && echo ok || echo "called $n times")"
+chk "and runs no changed-line scan at all" "none" \
+  "$(sort -u .claude/scans.txt 2>/dev/null | paste -sd, - | grep . || echo none)"
+# Several more runs, so the assertion is not about a single quiet code path.
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] mod.py too big\n- file: mod.py:1\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf -- '### F1-1: REJECTED — no\n' > "$RP1"
+run_unconfigured
+run_unconfigured
+chk "the reader was consulted on later rounds too, so the scan check can fail" "yes" \
+  "$([ "$(wc -l < .claude/reader-calls.txt)" -gt 1 ] && echo yes || echo "only $(wc -l < .claude/reader-calls.txt)")"
+chk "and still no scan ran across any of them" "none" \
+  "$(sort -u .claude/scans.txt 2>/dev/null | paste -sd, - | grep . || echo none)"
+
+# ...and when something IS configured it still measures. A git shim forwarding
+# to the real git is the only way to see the scan from outside, and this is what
+# proves the short-circuit above did not simply disable the feature.
+#
+# The plan also asked for the count to be memoised per process. Removing the
+# memoisation failed no test, so I traced the paths: every branch that reaches
+# a call site blocks before another one can fire, so there is at most one per
+# hook invocation and the memo had nothing to save. Dropped rather than shipped
+# unexercised.
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'mod.py\n' > mod.py
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n[writer.claude]\ntier = "cheap"\n' > .claude/spar-cfg.toml
+mkdir -p .claude/shim
+REALGIT="$(command -v git)"
+cat > .claude/shim/git <<SHIM
+#!/usr/bin/env bash
+case " \$* " in *" --numstat "*) printf 'x\n' >> "$PWD/.claude/numstat-calls.txt" ;; esac
+exec "$REALGIT" "\$@"
+SHIM
+chmod +x .claude/shim/git
+# Round 1 findings on mod.py, answered, so this invocation both dispatches the
+# matcher and builds a fix brief — two call sites, one hook run.
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] mod.py is wrong\n- file: mod.py:1\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf -- '### F1-1: FIXED — did it\n' > "$RP1"
+( PATH="$PWD/.claude/shim:$PATH"; SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null )
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] mod.py still wrong\n- file: mod.py:1\n- problem: p\n- suggestion: s\n\n### F2-2 [MECHANICAL] other.py\n- file: other.py:2\n- problem: q\n- suggestion: t\n' > "$RFb2"
+rm -f .claude/numstat-calls.txt
+( PATH="$PWD/.claude/shim:$PATH"; SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null )
+chk "a configured install still measures" "yes" \
+  "$([ -s .claude/numstat-calls.txt ] && echo yes || echo "never measured")"
+
+
+
+# A quoted ladder key is valid TOML. The engine must treat that install as
+# configured — a raw grep for `ladder =` would not, and the effort flag would
+# vanish with nothing to notice.
+fresh_dir; write_state task 0; mkdir -p reviews
+no_skip
+printf 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n' > f.txt
+printf '[effort]\n"ladder" = [[0, "low"], [8, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "a quoted ladder key still reaches the runner" "model_reasoning_effort='\"high\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+
+
+# A reader that does not answer `configured=` is treated as configuring nothing,
+# and that is the deliberate direction: an install whose reader the engine cannot
+# interrogate behaves exactly as it did before Phase 7, rather than half-applying
+# a model while skipping the size-dependent half. The shipped reader always
+# answers, and it is resolved from the same PLUGIN_ROOT as the hook, so the two
+# cannot be at different versions — this covers a hand-written override only.
+fresh_dir; write_state task 0; mkdir -p reviews
+cat > .claude/old-reader.sh <<'READER'
+#!/bin/sh
+printf 'model=stub-model\neffort=high\nwriter=t\nsource=config\n'
+READER
+chmod +x .claude/old-reader.sh
+SPAR_CONFIG_READER="$PWD/.claude/old-reader.sh" run_hook >/dev/null
+chk "a reader with no configured= line adds no model flag" "absent" \
+  "$(grep -qF -- '--model' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+chk "and no effort flag either" "absent" \
+  "$(grep -qF 'model_reasoning_effort' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+
+# ── the judge reaches a re-worded stalemate ─────────────────────────────────
+# The streak accumulates against the canonical fingerprint, but the round that
+# completes it carries the finding under its new wording. Looking the text up by
+# canonical fingerprint in that round alone finds nothing, so the judge never
+# dispatches and the dispute falls through to the user instead of being settled
+# by the blind adjudicator the protocol reserves for it.
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] mod.py off by one\n- file: mod.py:10\n- problem: original wording\n- suggestion: s\n' > "$RFa"
+printf -- '### F1-1: REJECTED — not a defect\n' > "$RPa"
+run_hook >/dev/null                     # fold round 1 (streak 1), advance to 2
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] mod.py stops one short\n- file: mod.py:10\n- problem: reworded here\n- suggestion: s\n' > "$RFb"
+printf -- '### F2-1: REJECTED — still not a defect\n' > "$RPb"
+run_hook >/dev/null                     # matcher dispatched on the same file
+printf 'SAME N1 E1\n' > "$(cat .claude/spar-matcher-pending)"
+OUT=$(run_hook)                         # alias applied, streak 2 → judge
+chk "a re-worded stalemate dispatches the judge" 'run-judge' "$OUT"
+chk_file "judge runner generated" .claude/spar-run-judge.sh
+chk "the judge prompt carries the finding text" "reworded here" \
+  "$(cat .claude/spar-judge-prompt.txt 2>/dev/null)"
+chk "and the user is not asked to adjudicate instead" "absent" \
+  "$(printf '%s' "$OUT" | grep -qF 'judge is unavailable' && echo present || echo absent)"
+
+
+# ── sweep findings use the hard cap, not the soft one ───────────────────────
+# A run that extended past the soft cap under the productivity rule still has
+# rounds; killing it the moment the sweep speaks discards them, and the block
+# message's "already used all 5 reviewer rounds" is false by then.
+sweep_review_repo 6
+RF6="reviews/spar-20260721-120000-abc123-r6.md"
+printf 'STATUS: CONVERGED\n' > "$RF6"
+run_hook >/dev/null
+printf 'SWEEP: FINDINGS\n\n### S-1 [MECHANICAL] something left\n' > "$SF"
+OUT=$(run_hook)
+chk "past the soft cap, sweep findings are routed, not dropped" 'respond to sweep' "$OUT"
+chk "and the run is still active" 'active: true' "$(cat .claude/spar.local.md)"
+printf -- '### S-1: FIXED — handled\n' > "$SRESP"
+OUT=$(run_hook)
+chk "the sweep response advances to a reviewer round" 'round 7' "$OUT"
+
+# At the hard cap it still terminates honestly.
+sweep_review_repo 10
+RF10="reviews/spar-20260721-120000-abc123-r10.md"
+printf 'STATUS: CONVERGED\n' > "$RF10"
+run_hook >/dev/null
+printf 'SWEEP: FINDINGS\n\n### S-1 [MECHANICAL] something left\n' > "$SF"
+OUT=$(run_hook)
+chk "at the hard cap, sweep findings still end the run" 'hard cap' "$OUT"
+chk "hard-cap sweep exit deactivates" 'active: false' "$(cat .claude/spar.local.md)"
+chk "hard-cap sweep exit records the honest reason" 'reason: sweep-findings-at-cap' \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
 
 echo; echo "PASS=$PASS FAIL=$FAIL"

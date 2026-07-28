@@ -94,9 +94,11 @@ gatekeeper implementation.
    finding. It is one fresh, read-only author-family instance, blind to
    the ledger and all loop history but allowed repository intent pointers.
    It uses `SWEEP: CLEAN|FINDINGS`, never `STATUS: CONVERGED`, and runs at
-   most once. The sweep itself is not a reviewer round. Findings below the cap
-   receive a separate response and re-enter at reviewer round `r+1`; findings
-   at the cap terminate honestly as `sweep-findings-at-cap`.
+   most once. The sweep itself is not a reviewer round. Findings below the
+   **hard** cap receive a separate response and re-enter at reviewer round
+   `r+1` — including on a run that passed the soft cap under the productivity
+   rule, which still has rounds to spend; only at the hard cap do they
+   terminate honestly as `sweep-findings-at-cap`.
 9. Every terminal path atomically writes one immutable outcome before cleanup:
    at least `converged`, `cap`, `error-bypass`, `cancelled`, `skipped`,
    `blocked-pending-user`, or `sweep-findings-at-cap`. Only `converged` asserts
