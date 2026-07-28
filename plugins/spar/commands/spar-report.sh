@@ -76,6 +76,26 @@ reason=$(field reason "$OUTCOME"); [ -n "$reason" ] || reason=unknown
 rounds=$(field rounds "$OUTCOME"); [ -n "$rounds" ] || rounds=$(field round "$STATE")
 case "$rounds" in ''|*[!0-9]*) rounds=0 ;; esac
 reviewer=$(field reviewer "$OUTCOME")
+# The build, not only the family: the same CLI on the same code has given very
+# different findings across versions. It names the build the run was OBSERVED to
+# start with, not the one that necessarily performed every round — a CLI that
+# updated mid-run is not visible here.
+#
+# The live state is a fallback only for the run it belongs to. A report asked for
+# an older id would otherwise inherit the current run's build and state it as
+# fact; `unknown` is the honest answer there.
+reviewer_version=$(field reviewer_version "$OUTCOME")
+if [ -z "$reviewer_version" ] \
+  && [ "$(field review_id "$STATE")" = "$review_id" ]; then
+  reviewer_version=$(field reviewer_version "$STATE")
+fi
+# Printable ASCII only — the value originates in third-party output. A backslash
+# survives that filter, so it is emitted with printf, never echo: under
+# `xpg_echo` an inherited shopt this script does not control, `echo` expands
+# `\n` and forges a frontmatter line.
+reviewer_version=$(printf '%s' "$reviewer_version" \
+  | tr -d '\000-\037\177' | LC_ALL=C tr -cd '\040-\176' | cut -c1-120)
+[ -n "$reviewer_version" ] || reviewer_version=unknown
 [ -n "$reviewer" ] || reviewer=$(field reviewer "$STATE")
 # The pairing is a property of BOTH seats, so it must be derived from the pair.
 # Hardcoding "claude author" was safe only while Claude was the only host; with a
@@ -354,6 +374,7 @@ trap 'rm -f "$tmp"' EXIT
   echo "- outcome: ${reason}"
   echo "- rounds: ${rounds}"
   echo "- reviewer: ${reviewer} — ${pairing}"
+  printf '%s\n' "- reviewer build: ${reviewer_version} (observed when the run started)"
   echo "- sweep: ${sweep}"
   echo "- base_sha: ${base}"
   echo "- generated_at: $(date -u +%FT%TZ)"

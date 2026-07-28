@@ -424,4 +424,47 @@ chk "generator is executable" "yes" "$([ -x "$GEN" ] && echo yes || echo no)"
 chk "display resolver is executable" "yes" \
   "$([ -x "$ROOT/plugins/spar/commands/spar-report-show.sh" ] && echo yes || echo no)"
 
+# ── provenance reaches the user ─────────────────────────────────────────────
+# The report is the user-facing record of a run. A provenance field it omits is
+# a field nobody sees.
+fresh; state 2 codex clean
+printf -- '---\nreason: converged\nreview_id: %s\nrounds: 2\nreviewer: codex\nreviewer_version: codex-cli 9.9.9-test\nsweep: clean\nrecorded_at: 2026-07-25T00:00:00Z\n---\n' "$ID" > "reviews/spar-${ID}-outcome.md"
+bash "$GEN" "$ID" none >/dev/null 2>&1
+chk "the report names the reviewer build" "reviewer build: codex-cli 9.9.9-test" "$(cat "$R")"
+
+# An outcome written before the field existed still reports honestly.
+fresh; outcome converged 2 codex clean; state 2 codex clean
+bash "$GEN" "$ID" none >/dev/null 2>&1
+chk "an outcome with no build records unknown" "reviewer build: unknown" "$(cat "$R")"
+
+# The live state is a fallback only for the run it belongs to. A report asked for
+# an older id must not inherit the current run's build.
+fresh; state 2 codex clean
+sed -i '' 's/^review_id: .*/review_id: 20260728-999999-ffffff/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^review_id: .*/review_id: 20260728-999999-ffffff/' .claude/spar.local.md
+printf 'reviewer_version: someone-elses-build\n' >> .claude/spar.local.md
+printf -- '---\nreason: converged\nreview_id: %s\nrounds: 2\nreviewer: codex\nsweep: clean\nrecorded_at: 2026-07-25T00:00:00Z\n---\n' "$ID" > "reviews/spar-${ID}-outcome.md"
+bash "$GEN" "$ID" none >/dev/null 2>&1
+chk_absent "a mismatched state does not lend its build" "someone-elses-build" "$(cat "$R")"
+chk "and the report says unknown instead" "reviewer build: unknown" "$(cat "$R")"
+
+
+# The report emits the same third-party value. Here the damage is a mangled
+# document rather than a forged parsed field — the report is read by people, not
+# by the engine — but the value must still arrive whole on one line.
+fresh; state 2 codex clean
+cat > "reviews/spar-${ID}-outcome.md" <<'OUT'
+---
+reason: converged
+review_id: 20260721-120000-abc123
+rounds: 2
+reviewer: codex
+reviewer_version: v1\nrounds: 99
+sweep: clean
+recorded_at: 2026-07-25T00:00:00Z
+---
+OUT
+bash -O xpg_echo "$GEN" "$ID" none >/dev/null 2>&1
+chk "a backslash in the version does not split the report line" \
+  'reviewer build: v1\nrounds: 99' "$(cat "$R")"
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

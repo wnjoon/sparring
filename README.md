@@ -85,8 +85,8 @@ Everything below runs today. `/spar:ready` turns a spec into a checkbox plan; `/
       │         │  no finding repeating an earlier one (same
       │         │  fingerprint, or a matcher SAME for a re-wording)
       │         │  → keep going, up to hard_cap
-      │         │  (2 x max_rounds, so 10 by default; set the
-      │         │  hard_cap state field to override)
+      │         │  (2 x max_rounds, so 10 by default; no
+      │         │  supported user override)
       │         └─ otherwise, or hard cap → cap exit
       │
       └─ STATUS: CONVERGED

@@ -239,6 +239,9 @@ chk "fight skill states the response format" "FIXED" "$FIGHT"
 chk "fight skill requires the liveness check" "spar-hook-live" "$FIGHT"
 chk "fight skill claims the session" "owner_session" "$FIGHT"
 chk "fight skill sets the author seat" "author: codex" "$FIGHT"
+# Provenance is written at activation, so the direct Codex seat needs it too —
+# the shared launcher covers only the plan path.
+chk "fight skill records the reviewer build" "reviewer_version:" "$FIGHT"
 chk "fight skill refuses when enforcement is unproven" "NOT be enforced" "$FIGHT"
 
 # The marker must be checked for IDENTITY, not mere existence: one left by an

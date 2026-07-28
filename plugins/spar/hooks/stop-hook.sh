@@ -709,19 +709,83 @@ economics_flags() { # $1=family → prints flags, or nothing
 # Emit a reviewer/judge/matcher runner for the resolved family.
 # codex: runs read-only in its own sandbox and inspects the diff itself.
 # claude: read-only tools + --safe-mode (isolated), so the hook provides the diff.
-emit_runner() { # $1=runner_path  $2=prompt_file  $3=out_file
-  local runner="$1" pf="$2" out="$3"
+# The change surface handed to a claude-family runner, which has no shell and so
+# cannot run git itself. With no pathspec this is the whole frozen-baseline
+# change; with one it is that change restricted to the given paths — what a judge
+# ruling on one cited file, or a matcher comparing one overlapping set, actually
+# needs. Both prompts tell their reader to inspect the diff, so the answer is to
+# narrow it, never to withhold it.
+# Can git resolve this string to something in this repository — tracked now,
+# present at the baseline, or an untracked file on disk? The answer decides
+# whether an empty narrowed surface is honest ("that file did not change") or a
+# lie ("we asked git about a path it has never heard of"). Only the second is a
+# reason to widen.
+#
+# --literal-pathspecs throughout: `--` ends option parsing but does NOT disable
+# pathspec magic, and a finding's location is text a model wrote. `:(glob)**`
+# would otherwise select every changed file — and would pass this very check,
+# since ls-files honours magic too.
+pathspec_resolves() { # $1 = candidate path
+  [ -n "$1" ] || return 1
+  git --literal-pathspecs ls-files --error-unmatch -- "$1" >/dev/null 2>&1 && return 0
+  git cat-file -e "${BASE}:$1" >/dev/null 2>&1 && return 0
+  # An untracked new file, asked of git rather than of the filesystem. `[ -e ]`
+  # would answer yes for `/etc/passwd` or `../thing` — paths that exist but that
+  # git then rejects outright, leaving the empty surface this whole function is
+  # built to avoid.
+  [ -n "$(git --literal-pathspecs ls-files --others --exclude-standard -- "$1" 2>/dev/null)" ]
+}
+
+# The change surface handed to a claude-family runner, which has no shell and so
+# cannot run git itself. With no pathspec — or with one git cannot resolve — this
+# is the whole frozen-baseline change; otherwise it is that change restricted to
+# the paths that resolved. A path git knows but that simply did not change
+# narrows to an empty surface, which is the honest answer; widening there would
+# show a judge the whole repository because the file it was asked about is clean.
+write_diff_surface() { # $@ = optional pathspec
+  local body="" untracked="" p note="" unusable=0
+  local -a keep=()
+  # ANY unresolvable path widens, not only all of them. Keeping the resolvable
+  # subset would drop the other findings' surfaces without saying so — the
+  # reader would be short of context and have no way to know it, which is the
+  # one outcome this function exists to prevent. Partial narrowing is reachable
+  # from the matcher, whose pathspec is a set.
+  for p in "$@"; do
+    if pathspec_resolves "$p"; then keep+=("$p"); else unusable=1; fi
+  done
+  if [ "$unusable" -eq 1 ]; then keep=(); fi
+  if [ "${#keep[@]}" -gt 0 ]; then
+    body=$(git --literal-pathspecs diff "${BASE}" -- "${keep[@]}" 2>/dev/null)
+    untracked=$(git --literal-pathspecs status --porcelain --untracked-files=all \
+      -- "${keep[@]}" 2>/dev/null)
+  else
+    # Widening is deliberate here, and it is said out loud. A reader handed more
+    # than it asked for should know why; a reader handed LESS would not know it
+    # had been handed less, and for the judge — whose ruling is binding — that
+    # reads as "nothing changed" and dismisses a real defect.
+    [ "$#" -gt 0 ] && note="# NOTE: a path this dispatch cited could not be resolved in this
+# repository, so the whole change is shown below instead of a narrowed slice."
+    body=$(git diff "${BASE}" 2>/dev/null)
+    untracked=$(git status --porcelain --untracked-files=all 2>/dev/null)
+  fi
+  { [ -n "$note" ] && printf '%s\n' "$note"
+    echo "# Changes under review (git diff ${BASE}):"; printf '%s\n' "$body"
+    echo "# Untracked files:"; printf '%s\n' "$untracked"; } > "$DIFF_SURFACE_FILE"
+}
+
+emit_runner() { # $1=runner  $2=prompt  $3=out  $4=role  $5.. = optional pathspec
+  local runner="$1" pf="$2" out="$3" role="${4:-reviewer}"
+  if [ "$#" -ge 4 ]; then shift 4; else shift "$#"; fi
   local ecoflags; ecoflags="$(economics_flags "$REVIEWER")"
   if [ "$REVIEWER" = "claude" ]; then
-    # provide the change surface (claude has no shell): diff against the frozen baseline
-    { echo "# Changes under review (git diff ${BASE}):"; git diff "${BASE}" 2>/dev/null;
-      echo; echo "# Untracked files:"; git status --porcelain --untracked-files=all 2>/dev/null; } > "$DIFF_SURFACE_FILE"
+    write_diff_surface "$@"
     cat > "$runner" <<EOF
 #!/usr/bin/env bash
-# sparring reviewer runner — claude family (generated; do not edit)
+# sparring ${role} runner — claude family (generated; do not edit)
 # Command form verified in Task 19 (docs/superpowers/notes/claude-runner-spike.md):
 # prompt via STDIN (variadic --tools eats a positional arg), --tools as separate
-# args, --safe-mode for isolation. No Bash → the diff is fed in via the prompt.
+# args, --safe-mode for isolation. No Bash → the change surface is fed in via the
+# prompt, narrowed to the paths this dispatch concerns.
 set -uo pipefail
 if [ -e reviews ] || [ -L reviews ]; then
   [ -d reviews ] && [ ! -L reviews ] || exit 1
@@ -965,7 +1029,7 @@ $(cat "$INTENT_FILE")"
   printf '%s' "$prompt" > "$PROMPT_FILE"
 
   local out; out=$(review_file "$n")
-  emit_runner "$RUNNER" "$PROMPT_FILE" "$out"
+  emit_runner "$RUNNER" "$PROMPT_FILE" "$out" reviewer
 }
 
 # Extract the markdown block of the finding whose fingerprint matches $2.
@@ -1045,7 +1109,21 @@ prepare_judge() { # $1=fingerprint
   local k; k=$(cat "$JUDGE_SEQ" 2>/dev/null || echo 0)
   case "$k" in ''|*[!0-9]*) k=0;; esac; k=$((k+1)); echo "$k" > "$JUDGE_SEQ"
   local out="reviews/spar-${REVIEW_ID}-judge-${k}.md"
-  emit_runner "$JUDGE_RUNNER" "$JUDGE_PROMPT_FILE" "$out"
+  # The fingerprint's file half, the same expression gate_finding_text's
+  # neighbours use. A finding with no location leaves it empty, and a finding
+  # citing something git cannot resolve leaves it useless; write_diff_surface
+  # falls back to the whole change in both cases, so there is no guard here —
+  # one would be a branch the fallback makes unobservable.
+  # No pathspec at all when the finding cited no location. Passing "" widens the
+  # same way, but it also prints a note saying a cited path could not be
+  # resolved — false when nothing was cited, and a generated artifact stating
+  # something untrue is worse than the payload it saves.
+  local jfile="${fp%% | *}"
+  if [ -n "$jfile" ]; then
+    emit_runner "$JUDGE_RUNNER" "$JUDGE_PROMPT_FILE" "$out" judge "$jfile"
+  else
+    emit_runner "$JUDGE_RUNNER" "$JUDGE_PROMPT_FILE" "$out" judge
+  fi
   printf '%s\t%s\n' "$fp" "$out" > "$JUDGE_PENDING"
   set_registry_status "$fp" judging
   return 0
@@ -1104,13 +1182,21 @@ EXIST_EOF
   { [ "$i" -gt 0 ] && [ "$j" -gt 0 ]; } || { rm -f "$MATCHER_MANIFEST"; return 1; }
 
   local prompt; prompt=$(cat "$tpl_dir/matcher.md")
-  prompt=${prompt//\{\{TASK\}\}/$TASK}
   prompt=${prompt//\{\{NEW_FINDINGS\}\}/$nlist}
   prompt=${prompt//\{\{EXISTING\}\}/$elist}
   mkdir -p reviews .claude
   printf '%s' "$prompt" > "$MATCHER_PROMPT_FILE"
   local out="reviews/spar-${REVIEW_ID}-matcher-r${n}.md"
-  emit_runner "$MATCHER_RUNNER" "$MATCHER_PROMPT_FILE" "$out"
+  # $overlap is the newline-separated file list the prefilter already computed.
+  # Empty cannot happen here (build_matcher returns early without it), but the
+  # guard keeps the fallback honest if that ever changes.
+  local -a mpaths=()
+  while IFS= read -r mf; do [ -n "$mf" ] && mpaths+=("$mf"); done <<< "$overlap"
+  if [ "${#mpaths[@]}" -gt 0 ]; then
+    emit_runner "$MATCHER_RUNNER" "$MATCHER_PROMPT_FILE" "$out" matcher "${mpaths[@]}"
+  else
+    emit_runner "$MATCHER_RUNNER" "$MATCHER_PROMPT_FILE" "$out" matcher
+  fi
   printf '%s' "$out" > "$MATCHER_PENDING"
   return 0
 }
@@ -1436,7 +1522,16 @@ file is your statement either way, and the next round re-reviews the fix."
 Read ${RF}. Fix every [MECHANICAL] finding. Decide each [DESIGN] finding on
 the merits. Then write ${RESP} with one section per finding ID:
 'FIXED — <what you did>' or 'REJECTED — <reason grounded in code or the task
-requirements>'. Then stop again.${BRIEF_NOTE}" \
+requirements>'. Then stop again.
+
+Three things this loop keeps paying for:
+
+- Undo your fix and check which tests fail. One that passes either way is not
+  testing it.
+- Find every place the rule you changed is written down: code, its comment, the
+  docs, the other seat's copy where one exists.
+- If you narrowed a definition, narrow all of it. \"Not empty\" and \"well formed\"
+  are different rules.${BRIEF_NOTE}" \
         "sparring [${REVIEW_ID}] round ${ROUND}: respond to findings"
     fi
 
