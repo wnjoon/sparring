@@ -173,9 +173,10 @@ git commit -m "refactor(engine): one finding grammar, and a fingerprint that sur
 
 **Interfaces:**
 - Consumes: nothing from Task 1.
-- Produces: `economics_flags` and `build_fix_brief` behave exactly as before whenever any value is configured, and perform no git or python work at all when none is.
+- Produces: `economics_flags` and `build_fix_brief` behave exactly as before whenever any value is configured, and run no changed-line scan at all when none is.
+- Correction, measured while implementing this task: the memoisation asked for below has nothing to save. Instrumenting `diff_line_count` across the whole suite recorded 229 hook invocations — 202 called it zero times, 27 called it once, none twice. Every consumer is immediately followed by a `block` that exits, so at most one can fire per invocation. The plan's original "three times on a findings round" was wrong and has been struck from the paragraph above.
 
-`economics_flags` evaluates `$(diff_line_count)` inside the command substitution that invokes the reader, so the count is computed before anything knows whether a value is set. A default install — where `shared/config.toml` is entirely comments — therefore pays a `git diff --numstat`, a `git ls-files --others`, one `awk` per untracked file and a `python3 -I` process spawn on every runner emission, three times on a findings round, to produce nothing.
+`economics_flags` evaluates `$(diff_line_count)` inside the command substitution that invokes the reader, so the count is computed before anything knows whether a value is set. A default install — where `shared/config.toml` is entirely comments — therefore pays a `git diff --numstat`, a `git ls-files --others`, one `awk` per untracked file and a `python3 -I` process spawn on every runner emission, to produce nothing.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -260,6 +261,8 @@ economics_flags() { # $1=family → prints flags, or nothing
 ```
 
 Apply the same guard to `build_fix_brief` (its reader call, around `:1210`): call `economics_configured "$AUTHOR" || return 1` before the reader invocation that fetches the writer tier.
+
+**Correction, applied while implementing:** the `grep -q '^[[:space:]]*ladder…'` above is not TOML-aware — it misses `"ladder" = …`, a quoted key `tomllib` accepts, and would silently switch that install's effort ladder off. Probing the reader at a large size instead is also wrong: a ladder whose top rung names an unknown level yields no effort at that size, so a valid lower rung would be read as "nothing configured". The question is therefore answered by the reader itself, which gained a fifth output line, `configured=yes|no`, computed from the family's model, its writer tier, or the presence of at least one well-formed rung with a known level. The change surface grew accordingly: `plugins/spar/commands/spar-config.sh` and `tests/test_config.sh` are modified too, beyond the Files list above, and the reader's output contract is now five lines.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 

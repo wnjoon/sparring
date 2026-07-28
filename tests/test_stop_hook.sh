@@ -1868,7 +1868,7 @@ chk "shipped config → no effort flag on the runner" "absent" \
 fresh_dir; write_state task 0; mkdir -p reviews
 cat > .claude/fake-reader.sh <<'READER'
 #!/bin/sh
-printf 'model=should-not-appear\neffort=high\nwriter=\nsource=default\n'
+printf 'model=should-not-appear\neffort=high\nwriter=\nconfigured=no\nsource=default\n'
 READER
 chmod +x .claude/fake-reader.sh
 SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
@@ -1882,7 +1882,7 @@ chk "source=default → no effort flag either" "absent" \
 fresh_dir; write_state task 0; mkdir -p reviews
 cat > .claude/fake-reader.sh <<'READER'
 #!/bin/sh
-printf 'model=stub-model\neffort=\nwriter=\nsource=config\n'
+printf 'model=stub-model\neffort=\nwriter=\nconfigured=yes\nsource=config\n'
 READER
 chmod +x .claude/fake-reader.sh
 SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
@@ -2235,29 +2235,48 @@ chk "the extracted finding appears exactly once in the judge prompt" "1" \
 
 
 # ── economics: a default install measures nothing ───────────────────────────
-# The reader is replaced with a stub that records every invocation. With no
-# configured value the engine must not consult it with a real line count, and
-# must not run the git scans that produce one.
+# Instrumented at the only place the cost actually lands: the git scans. The
+# reader is also stubbed, because asserting on its arguments alone cannot show
+# this — economics_configured deliberately probes it with the constant 0, and a
+# constant argument cannot tell a measured count from an unmeasured one.
 fresh_dir; write_state task 0; mkdir -p reviews
 no_skip
 printf 'a\nb\nc\n' > f.txt
+mkdir -p .claude/shim
+REALGIT="$(command -v git)"
+cat > .claude/shim/git <<SHIM
+#!/usr/bin/env bash
+case " \$* " in
+  *" --numstat "*)          printf 'numstat\n' >> "$PWD/.claude/scans.txt" ;;
+  *" --others "*)           printf 'ls-files\n' >> "$PWD/.claude/scans.txt" ;;
+esac
+exec "$REALGIT" "\$@"
+SHIM
+chmod +x .claude/shim/git
 cat > .claude/fake-reader.sh <<'READER'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$PWD/.claude/reader-calls.txt"
-printf 'model=\neffort=\nwriter=\nsource=default\n'
+printf 'model=\neffort=\nwriter=\nconfigured=no\nsource=default\n'
 READER
 chmod +x .claude/fake-reader.sh
-SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
-# Several dispatches, so this cannot pass by there being only one call site.
+run_unconfigured() {
+  ( PATH="$PWD/.claude/shim:$PATH"
+    SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null )
+}
+run_unconfigured
+chk "one unconfigured hook run consults the reader at most once" "ok" \
+  "$(n=$(wc -l < .claude/reader-calls.txt 2>/dev/null || echo 0); n=${n// /}; [ "$n" -le 1 ] && echo ok || echo "called $n times")"
+chk "and runs no changed-line scan at all" "none" \
+  "$(sort -u .claude/scans.txt 2>/dev/null | paste -sd, - | grep . || echo none)"
+# Several more runs, so the assertion is not about a single quiet code path.
 printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] mod.py too big\n- file: mod.py:1\n- problem: p\n- suggestion: s\n' > "$RF1"
 printf -- '### F1-1: REJECTED — no\n' > "$RP1"
-SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
-SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
-chk "the reader was consulted more than once, so the next check can fail" "yes" \
+run_unconfigured
+run_unconfigured
+chk "the reader was consulted on later rounds too, so the scan check can fail" "yes" \
   "$([ "$(wc -l < .claude/reader-calls.txt)" -gt 1 ] && echo yes || echo "only $(wc -l < .claude/reader-calls.txt)")"
-chk "an unconfigured install never measures a line count" "none" \
-  "$(awk '$2 != 0 { n++ } END { print (n ? n " calls carried a count" : "none") }' .claude/reader-calls.txt)"
-
+chk "and still no scan ran across any of them" "none" \
+  "$(sort -u .claude/scans.txt 2>/dev/null | paste -sd, - | grep . || echo none)"
 
 # ...and when something IS configured it still measures. A git shim forwarding
 # to the real git is the only way to see the scan from outside, and this is what
@@ -2292,6 +2311,60 @@ rm -f .claude/numstat-calls.txt
 chk "a configured install still measures" "yes" \
   "$([ -s .claude/numstat-calls.txt ] && echo yes || echo "never measured")"
 
+
+
+# A quoted ladder key is valid TOML. The engine must treat that install as
+# configured — a raw grep for `ladder =` would not, and the effort flag would
+# vanish with nothing to notice.
+fresh_dir; write_state task 0; mkdir -p reviews
+no_skip
+printf 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n' > f.txt
+printf '[effort]\n"ladder" = [[0, "low"], [8, "high"]]\n' > .claude/spar-cfg.toml
+SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null
+chk "a quoted ladder key still reaches the runner" "model_reasoning_effort='\"high\"'" \
+  "$(cat .claude/spar-run-reviewer.sh)"
+
+
+# A reader that does not answer `configured=` is treated as configuring nothing,
+# and that is the deliberate direction: an install whose reader the engine cannot
+# interrogate behaves exactly as it did before Phase 7, rather than half-applying
+# a model while skipping the size-dependent half. The shipped reader always
+# answers, and it is resolved from the same PLUGIN_ROOT as the hook, so the two
+# cannot be at different versions — this covers a hand-written override only.
+fresh_dir; write_state task 0; mkdir -p reviews
+cat > .claude/old-reader.sh <<'READER'
+#!/bin/sh
+printf 'model=stub-model\neffort=high\nwriter=t\nsource=config\n'
+READER
+chmod +x .claude/old-reader.sh
+SPAR_CONFIG_READER="$PWD/.claude/old-reader.sh" run_hook >/dev/null
+chk "a reader with no configured= line adds no model flag" "absent" \
+  "$(grep -qF -- '--model' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+chk "and no effort flag either" "absent" \
+  "$(grep -qF 'model_reasoning_effort' .claude/spar-run-reviewer.sh && echo present || echo absent)"
+
+
+# ── the judge reaches a re-worded stalemate ─────────────────────────────────
+# The streak accumulates against the canonical fingerprint, but the round that
+# completes it carries the finding under its new wording. Looking the text up by
+# canonical fingerprint in that round alone finds nothing, so the judge never
+# dispatches and the dispute falls through to the user instead of being settled
+# by the blind adjudicator the protocol reserves for it.
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] mod.py off by one\n- file: mod.py:10\n- problem: original wording\n- suggestion: s\n' > "$RFa"
+printf -- '### F1-1: REJECTED — not a defect\n' > "$RPa"
+run_hook >/dev/null                     # fold round 1 (streak 1), advance to 2
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] mod.py stops one short\n- file: mod.py:10\n- problem: reworded here\n- suggestion: s\n' > "$RFb"
+printf -- '### F2-1: REJECTED — still not a defect\n' > "$RPb"
+run_hook >/dev/null                     # matcher dispatched on the same file
+printf 'SAME N1 E1\n' > "$(cat .claude/spar-matcher-pending)"
+OUT=$(run_hook)                         # alias applied, streak 2 → judge
+chk "a re-worded stalemate dispatches the judge" 'run-judge' "$OUT"
+chk_file "judge runner generated" .claude/spar-run-judge.sh
+chk "the judge prompt carries the finding text" "reworded here" \
+  "$(cat .claude/spar-judge-prompt.txt 2>/dev/null)"
+chk "and the user is not asked to adjudicate instead" "absent" \
+  "$(printf '%s' "$OUT" | grep -qF 'judge is unavailable' && echo present || echo absent)"
 
 
 echo; echo "PASS=$PASS FAIL=$FAIL"

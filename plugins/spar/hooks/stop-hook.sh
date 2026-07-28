@@ -661,26 +661,25 @@ diff_line_count() {
   printf '%s\n' "$(( ${tracked:-0} + untracked ))"
 }
 
-# Does this install configure anything at all? Asked with a line count of 0,
-# which the reader does not need in order to answer it: `source=` reports
-# whether a file was read, and neither the model nor the writer tier varies with
-# size. Only the effort ladder does, so a real count is measured afterwards and
-# only when it can change something. Without this an install that configures
-# nothing — the shipped default, where config.toml is entirely comments — paid a
-# git diff, a git ls-files, an awk per untracked file and a python spawn on
-# every runner emission to produce no flags at all.
+# Does this install configure anything at all? The reader answers that on its
+# `configured=` line, which is size-independent by contract, so a count of 0
+# answers it exactly as a real count would — and measuring one here would defeat
+# the point. Without this an install that configures nothing — the shipped
+# default, where config.toml is entirely comments — paid a git diff, a git
+# ls-files, an awk per untracked file and a python spawn on every runner
+# emission to produce no flags at all.
 economics_configured() { # $1=family
-  local k v src="" model="" writer=""
+  local k v cfgd=""
   [ -x "$CONFIG_READER" ] || return 1
+  # The reader answers this itself, because nothing here can. Inferring it from
+  # the other lines fails two ways: a ladder yields no effort below its lowest
+  # rung, and a malformed top rung yields none at any size — so an empty
+  # `effort=` is not evidence that no ladder exists. Re-parsing the TOML with a
+  # `grep` fails a third way, on `"ladder" = …`.
   while IFS='=' read -r k v; do
-    case "$k" in source) src="$v" ;; model) model="$v" ;; writer) writer="$v" ;; esac
+    case "$k" in configured) cfgd="$v" ;; esac
   done < <("$CONFIG_READER" "$1" 0 2>/dev/null)
-  [ "$src" = config ] || return 1
-  [ -n "$model" ] || [ -n "$writer" ] && return 0
-  # A ladder still yields an effort at a nonzero size, so a file holding only an
-  # [effort] table must not be read as unconfigured.
-  grep -q '^[[:space:]]*ladder[[:space:]]*=' \
-    "${SPAR_CONFIG_FILE:-${PLUGIN_ROOT}/shared/config.toml}" 2>/dev/null
+  [ "$cfgd" = yes ]
 }
 
 economics_flags() { # $1=family → prints flags, or nothing
@@ -1029,7 +1028,13 @@ prepare_judge() { # $1=fingerprint
   local fp="$1"
   local tpl_dir="${PLUGIN_ROOT}/shared/prompts"
   [ -f "$tpl_dir/judge.md" ] || { log "judge template missing"; return 1; }
-  local finding; finding=$(extract_finding "$(review_file "$ROUND")" "$fp")
+  # resolve_finding_text, not extract_finding: the streak is held against the
+  # CANONICAL fingerprint, while the round that completed it may carry only the
+  # re-worded variant — which is precisely the case the matcher exists to
+  # create. It also searches earlier rounds, for the same reason the parked-
+  # finding path does. Without it the one stalemate this repository has ever
+  # produced fell through to the user rather than the blind adjudicator.
+  local finding; finding=$(resolve_finding_text "$fp" "$ROUND")
   [ -n "$finding" ] || { log "cannot extract finding for judge: $fp"; return 1; }
   local prompt; prompt=$(cat "$tpl_dir/judge.md")
   prompt=${prompt//\{\{TASK\}\}/$TASK}

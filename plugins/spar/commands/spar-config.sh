@@ -1,10 +1,21 @@
 #!/usr/bin/env bash
-# Read model-economics settings for one family. Prints four key=value lines and
+# Read model-economics settings for one family. Prints five key=value lines and
 # always exits 0 — an economics setting that cannot be read must degrade to the
 # behaviour the loop had before Phase 7, never stop a review. Every caller can
 # therefore use the output without checking a status.
 # Usage: spar-config.sh <family> <changed-line-count>
-# Output: model=…  effort=…  writer=…  source=config|default
+# Output: model=…  effort=…  writer=…  configured=yes|no  source=config|default
+#
+# The output is five lines and every caller requires all five. A reader that
+# omits `configured` is treated by the engine as configuring nothing, which
+# degrades to pre-Phase-7 behaviour rather than half-applying a setting.
+#
+# `configured` answers "does this install set anything for this family at all",
+# independently of the size passed in. Callers need that before deciding whether
+# to measure a diff, and it cannot be derived from the other lines: an effort
+# ladder produces no effort at a size below its lowest rung, and its highest
+# rung may be a word this script drops — so an empty `effort=` says nothing
+# about whether a ladder exists.
 set -uo pipefail
 
 FAMILY="${1-}"; LINES="${2-0}"
@@ -14,7 +25,7 @@ CFG="${SPAR_CONFIG_FILE:-$DIR/../shared/config.toml}"
 
 # `source=default` is the signal callers key on: it means nothing here was read
 # from a file, so they must add no flags at all rather than pass an empty one.
-emit_default() { printf 'model=\neffort=\nwriter=\nsource=default\n'; exit 0; }
+emit_default() { printf 'model=\neffort=\nwriter=\nconfigured=no\nsource=default\n'; exit 0; }
 
 # Only families the engine actually resolves. The ladder is family-independent,
 # so without this an unknown name would come back with source=config and a real
@@ -66,6 +77,13 @@ def s(table, key):
 # with no row at or below the size, leaves this EMPTY: an unconfigured effort must
 # produce no flag at all, or a config that sets only a model would quietly change
 # how hard the reviewer thinks.
+LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+# Selection is unchanged: the highest threshold at or below the diff size wins
+# among well-shaped rows, and the level it names is checked afterwards. A rung
+# that asks for a word the CLIs do not know therefore emits NO effort rather
+# than quietly substituting the rung below it — running at a level the config
+# did not ask for is not a safer wrong answer than running at the CLI default.
 effort = ""
 ladder = cfg.get("effort", {}).get("ladder") if isinstance(cfg.get("effort"), dict) else None
 if isinstance(ladder, list):
@@ -77,22 +95,34 @@ if isinstance(ladder, list):
                 and lines >= row[0]
                 and (picked is None or row[0] >= picked[0])):
             picked = row
-    if picked:
+    # Membership is tested on the value as written, not on a trimmed copy: a
+    # padded ` high ` is not one of the documented words, and accepting it while
+    # passing the original through would put whitespace inside a CLI argument.
+    if picked and picked[1] in LEVELS:
         effort = picked[1]
+
+# Separately: does a usable rung exist AT ALL? Independent of this call's size
+# and of which rung it selected, because that is the question the engine asks
+# before deciding whether measuring a diff is worth anything.
+has_ladder = isinstance(ladder, list) and any(
+    isinstance(r, list) and len(r) == 2
+    and isinstance(r[0], int) and not isinstance(r[0], bool)
+    and isinstance(r[1], str) and r[1] in LEVELS
+    for r in ladder)
 
 # The two CLIs disagree on what an unrecognised effort does, and the softer of the
 # two is the dangerous one: `claude --effort banana` warns on stderr and runs at
 # the DEFAULT effort with exit 0, so a typo in config.toml silently undoes the one
 # thing this setting exists to do. (codex rejects the value and the round fails
-# loudly, which at least gets noticed.) Neither is worth relying on, so an effort
-# that is not one of the documented words is dropped here and no flag is emitted.
-if effort not in ("low", "medium", "high", "xhigh", "max"):
-    effort = ""
+# loudly, which at least gets noticed.) Neither is worth relying on, so the rung
+# filter above accepts only the documented words.
 
 # A newline in any value would forge an extra key=value line in the caller's
 # read loop, so the whole result is refused rather than partially emitted.
-vals = (("model", s("reviewer", "model")), ("effort", effort),
-        ("writer", s("writer", "tier")), ("source", "config"))
+model, writer = s("reviewer", "model"), s("writer", "tier")
+configured = "yes" if (model or writer or has_ladder) else "no"
+vals = (("model", model), ("effort", effort), ("writer", writer),
+        ("configured", configured), ("source", "config"))
 for _, v in vals:
     if "\n" in v or "\r" in v:
         sys.exit(1)
