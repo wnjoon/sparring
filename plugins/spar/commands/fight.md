@@ -1,6 +1,6 @@
 ---
 description: "Fight: run the sparring review loop — a single task, or a plan prepared by /spar:ready"
-argument-hint: "[--reviewer codex|claude] [--include-dirty] [--unattended] [--] <task description>"
+argument-hint: "[--reviewer codex|claude] [--include-dirty] [--unattended] [--no-plan-review] [--] <task description>"
 allowed-tools:
   - Bash
   - Read
@@ -25,7 +25,9 @@ SPAR_REST="${RESOLVED#*$'\t'}"
 SPAR_INCLUDE_DIRTY="${SPAR_REST%%$'\t'*}"
 SPAR_REST2="${SPAR_REST#*$'\t'}"
 SPAR_UNATTENDED="${SPAR_REST2%%$'\t'*}"
-SPAR_TASK="${SPAR_REST2#*$'\t'}"
+SPAR_REST3="${SPAR_REST2#*$'\t'}"
+SPAR_PLAN_REVIEW="${SPAR_REST3%%$'\t'*}"
+SPAR_TASK="${SPAR_REST3#*$'\t'}"
 # ── Dispatch: plan-aware vs single-task ──────────────────────────────────────
 # A plan prepared by /spar:ready lives in .claude/spar-plan.local.md. With one
 # pending, `fight` (no task) drives it task-by-task; a task arg is refused so a

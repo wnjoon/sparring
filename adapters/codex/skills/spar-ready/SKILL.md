@@ -35,7 +35,9 @@ RDY_REST="${RESOLVED#*$'\t'}"
 RDY_REVIEWER="${RDY_REST%%$'\t'*}"
 RDY_REST2="${RDY_REST#*$'\t'}"
 RDY_UNATTENDED="${RDY_REST2%%$'\t'*}"
-RDY_SPEC="${RDY_REST2#*$'\t'}"
+RDY_REST3="${RDY_REST2#*$'\t'}"
+RDY_PLAN_REVIEW="${RDY_REST3%%$'\t'*}"
+RDY_SPEC="${RDY_REST3#*$'\t'}"
 # Mirror of the Claude seat's auto-detect: Codex authors here, so claude reviews
 # when it is installed and only a machine without it falls back to same-family.
 if [ -z "$RDY_REVIEWER" ]; then

@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Resolve /spar:ready flags from the ONE-string argument, strip them, and
-# print: "<mode>\t<reviewer|empty>\t<unattended>\t<spec>" (unattended ∈
-# true|false). Never argv-split the input.
+# print: "<mode>\t<reviewer|empty>\t<unattended>\t<plan_review>\t<spec>"
+# (unattended and plan_review ∈ true|false). The free text is LAST so a spec
+# carrying tabs or newlines is still unambiguous. Never argv-split the input.
 set -uo pipefail
 raw="${1-}"
 stripped="$raw"
 if [ "$stripped" = "--" ]; then stripped=""
 elif [ "${stripped#-- }" != "$stripped" ]; then stripped="${stripped#-- }"; fi
 
-mode="per-task"; reviewer=""; unattended=false; seen_mode=false; seen_rev=false; seen_unatt=false
+mode="per-task"; reviewer=""; unattended=false; plan_review=true
+seen_mode=false; seen_rev=false; seen_unatt=false; seen_pr=false
 remainder="$stripped"
 while :; do
   if [ "$remainder" = "--" ]; then remainder=""; break
@@ -19,6 +21,12 @@ while :; do
   elif [ "${remainder#--whole }" != "$remainder" ]; then
     [ "$seen_mode" = false ] || { echo "error: --whole specified more than once" >&2; exit 2; }
     seen_mode=true; mode="whole"; remainder="${remainder#--whole }"
+  elif [ "$remainder" = "--no-plan-review" ]; then
+    [ "$seen_pr" = false ] || { echo "error: --no-plan-review specified more than once" >&2; exit 2; }
+    seen_pr=true; plan_review=false; remainder=""
+  elif [ "${remainder#--no-plan-review }" != "$remainder" ]; then
+    [ "$seen_pr" = false ] || { echo "error: --no-plan-review specified more than once" >&2; exit 2; }
+    seen_pr=true; plan_review=false; remainder="${remainder#--no-plan-review }"
   elif [ "$remainder" = "--unattended" ]; then
     [ "$seen_unatt" = false ] || { echo "error: --unattended specified more than once" >&2; exit 2; }
     seen_unatt=true; unattended=true; remainder=""
@@ -35,4 +43,4 @@ while :; do
 done
 spec="${remainder%$'\n'}"
 [ -n "$spec" ] || { echo "error: no spec path or description given" >&2; exit 2; }
-printf '%s\t%s\t%s\t%s\n' "$mode" "$reviewer" "$unattended" "$spec"
+printf '%s\t%s\t%s\t%s\t%s\n' "$mode" "$reviewer" "$unattended" "$plan_review" "$spec"

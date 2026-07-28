@@ -1,6 +1,6 @@
 ---
 description: "Ready: turn a spec into a checkbox plan on a dedicated branch, then stop — run /spar:fight to execute it"
-argument-hint: "[--whole] [--reviewer codex|claude] [--unattended] [--] <spec path or description>"
+argument-hint: "[--whole] [--reviewer codex|claude] [--unattended] [--no-plan-review] [--] <spec path or description>"
 allowed-tools:
   - Bash
   - Read
@@ -27,7 +27,9 @@ RDY_REST="${RESOLVED#*$'\t'}"
 RDY_REVIEWER="${RDY_REST%%$'\t'*}"
 RDY_REST2="${RDY_REST#*$'\t'}"
 RDY_UNATTENDED="${RDY_REST2%%$'\t'*}"
-RDY_SPEC="${RDY_REST2#*$'\t'}"
+RDY_REST3="${RDY_REST2#*$'\t'}"
+RDY_PLAN_REVIEW="${RDY_REST3%%$'\t'*}"
+RDY_SPEC="${RDY_REST3#*$'\t'}"
 # Reviewer: empty means auto-detect (codex if present, else claude), matching /spar:fight.
 if [ -z "$RDY_REVIEWER" ]; then
   if command -v codex >/dev/null 2>&1; then RDY_REVIEWER=codex; else RDY_REVIEWER=claude; fi

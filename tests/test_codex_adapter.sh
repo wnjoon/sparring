@@ -239,6 +239,11 @@ chk "fight skill states the response format" "FIXED" "$FIGHT"
 chk "fight skill requires the liveness check" "spar-hook-live" "$FIGHT"
 chk "fight skill claims the session" "owner_session" "$FIGHT"
 chk "fight skill sets the author seat" "author: codex" "$FIGHT"
+# The resolver grew a fifth field; a mirror that does not peel it silently
+# receives the flag where the task text belongs.
+chk "fight skill destructures plan_review" "SPAR_PLAN_REVIEW=" "$FIGHT"
+chk "ready skill destructures plan_review" "RDY_PLAN_REVIEW=" \
+  "$(cat "$ROOT/adapters/codex/skills/spar-ready/SKILL.md")"
 # Provenance is written at activation, so the direct Codex seat needs it too —
 # the shared launcher covers only the plan path.
 chk "fight skill records the reviewer build" "reviewer_version:" "$FIGHT"

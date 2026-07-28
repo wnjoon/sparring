@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Resolve setup flags and strip them from the task text.
-# Usage: spar-resolve-family.sh "<raw /spar args as ONE string>"
+# Usage: spar-fight-resolve.sh "<raw /spar args as ONE string>"
 # The whole /spar argument text is passed as a single positional string (not
 # argv-split) so whitespace/newlines/tabs and shell-metacharacters in the task
 # survive verbatim — the caller must NOT word-split before invoking this.
-# Prints: "<family>\t<include-dirty>\t<unattended>\t<task text>"
-#   family ∈ codex|claude; include-dirty ∈ true|false; unattended ∈ true|false
+# Prints: "<family>\t<include-dirty>\t<unattended>\t<plan_review>\t<task text>"
+#   family ∈ codex|claude; the three flags ∈ true|false. The task text is LAST so
+#   one carrying tabs or newlines is still unambiguous.
 # Exits non-zero with "error: …" on an unusable resolution.
 set -uo pipefail
 
@@ -23,7 +24,7 @@ fi
 
 family=""
 include_dirty=false
-unattended=false
+unattended=false; plan_review=true; seen_pr=false
 seen_reviewer=false
 seen_include_dirty=false
 seen_unattended=false
@@ -51,6 +52,12 @@ while :; do
     seen_include_dirty=true
     include_dirty=true
     remainder="${remainder#--include-dirty }"
+  elif [ "$remainder" = "--no-plan-review" ]; then
+    [ "$seen_pr" = false ] || { echo "error: --no-plan-review specified more than once" >&2; exit 2; }
+    seen_pr=true; plan_review=false; remainder=""
+  elif [ "${remainder#--no-plan-review }" != "$remainder" ]; then
+    [ "$seen_pr" = false ] || { echo "error: --no-plan-review specified more than once" >&2; exit 2; }
+    seen_pr=true; plan_review=false; remainder="${remainder#--no-plan-review }"
   elif [ "$remainder" = "--unattended" ]; then
     [ "$seen_unattended" = false ] \
       || { echo "error: --unattended specified more than once" >&2; exit 2; }
@@ -96,4 +103,4 @@ if [ -z "$family" ]; then
 fi
 command -v "$family" >/dev/null 2>&1 || { echo "error: '$family' CLI not on PATH" >&2; exit 3; }
 
-printf '%s\t%s\t%s\t%s\n' "$family" "$include_dirty" "$unattended" "$task"
+printf '%s\t%s\t%s\t%s\t%s\n' "$family" "$include_dirty" "$unattended" "$plan_review" "$task"

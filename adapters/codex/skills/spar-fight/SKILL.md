@@ -74,7 +74,9 @@ SPAR_REST="${RESOLVED#*$'\t'}"
 SPAR_INCLUDE_DIRTY="${SPAR_REST%%$'\t'*}"
 SPAR_REST2="${SPAR_REST#*$'\t'}"
 SPAR_UNATTENDED="${SPAR_REST2%%$'\t'*}"
-SPAR_TASK="${SPAR_REST2#*$'\t'}"
+SPAR_REST3="${SPAR_REST2#*$'\t'}"
+SPAR_PLAN_REVIEW="${SPAR_REST3%%$'\t'*}"
+SPAR_TASK="${SPAR_REST3#*$'\t'}"
 # Codex authors here, so the cross-model default is the mirror image of the
 # Claude seat's: claude reviews when it is installed, and only a machine without
 # it falls back to same-family review.

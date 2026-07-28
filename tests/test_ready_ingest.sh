@@ -30,4 +30,22 @@ chk "whole → 1 task" "1" "$(plan_field tasks "$ST")"
 chk "whole heading" "WHOLE PLAN" "$(plan_task_line 1 "$ST" | cut -f3)"
 
 rm -rf "$TMP"
+# ── Phase 9: the fifth resolver field is destructured, and the spec stays last ─
+# Nothing fails loudly if this is missed: the spec text silently becomes the word
+# "true" and the plan gets written against it.
+# chk here is an exact-equality check, so ask for a computed yes/no.
+has() { grep -qF -- "$2" "$1" && echo yes || echo no; }
+# The Claude seat's two documents. The Codex mirrors are asserted in
+# tests/test_codex_adapter.sh, which is the suite that fails when a mirror
+# drifts — putting them here would leave that suite green on a broken adapter.
+chk "ready.md destructures plan_review" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/ready.md" 'RDY_PLAN_REVIEW=')"
+chk "fight.md destructures plan_review" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/fight.md" 'SPAR_PLAN_REVIEW=')"
+# Behavioural, not a substring: the resolver's own output must put the flag in
+# field 4 and the free text in field 5.
+RR="$ROOT/plugins/spar/commands/spar-ready-resolve.sh"
+chk "the flag lands in field 4" "false" "$(bash "$RR" "--no-plan-review -- some spec" | cut -f4)"
+chk "and the spec in field 5" "some spec" "$(bash "$RR" "--no-plan-review -- some spec" | cut -f5)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
