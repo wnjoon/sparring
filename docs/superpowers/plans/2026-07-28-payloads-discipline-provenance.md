@@ -37,7 +37,7 @@ What is genuinely wasteful is the *scope*. `emit_runner`'s claude branch builds 
 
 `matcher.md:10-12` separately carries `{{TASK}}`, which is a different matter: the matcher's question is whether two finding texts describe one defect on the same surface, and the task requirements do not bear on it. Under `/spar:fight --whole` that placeholder is the entire plan file.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/test_stop_hook.sh`, before the `PASS=`/`FAIL=` summary. Note the reviewer fixture is a **task-phase** state: a review-phase state with findings and no response blocks at `stop-hook.sh:1423-1440` without ever calling `prepare_round`, so no reviewer runner would exist.
 
@@ -116,12 +116,12 @@ chk "matcher.md names no task placeholder" "absent" \
   "$(grep -qF '{{TASK}}' "$ROOT/plugins/spar/shared/prompts/matcher.md" && echo present || echo absent)"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: the two "omits" checks FAIL (today every role gets the whole surface) and the matcher-template check FAILS. The four "carries" checks and both dispatch checks must already PASS — they are the controls that show nothing is losing the context it needs, and if any of them fails before the change the fixture is wrong, not the engine.
 
-- [ ] **Step 3: Extract the surface writer with an optional pathspec**
+- [x] **Step 3: Extract the surface writer with an optional pathspec**
 
 Today the surface is built inline inside `emit_runner`'s claude branch (`:715-718`). Lift it out, above `emit_runner`:
 
@@ -143,7 +143,7 @@ write_diff_surface() { # $@ = optional pathspec
 }
 ```
 
-- [ ] **Step 4: Give `emit_runner` a role and a pathspec**
+- [x] **Step 4: Give `emit_runner` a role and a pathspec**
 
 Change the signature, and call the writer **inside the existing claude-family branch** so a codex dispatch still writes no surface at all:
 
@@ -159,22 +159,22 @@ emit_runner() { # $1=runner  $2=prompt  $3=out  $4=role  $5.. = optional pathspe
 
 Only the pathspec changes per role; the branch structure and the codex arm stay exactly as they are. Update the comment inside the generated claude runner (`:721-724`) so it says the runner is fed the change surface **for the paths this dispatch concerns**, rather than implying it is always the whole diff.
 
-- [ ] **Step 5: Pass the role and the paths at each call site**
+- [x] **Step 5: Pass the role and the paths at each call site**
 
 - `:968` (`prepare_round`) → `emit_runner "$RUNNER" "$PROMPT_FILE" "$out" reviewer` — no pathspec, the whole change.
 - `:1048` (`prepare_judge`) → the fingerprint's file part is `${fp%% | *}`, the same expression `gate_finding_text`'s neighbours use at `:1085` and `:1096`. Compute it into a local and pass it: `emit_runner "$JUDGE_RUNNER" "$JUDGE_PROMPT_FILE" "$out" judge "$jfile"`. When the fingerprint has an empty file part — a finding with no location, which the grammar preserves — pass no pathspec, so the judge falls back to the whole surface rather than to nothing.
 - `:1113` (`build_matcher`) → `$overlap` (`:1022` in that function) is the newline-separated list of overlapping files already computed for the prefilter. Pass its entries as separate arguments, guarding against an empty list the same way.
 
-- [ ] **Step 6: Drop the task from the matcher prompt**
+- [x] **Step 6: Drop the task from the matcher prompt**
 
 In `plugins/spar/shared/prompts/matcher.md`, delete the `## Task the author was given` heading and the `{{TASK}}` line beneath it. Remove the matching substitution inside `build_matcher` (`:1106-1109`) — it is the fourth of four identical `{{TASK}}` substitutions in the engine, so identify it by the function it sits in, not by the string. Leave `{{NEW_FINDINGS}}` and `{{EXISTING}}` untouched.
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: `FAIL=0`.
 
-- [ ] **Step 8: Prove each part is independently caught**
+- [x] **Step 8: Prove each part is independently caught**
 
 Four scratch copies, because four things can be reverted separately:
 1. Drop the pathspec from the judge call site only → the judge "omits" check must fail and the matcher's must not.
@@ -184,7 +184,7 @@ Four scratch copies, because four things can be reverted separately:
 
 Also confirm in each copy that the four "carries" controls still pass; if narrowing ever drops the file the dispatch is *about*, that is the failure that matters most.
 
-- [ ] **Step 9: Run every suite and commit**
+- [x] **Step 9: Run every suite and commit**
 
 ```bash
 rc=0
