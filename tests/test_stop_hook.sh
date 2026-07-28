@@ -2402,5 +2402,171 @@ chk "hard-cap sweep exit records the honest reason" 'reason: sweep-findings-at-c
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
 
+# ── each dispatch sees the surface its prompt names ─────────────────────────
+# The claude family has no shell, so the inline surface is the only way it can
+# follow "inspect the code with git diff". The reviewer's question is the whole
+# change; the judge's is one cited file; the matcher's is the overlapping set.
+surface_repo() { # $1=phase $2=round → claude reviewer, two committed files, both edited
+  fresh_dir; write_state "$1" "$2"; mkdir -p reviews
+  # include_dirty first, keyed on a line the reviewer switch does not touch:
+  # no_skip matches `reviewer: codex`, which is gone a line later, and without
+  # it the heuristic small-change skip ends the run before a runner exists.
+  sed -i '' 's/^round: /include_dirty: true\nround: /' .claude/spar.local.md 2>/dev/null \
+    || sed -i 's/^round: /include_dirty: true\nround: /' .claude/spar.local.md
+  sed -i '' 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md 2>/dev/null \
+    || sed -i 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md
+  printf 'one\n' > wanted.py; printf 'two\n' > unrelated.py
+  git add -A >/dev/null 2>&1
+  git -c user.email=t@t -c user.name=t commit -qm base
+  local b; b=$(git rev-parse HEAD)
+  sed -i '' "s/^base_sha: .*/base_sha: $b/" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^base_sha: .*/base_sha: $b/" .claude/spar.local.md
+  printf 'one\nchanged-in-wanted\n' > wanted.py
+  printf 'two\nchanged-in-unrelated\n' > unrelated.py
+}
+
+surface_repo task 0
+run_hook >/dev/null
+chk "the reviewer surface carries the whole change" "changed-in-unrelated" \
+  "$(cat .claude/spar-diff.txt)"
+chk "and the reviewer's own file too" "changed-in-wanted" "$(cat .claude/spar-diff.txt)"
+
+# The judge is dispatched on a finding citing wanted.py; the surface it is given
+# must not carry unrelated.py's hunk.
+surface_repo review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] wanted.py off by one\n- file: wanted.py:1\n- problem: p\n- suggestion: s\n' > "$RFa"
+printf -- '### F1-1: REJECTED — no\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] wanted.py off by one\n- file: wanted.py:1\n- problem: p\n- suggestion: s\n' > "$RFb"
+printf -- '### F2-1: REJECTED — still no\n' > "$RPb"
+run_hook >/dev/null
+chk_file "judge dispatched" .claude/spar-run-judge.sh
+chk "the judge surface carries the cited file" "changed-in-wanted" "$(cat .claude/spar-diff.txt)"
+chk "the judge surface omits an unrelated file" "absent" \
+  "$(grep -qF 'changed-in-unrelated' .claude/spar-diff.txt && echo present || echo absent)"
+
+# The matcher is dispatched on an overlap of wanted.py; unrelated.py must not ride along.
+surface_repo review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] wanted.py is wrong\n- file: wanted.py:1\n- problem: p\n- suggestion: s\n' > "$RFa"
+printf -- '### F1-1: REJECTED — no\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] wanted.py stops early\n- file: wanted.py:1\n- problem: p\n- suggestion: s\n' > "$RFb"
+printf -- '### F2-1: REJECTED — no\n' > "$RPb"
+run_hook >/dev/null
+chk_file "matcher dispatched" .claude/spar-run-matcher.sh
+chk "the matcher surface carries the overlapping file" "changed-in-wanted" \
+  "$(cat .claude/spar-diff.txt)"
+chk "the matcher surface omits a file with no overlap" "absent" \
+  "$(grep -qF 'changed-in-unrelated' .claude/spar-diff.txt && echo present || echo absent)"
+
+# A cited path git cannot resolve must not narrow the surface to nothing. Every
+# such form — a basename, a path with prose after it, `N/A`, a `:` prefix git
+# reads as pathspec magic — produces no output and no error, so an empty
+# narrowed surface is indistinguishable from "not a path git knows". Handing a
+# reader who was told to inspect the diff an apparently unchanged tree is the
+# withholding this task exists to avoid, arriving through a different door.
+surface_repo review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] wanted.py off by one\n- file: wanted.py (the new helper)\n- problem: p\n- suggestion: s\n' > "$RFa"
+printf -- '### F1-1: REJECTED — no\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] wanted.py off by one\n- file: wanted.py (the new helper)\n- problem: p\n- suggestion: s\n' > "$RFb"
+printf -- '### F2-1: REJECTED — still no\n' > "$RPb"
+run_hook >/dev/null
+chk_file "judge dispatched on an unresolvable path" .claude/spar-run-judge.sh
+chk "an unresolvable path falls back to the whole change" "changed-in-unrelated" \
+  "$(cat .claude/spar-diff.txt)"
+chk "and the cited file is there too" "changed-in-wanted" "$(cat .claude/spar-diff.txt)"
+chk "and the widening is stated, not silent" "could not be resolved" \
+  "$(cat .claude/spar-diff.txt)"
+
+# Same for a finding with no location at all: the fingerprint's file half is the
+# empty string, which git rejects outright.
+surface_repo review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] something is wrong\n- problem: p\n- suggestion: s\n' > "$RFa"
+printf -- '### F1-1: REJECTED — no\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] something is wrong\n- problem: p\n- suggestion: s\n' > "$RFb"
+printf -- '### F2-1: REJECTED — still no\n' > "$RPb"
+run_hook >/dev/null
+chk_file "judge dispatched on a location-less finding" .claude/spar-run-judge.sh
+chk "a location-less finding falls back to the whole change" "changed-in-unrelated" \
+  "$(cat .claude/spar-diff.txt)"
+chk "and claims no citation it never received" "absent" \
+  "$(grep -qF 'could not be resolved' .claude/spar-diff.txt && echo present || echo absent)"
+
+# A path that exists on disk but outside the worktree passes a filesystem test
+# and is then rejected by git — the empty surface this all exists to avoid.
+surface_repo review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] outside citation\n- file: /etc/passwd:1\n- problem: p\n- suggestion: s\n' > "$RFa"
+printf -- '### F1-1: REJECTED — no\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] outside citation\n- file: /etc/passwd:1\n- problem: p\n- suggestion: s\n' > "$RFb"
+printf -- '### F2-1: REJECTED — still no\n' > "$RPb"
+run_hook >/dev/null
+chk_file "judge dispatched on an outside-worktree citation" .claude/spar-run-judge.sh
+chk "a path outside the worktree falls back to the whole change" "changed-in-wanted" \
+  "$(cat .claude/spar-diff.txt)"
+
+# A path git DOES know, that simply did not change, narrows to an empty surface.
+# Widening there would show a judge the whole repository because the file it was
+# asked about happens to be clean — the opposite of "and no more".
+surface_unchanged_repo() { # cited file tracked and untouched; another file changed
+  fresh_dir; write_state review 1; mkdir -p reviews
+  sed -i '' 's/^round: /include_dirty: true\nround: /' .claude/spar.local.md 2>/dev/null \
+    || sed -i 's/^round: /include_dirty: true\nround: /' .claude/spar.local.md
+  sed -i '' 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md 2>/dev/null \
+    || sed -i 's/^reviewer: codex/reviewer: claude/' .claude/spar.local.md
+  printf 'one\n' > wanted.py; printf 'two\n' > unrelated.py
+  git add -A >/dev/null 2>&1
+  git -c user.email=t@t -c user.name=t commit -qm base
+  local b; b=$(git rev-parse HEAD)
+  sed -i '' "s/^base_sha: .*/base_sha: $b/" .claude/spar.local.md 2>/dev/null \
+    || sed -i "s/^base_sha: .*/base_sha: $b/" .claude/spar.local.md
+  printf 'two\nchanged-in-unrelated\n' > unrelated.py   # wanted.py left alone
+}
+surface_unchanged_repo
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] wanted.py off by one\n- file: wanted.py:1\n- problem: p\n- suggestion: s\n' > "$RFa"
+printf -- '### F1-1: REJECTED — no\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] wanted.py off by one\n- file: wanted.py:1\n- problem: p\n- suggestion: s\n' > "$RFb"
+printf -- '### F2-1: REJECTED — still no\n' > "$RPb"
+run_hook >/dev/null
+chk_file "judge dispatched on an unchanged cited file" .claude/spar-run-judge.sh
+chk "a known-but-unchanged path does not widen the surface" "absent" \
+  "$(grep -qF 'changed-in-unrelated' .claude/spar-diff.txt && echo present || echo absent)"
+
+# `--` ends option parsing but does not disable pathspec magic, and a location is
+# text a model wrote. `:(glob)wanted.py` must not be honoured as a selector.
+surface_repo review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] glob citation\n- file: :(glob)wanted.py\n- problem: p\n- suggestion: s\n' > "$RFa"
+printf -- '### F1-1: REJECTED — no\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] glob citation\n- file: :(glob)wanted.py\n- problem: p\n- suggestion: s\n' > "$RFb"
+printf -- '### F2-1: REJECTED — still no\n' > "$RPb"
+run_hook >/dev/null
+chk_file "judge dispatched on a magic-looking location" .claude/spar-run-judge.sh
+chk "pathspec magic is not honoured as a selector" "changed-in-unrelated" \
+  "$(cat .claude/spar-diff.txt)"
+
+# A matcher's pathspec is a SET, so it can be part resolvable and part not.
+# Keeping only the good half would drop the other findings' surfaces with no
+# note — short of context, and no way for the reader to know it.
+surface_repo review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] wanted is wrong\n- file: wanted.py:1\n- problem: p\n- suggestion: s\n\n### F1-2 [MECHANICAL] unrelated is wrong\n- file: unrelated.py (the helper)\n- problem: q\n- suggestion: t\n' > "$RFa"
+printf -- '### F1-1: REJECTED — no\n### F1-2: REJECTED — no\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] wanted stops early\n- file: wanted.py:1\n- problem: p\n- suggestion: s\n\n### F2-2 [MECHANICAL] unrelated stops early\n- file: unrelated.py (the helper)\n- problem: q\n- suggestion: t\n' > "$RFb"
+printf -- '### F2-1: REJECTED — no\n### F2-2: REJECTED — no\n' > "$RPb"
+run_hook >/dev/null
+chk_file "matcher dispatched on a mixed path set" .claude/spar-run-matcher.sh
+chk "one unresolvable path in the set widens the whole surface" "changed-in-unrelated" \
+  "$(cat .claude/spar-diff.txt)"
+chk "and the partial failure is stated too" "could not be resolved" \
+  "$(cat .claude/spar-diff.txt)"
+
+chk "matcher.md names no task placeholder" "absent" \
+  "$(grep -qF '{{TASK}}' "$ROOT/plugins/spar/shared/prompts/matcher.md" && echo present || echo absent)"
+
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
