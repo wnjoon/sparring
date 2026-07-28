@@ -118,6 +118,20 @@ if [ -f "$PLAN_STATE" ]; then
   PLAN="$(plan_field plan_path "$PLAN_STATE")"
   MODE="$(plan_field mode "$PLAN_STATE")"
   [ -f "$PLAN" ] || { echo "Error: plan file not found: $PLAN" >&2; exit 1; }
+  # The plan review is a precondition of activation, checked after the phase and
+  # plan-file checks so its message is never the first thing a user sees when the
+  # real problem is a missing plan — and BEFORE the author/owner stamps below, so
+  # a refused run leaves the state exactly as it found it. plan_put_field, not
+  # plan_set_field, for the same reason those two use it. No [ -x ] guard on the
+  # checker — a missing command script is a broken install, and fail-open exists
+  # so a hook never holds a session hostage, which this deliberately is not.
+  PRCHK="$SPAR_ROOT/commands/spar-plan-review-check.sh"
+  if [ "$SPAR_PLAN_REVIEW" = false ]; then
+    plan_put_field plan_review overridden "$PLAN_STATE"
+    echo "Note: starting without a plan review because --no-plan-review was given."
+  elif ! bash "$PRCHK" "$PLAN" "$PLAN_STATE"; then
+    exit 1
+  fi
   # Claim the plan for THIS seat and THIS session. Both are stamped on the plan,
   # not on the task, because the hook launches every task after the first and
   # would otherwise drop them at the first advance. plan_put_field, not

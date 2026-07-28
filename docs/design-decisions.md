@@ -488,7 +488,7 @@ the instrument — if delegated fixes start causing the following round's findin
 the escalation rule is what should catch it, and if it does not, the tier is
 wrong or the rule is.
 
-## Phase 9 — plan review (not yet designed)
+## Phase 9 — plan review
 
 The plan is the one artifact in this system that no independent pass ever reads.
 `/spar:ready` stops so a human can review it, and that checkpoint was deliberate;
@@ -513,19 +513,58 @@ That the loop's own premise applies here is the argument: the author never grade
 its own work. A plan is authored work, and today it is graded by its author until
 execution proves otherwise.
 
-**Shape, when it is designed.** One blind pass, not a convergence loop — a plan
-has no tests to converge on, and iterating a document with a model is how plans
-grow rather than improve. The brief is bounded to what a reader with the
-repository can check and a human cannot cheaply: does every claim the plan makes
-about existing code hold; is every step satisfiable as written; does it cover the
-spec; and does anything in a task body collide with the `### ` extractor. Findings
-come back to the author to act on before `/spar:fight`, not to a debate. Cost is
-one reviewer call per plan, against a loop's worth of rounds when a plan is wrong.
+**What was built.** One blind pass, not a convergence loop — a plan has no tests
+to converge on, and iterating a document with a model is how plans grow rather
+than improve. `/spar:ready` captures the spec it was given to
+`.claude/spar-plan-spec.txt`, writes `plan_review` and `plan_review_id` into the
+plan state, and prepares a read-only reviewer over the plan and that captured
+spec. The result lands in `reviews/spar-plan-<id>.md` behind a
+`PLAN-REVIEW: CLEAN|FINDINGS` marker, deliberately not `STATUS:` — convergence is
+the reviewer's word inside a task loop and nothing produced outside one may be
+mistaken for it. The author answers each finding in
+`.claude/spar-plan-review-response.md`, and `/spar:fight` will not activate the
+plan until every one has a disposition. On by default; `--no-plan-review` skips
+it and records `plan_review: overridden` rather than skipping silently.
 
-**Open questions.** Whether it belongs inside `/spar:ready` (always) or as an
-opt-in flag; whether the reviewer family should be the cross-model one or the
-author's own, given the pass is about facts rather than judgment; and whether a
-plan that fails should block `/spar:fight` or merely warn.
+**Enforcement is a `/spar:fight` precondition, not a Stop-hook branch.** The
+first draft put a `planned`-phase branch in the dispatcher. It was rejected
+because such a branch can only enforce that an artifact exists, not that its
+findings were acted on — the hook sees a file, not a decision, and the whole
+point of the pass is the decision. A precondition at activation can read both the
+result and the response and compare them, and it fails in the one place a user is
+already waiting for an answer. This also means the usual fail-open rule does not
+apply: fail-open exists so a *hook* never holds a session hostage, and a
+deliberate precondition outside the hook that silently passed when its own script
+was missing would be a gate in name only.
+
+**The brief includes bounded design critique.** The first draft excluded it,
+reasoning that facts are checkable and judgment is not. That was wrong in a way
+the first two live passes demonstrated: a plan can be factually accurate about
+every line it cites and still contradict the protocol it is implementing, and a
+reader with the repository in front of it is exactly who can notice. Question 6
+asks whether any design decision contradicts the spec, `policy.md`, the README's
+invariants or the observable data flow — with a boundary: name the minimal
+alternative and its cost, do not rewrite the plan. Without that boundary the
+output is a competing plan, which is longer, not better. The human decides.
+
+**A plan edited after review is reported, not re-reviewed.** The recorded hash is
+compared at activation and a mismatch prints a note; the run proceeds. The
+objection, raised by an independent read of the design and overruled rather than
+missed: an author can accept a finding, rewrite the plan into something the
+reviewer never saw, and still pass the gate. That is true. The alternative costs a
+full pass per edit, and since the usual reason a plan changes is that the review
+asked for it, requiring re-review would charge for the review twice on exactly the
+runs where it worked. The note is the honest middle — it tells the reader that the
+review below describes an earlier revision, and leaves the judgment where the rest
+of this system leaves it.
+
+**A malformed result is quarantined, not refused in place.** The generated runner
+exits 0 the moment a regular result file exists, which is what makes it safe to
+re-run; telling an author to re-run it over a truncated or foreign-marker file
+would be telling them to run something that does nothing. So the checker renames
+the file to `<result>.invalid-N` and then names the runner. Without that the only
+way past a bad result is `--no-plan-review`, and the gate would be unclearable by
+the failure mode most likely to produce one.
 
 ## Cross-cutting stances
 

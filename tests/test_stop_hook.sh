@@ -138,6 +138,36 @@ chk "/spar atomically publishes initial state" 'mv "$SPAR_STATE_TMP" .claude/spa
 # Same for the direct Claude seat: the shared launcher covers the plan path only.
 chk "/spar records the reviewer build" 'reviewer_version:' \
   "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+chk "/spar:fight gates on the plan review" 'spar-plan-review-check.sh' \
+  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+# Presence is not order. The gate must precede the phase flip, or a refused plan
+# is already `running` and /spar:cancel is the only way out of it.
+chk "and does so before flipping the phase" "yes" \
+  "$(awk '/spar-plan-review-check\.sh/{c=NR} /plan_set_field phase running/{p=NR} END{print (c && p && c < p) ? "yes" : "no"}' \
+     "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+# plan_put_field, not plan_set_field: a plan prepared before this phase has no
+# plan_review line, and a pure replace would silently record nothing.
+chk "the override appends rather than replaces" 'plan_put_field plan_review overridden' \
+  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+
+# The override is behavioural, not a substring: run the real activation block
+# against a state file that has NO plan_review key, which is exactly the case a
+# pure replace gets wrong.
+fresh_dir
+mkdir -p reviews
+printf -- '---\nactive: true\nphase: planned\nmode: per-task\nreviewer: codex\nplan_path: p.md\ntasks: 1\ncurrent: 1\ncurrent_review_id:\n---\n1\tpending\tTask 1: A\n' > .claude/spar-plan.local.md
+printf '# Plan\n\n### Task 1: A\n\ndo it\n' > p.md
+. "$CLAUDE_PLUGIN_ROOT/commands/spar-plan-lib.sh"
+PLAN_STATE=.claude/spar-plan.local.md
+SPAR_PLAN_REVIEW=false
+PRCHK="$CLAUDE_PLUGIN_ROOT/commands/spar-plan-review-check.sh"
+if [ "$SPAR_PLAN_REVIEW" = false ]; then
+  plan_put_field plan_review overridden "$PLAN_STATE"
+elif ! bash "$PRCHK" p.md "$PLAN_STATE"; then :; fi
+chk "the override is recorded on a state that lacked the field" "plan_review: overridden" \
+  "$(cat "$PLAN_STATE")"
+chk "and the task table below it is untouched" "Task 1: A" \
+  "$(tail -1 "$PLAN_STATE")"
 
 # ── 4d. Phase 4 skip: small + safe only, always reported and persisted ──
 skip_repo() {

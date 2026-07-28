@@ -50,6 +50,20 @@ if [ -f "$PLAN_STATE" ]; then
   PLAN="$(plan_field plan_path "$PLAN_STATE")"
   MODE="$(plan_field mode "$PLAN_STATE")"
   [ -f "$PLAN" ] || { echo "Error: plan file not found: $PLAN" >&2; exit 1; }
+  # The plan review is a precondition of activation, checked after the phase and
+  # plan-file checks so its message is never the first thing a user sees when the
+  # real problem is a missing plan. plan_put_field, not plan_set_field: a plan
+  # prepared before this phase carries no plan_review line and a pure replace
+  # would record the override silently nowhere. No [ -x ] guard on the checker —
+  # a missing command script is a broken install, and fail-open exists so a hook
+  # never holds a session hostage, which this deliberately is not.
+  PRCHK="${CLAUDE_PLUGIN_ROOT}/commands/spar-plan-review-check.sh"
+  if [ "$SPAR_PLAN_REVIEW" = false ]; then
+    plan_put_field plan_review overridden "$PLAN_STATE"
+    echo "Note: starting without a plan review because --no-plan-review was given."
+  elif ! bash "$PRCHK" "$PLAN" "$PLAN_STATE"; then
+    exit 1
+  fi
   plan_set_field phase running "$PLAN_STATE"
   H1="$(plan_task_line 1 "$PLAN_STATE" | cut -f3)"
   if [ "$MODE" = "whole" ]; then cp "$PLAN" .claude/spar-fight-task.txt

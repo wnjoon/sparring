@@ -257,6 +257,15 @@ chk "ready skill's authoring section reads the captured spec" ".claude/spar-plan
 # Provenance is written at activation, so the direct Codex seat needs it too —
 # the shared launcher covers only the plan path.
 chk "fight skill records the reviewer build" "reviewer_version:" "$FIGHT"
+chk "fight skill gates on the plan review" "spar-plan-review-check.sh" "$FIGHT"
+# Presence is not order. The gate must precede the phase flip, or a refused plan
+# is already `running` and the cancel skill is the only way out of it.
+chk "and does so before flipping the phase" "yes" \
+  "$(awk '/spar-plan-review-check\.sh/{c=NR} /plan_set_field phase running/{p=NR} END{print (c && p && c < p) ? "yes" : "no"}' \
+     "$ROOT/adapters/codex/skills/spar-fight/SKILL.md")"
+# plan_put_field, not plan_set_field: a plan prepared before this phase has no
+# plan_review line, and a pure replace would silently record nothing.
+chk "fight skill appends the override" "plan_put_field plan_review overridden" "$FIGHT"
 chk "fight skill refuses when enforcement is unproven" "NOT be enforced" "$FIGHT"
 
 # The marker must be checked for IDENTITY, not mere existence: one left by an
