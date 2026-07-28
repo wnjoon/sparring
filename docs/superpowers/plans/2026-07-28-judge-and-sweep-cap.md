@@ -153,7 +153,7 @@ This is the failure that ended the previous loop on this repository: the run rea
 
 Routing sweep findings adds exactly one sweep response and one reviewer round. What that round then finds is not bounded by this change — it may itself produce findings and consume several of the rounds still available — but every one of them is governed by the normal cap, and the sweep cannot re-arm (`set_sweep_state true findings` is already set on this path, and the convergence branch checks `SWEEP_DONE` before sweeping again). The hard cap therefore remains the thing that guarantees termination, which is what it is for.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```bash
 # ── sweep findings use the hard cap, not the soft one ───────────────────────
@@ -187,12 +187,12 @@ chk "hard-cap sweep exit records the honest reason" 'reason: sweep-findings-at-c
 
 `sweep_review_repo` and `$SF` are the existing helpers used by case 44; `$SRESP` is the sweep response path the hook already names. Confirm `sweep_review_repo` accepts a round argument above 5 before relying on it — case 44 calls it with 5 and case 45 with 3.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: the first three checks FAIL — at round 6 the hook currently reports `at cap` and deactivates. The hard-cap checks should already pass, which is what shows the terminal is not being removed.
 
-- [ ] **Step 3: Move the comparison to the hard cap**
+- [x] **Step 3: Move the comparison to the hard cap**
 
 Replace the branch condition at `:1692`:
 
@@ -216,7 +216,7 @@ ${SF} as an unconverged/blocked result; the sweep findings were not silently
 dropped." "sparring [${REVIEW_ID}]: sweep findings at hard cap"
 ```
 
-- [ ] **Step 4: Re-point the two existing tests whose premise this changes**
+- [x] **Step 4: Re-point the two existing tests whose premise this changes**
 
 Case 44 (`tests/test_stop_hook.sh:759`) and case T3 (`:987`) both put the loop at round 5 and assert the run terminates. Under the new rule round 5 is below the hard cap and routes instead, so both would be asserting behaviour the engine no longer has. Do not delete them — they are the only coverage of the terminal. Give each a state file whose caps coincide, using the idiom already at `:1388`:
 
@@ -227,20 +227,20 @@ sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md 2
 
 **The two cases set their state differently, so the insertion point differs.** Case 44 calls `sweep_review_repo 5` at `tests/test_stop_hook.sh:760`; insert immediately after that call. T3 does **not** use that helper — it calls `fresh_dir; write_state review 5` at `:988` and then seds the phase to `sweep`; insert after the `write_state` line and before the phase sed. In both cases the edit must precede the first `run_hook`. Update each case's comment to say it is exercising the hard cap.
 
-- [ ] **Step 5: Correct the two documents that state the old rule**
+- [x] **Step 5: Correct the two documents that state the old rule**
 
 `plugins/spar/shared/policy.md:99` says sweep findings "at the cap terminate honestly as `sweep-findings-at-cap`" — make it say the hard cap, and that below it the findings are routed through one further reviewer round. `README.md:97` shows `findings at cap → sweep-findings-at-cap exit` in the flow diagram; make the same correction there. `plugins/spar/commands/fight.md:125` lists "sweep findings at the cap" among the non-converged endings without distinguishing soft from hard; it does not assert the old rule, but say "hard cap" so the ambiguity is not carried forward. The Codex fight skill makes no boundary claim and needs no edit. Historical specs and completed plans that mention `sweep-findings-at-cap` describe runs that happened and are not rewritten.
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: `FAIL=0`.
 
-- [ ] **Step 7: Prove the tests discriminate**
+- [x] **Step 7: Prove the tests discriminate**
 
 In a scratch copy, restore `[ "$ROUND" -ge "$MAX_ROUNDS" ]` and confirm the three round-6 checks fail while the hard-cap checks still pass. In a second copy, change the condition to a constant `false` and confirm the hard-cap checks fail — that is what shows the terminal still exists rather than having been routed away entirely.
 
-- [ ] **Step 8: Record the decision and commit**
+- [x] **Step 8: Record the decision and commit**
 
 Add to `docs/design-decisions.md`, beside the two-level cap's own entry, that the sweep-findings branch was written before the two-level cap and kept comparing against the soft cap; that this ended a real run with four rounds unspent on 2026-07-28; and that the hard cap is now the single place a round budget is declared exhausted.
 
