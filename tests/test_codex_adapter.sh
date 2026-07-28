@@ -244,6 +244,10 @@ chk "fight skill sets the author seat" "author: codex" "$FIGHT"
 chk "fight skill destructures plan_review" "SPAR_PLAN_REVIEW=" "$FIGHT"
 chk "ready skill destructures plan_review" "RDY_PLAN_REVIEW=" \
   "$(cat "$ROOT/adapters/codex/skills/spar-ready/SKILL.md")"
+READY="$(cat "$ROOT/adapters/codex/skills/spar-ready/SKILL.md")"
+chk "ready skill captures the spec" "spar-plan-spec.txt" "$READY"
+chk "ready skill records plan_review" "plan_review:" "$READY"
+chk "ready skill records plan_review_id" "plan_review_id:" "$READY"
 # Provenance is written at activation, so the direct Codex seat needs it too —
 # the shared launcher covers only the plan path.
 chk "fight skill records the reviewer build" "reviewer_version:" "$FIGHT"

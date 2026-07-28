@@ -2062,6 +2062,13 @@ for doc in plugins/spar/commands/cancel.md adapters/codex/skills/spar-cancel/SKI
   fresh_dir; mkdir -p reviews
   write_state review 1
   printf 'a brief\n' > .claude/spar-fix-brief.md
+  # The plan-review working files belong to the plan layer, not the loop, so
+  # cleanup() never sees them and only these two documents can remove them.
+  PR_ARTIFACTS=".claude/spar-plan-spec.txt .claude/spar-run-plan-review.sh
+.claude/spar-plan-review-prompt.txt .claude/spar-plan-review-hash
+.claude/spar-plan-review-response.md"
+  for f in $PR_ARTIFACTS; do printf 'x\n' > "$f"; done
+  printf 'PLAN-REVIEW: CLEAN\n' > reviews/spar-plan-20260101-000000-aaaaaa.md
   BLOCK="$(cancel_block "$ROOT/$doc")"
   chk "$doc has a runnable cancel block" "present" \
     "$(printf '%s' "$BLOCK" | grep -q 'rm -f' && echo present || echo absent)"
@@ -2075,6 +2082,13 @@ for doc in plugins/spar/commands/cancel.md adapters/codex/skills/spar-cancel/SKI
     "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
   chk "$doc still removes the state file" "absent" \
     "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+  LEFT=""
+  for f in $PR_ARTIFACTS; do [ -e "$f" ] && LEFT="$LEFT $f"; done
+  chk "$doc removes every plan-review working file" "none" "${LEFT:-none}"
+  # The review itself is evidence, not scratch: it survives cancellation exactly
+  # as reviews/spar-<id>-r<N>.md does.
+  chk "$doc keeps the plan review itself" "present" \
+    "$([ -f reviews/spar-plan-20260101-000000-aaaaaa.md ] && echo present || echo absent)"
   # Proves the premise of the env -u above rather than asserting it in a comment:
   # with the plugin root reachable, cancel.md's outcome writer runs and leaves
   # reviews/spar-<id>-outcome.md behind, and this check would fail.

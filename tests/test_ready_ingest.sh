@@ -48,4 +48,12 @@ RR="$ROOT/plugins/spar/commands/spar-ready-resolve.sh"
 chk "the flag lands in field 4" "false" "$(bash "$RR" "--no-plan-review -- some spec" | cut -f4)"
 chk "and the spec in field 5" "some spec" "$(bash "$RR" "--no-plan-review -- some spec" | cut -f5)"
 
+# ── Phase 9: the Claude seat captures the spec and records the fields ───────
+chk "ready.md captures the spec" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/ready.md" 'spar-plan-spec.txt')"
+chk "ready.md records plan_review" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/ready.md" 'plan_review:')"
+chk "ready.md records plan_review_id" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/ready.md" 'plan_review_id:')"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

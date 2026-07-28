@@ -74,6 +74,13 @@ RDY_SLUG="$(printf '%s' "$RDY_SPEC" | sed 's#.*/##; s/\.[A-Za-z0-9]*$//' | tr '[
 RDY_BRANCH="spar/${RDY_SLUG}-$(date +%Y%m%d-%H%M%S)"
 git checkout -b "$RDY_BRANCH" || { echo "Error: could not create branch $RDY_BRANCH." >&2; exit 1; }
 for D in .claude reviews docs/superpowers/plans; do mkdir -p "$D"; done
+# The captured copy is authoritative from here: a spec file edited later does not
+# change what the plan was written against. A path is copied byte for byte;
+# inline text gets a trailing newline.
+if [ -f "$RDY_SPEC" ]; then cp "$RDY_SPEC" .claude/spar-plan-spec.txt
+else printf '%s\n' "$RDY_SPEC" > .claude/spar-plan-spec.txt; fi
+RDY_PR_ID="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+if [ "$RDY_PLAN_REVIEW" = false ]; then RDY_PR=skipped; else RDY_PR=required; fi
 # Reuse spar's git-excludes so fight's own commits never stage loop artifacts.
 EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
 for pat in 'reviews/spar-*' '.claude/spar*'; do
@@ -94,6 +101,8 @@ author: codex
 reviewer: ${RDY_REVIEWER}
 owner_session:
 unattended: ${RDY_UNATTENDED}
+plan_review: ${RDY_PR}
+plan_review_id: ${RDY_PR_ID}
 plan_path:
 branch: ${RDY_BRANCH}
 tasks: 0
@@ -103,8 +112,8 @@ current_review_id:
 STATE_EOF
 mv "$TMP" .claude/spar-plan.local.md
 trap - EXIT
-printf 'Ready — plan branch %s (author=codex, reviewer=%s, unattended=%s).\nSPEC=%s\n' \
-  "$RDY_BRANCH" "$RDY_REVIEWER" "$RDY_UNATTENDED" "$RDY_SPEC"
+printf 'Ready — plan branch %s (author=codex, reviewer=%s, unattended=%s, plan-review=%s).\nSPEC=%s\n' \
+  "$RDY_BRANCH" "$RDY_REVIEWER" "$RDY_UNATTENDED" "$RDY_PR" "$RDY_SPEC"
 ```
 
 ## 2. Write the plan
@@ -133,7 +142,36 @@ MODE="$(sed -n 's/^mode: //p' .claude/spar-plan.local.md | head -1)"
 bash "$SPAR_ROOT/commands/spar-ready-ingest.sh" "<the plan path>" "$MODE" .claude/spar-plan.local.md
 ```
 
-## 4. Stop
+## 4. Have the plan reviewed
+
+Skip this section entirely when section 1 printed `plan-review=skipped`.
+
+```bash
+SPAR_ROOT="${SPAR_PLUGIN_ROOT:-}"
+[ -n "$SPAR_ROOT" ] || SPAR_ROOT=@@SPAR_PLUGIN_ROOT@@
+bash "$SPAR_ROOT/commands/spar-plan-review-prepare.sh" "<the plan path>" .claude/spar-plan.local.md \
+  && bash .claude/spar-run-plan-review.sh
+```
+
+Read `reviews/spar-plan-<plan_review_id>.md` (the id is in the plan state) and
+show the user what it says. You did not write this review and you must not edit
+or delete it.
+
+If its first line is `PLAN-REVIEW: FINDINGS`, decide each finding on the merits —
+accept it and edit the plan, or reject it with a reason grounded in the plan, the
+spec, or the code — and write `.claude/spar-plan-review-response.md` with one
+section per finding:
+
+```
+### PR1: ACCEPTED — <what you changed in the plan>
+### PR2: REJECTED — <grounded reason>
+```
+
+`spar-fight` refuses to start until that file accounts for every finding. A
+grounded rejection clears a finding exactly as an acceptance does — the point is
+that each one was answered, not that the reviewer always wins.
+
+## 5. Stop
 
 Tell the user the plan path and branch, and that `spar-fight` with no task will
 drive the plan to convergence task by task. Do not start it — the checkpoint here

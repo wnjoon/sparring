@@ -14,6 +14,11 @@ if [ -f .claude/spar.local.md ]; then
   "$SPAR_ROOT/commands/spar-record-outcome.sh" cancelled .claude/spar.local.md "$SW" || true
 fi
 rm -f .claude/spar-plan.local.md .claude/spar-fight.log .claude/spar-fight-task.txt
+# Plan-review artifacts. The result under reviews/ is kept, like every other
+# review artifact — only the working files that would outlive the plan go.
+rm -f .claude/spar-plan-spec.txt .claude/spar-run-plan-review.sh \
+      .claude/spar-plan-review-prompt.txt .claude/spar-plan-review-hash \
+      .claude/spar-plan-review-response.md
 rm -f .claude/spar.local.md .claude/spar-run-reviewer.sh .claude/spar-reviewer-prompt.txt \
       .claude/spar-retries .claude/spar-ledger.md .claude/spar-registry.tsv \
       .claude/spar-registry-round .claude/spar-run-judge.sh .claude/spar-judge-prompt.txt \
