@@ -103,8 +103,8 @@ Nothing in `stop-hook.sh` changes. Nothing in `stop-fight.sh` changes.
    against, and the review must judge the plan against what it was given.
 2. Generate `plan_review_id` and write it, plus `plan_review: required`, into the
    plan state. With `--no-plan-review`, write `plan_review: skipped` and stop
-   here. If the reviewer CLI is not on `PATH`, write `plan_review: skipped` with
-   the reason printed — the same fail-open the loop uses everywhere.
+   here. There is no absent-CLI branch: `/spar:ready` already refuses to create a
+   plan at all when the chosen reviewer is not on `PATH`.
 3. After the session has written the plan and ingested it, prepare the prompt and
    the runner via `plugins/spar/commands/spar-plan-review-prepare.sh`, then tell
    the session to run the runner, read the result, present it to the user, and
@@ -223,11 +223,15 @@ belong.
 
 ## Failure behaviour
 
+`/spar:ready` already refuses to create a plan at all when the chosen reviewer
+CLI is not on `PATH` (`ready.md:35`, and the Codex mirror), so "the reviewer is
+absent at preparation" is a state the code prevents rather than one this pass
+must handle. The first draft of this spec listed it; that row was wrong.
+
 | Condition | Result |
 |---|---|
-| Reviewer CLI absent at preparation | `plan_review: skipped`, reason printed |
 | Runner fails or produces nothing | `/spar:fight` refuses and names the runner; the author re-runs |
-| Result's first line is not a marker | Same; the bad file is set aside as `.invalid-N` |
+| Result's first line is not a marker | The **checker** sets the bad file aside as `.invalid-N` and refuses; the generated runner exits 0 on any existing regular result, so nothing else can free the path |
 | Reviewer cannot be made to work at all | `/spar:fight --no-plan-review`, recorded as `overridden` |
 | `plan_review` absent from an older state file | Treated as `skipped` |
 
@@ -241,8 +245,6 @@ Pure bash, no reviewer CLI, stubs on `PATH` where one is needed.
 
 - **Preparation writes the fields and the runner**, and `--no-plan-review` writes
   `skipped` and prepares nothing.
-- **Absent CLI at preparation** yields `skipped` with a reason, and `/spar:fight`
-  proceeds.
 - **`/spar:fight` refuses** when the result is missing, and names the runner.
   Reverting the precondition makes it proceed — that check is the proof the
   enforcement exists.
