@@ -42,9 +42,42 @@ chk "prompt carries the plan" "Task 1: Alpha" "$(cat .claude/spar-plan-review-pr
 chk "prompt carries the captured spec" "the spec text" "$(cat .claude/spar-plan-review-prompt.txt 2>/dev/null)"
 chk "prompt names the invariants file question 6 needs" "policy.md" \
   "$(cat .claude/spar-plan-review-prompt.txt 2>/dev/null)"
+# The whole question block, not a substring of it. Substring checks cannot see
+# wording drift, and the six questions are the one part of this prompt the spec
+# fixes verbatim — reword one and the review asks a different thing than the
+# design settled on. Whitespace is collapsed so re-wrapping a line is allowed;
+# changing a word is not.
+flat(){ tr '\n' ' ' | tr -s ' '; }
+SPEC_Q="$(awk '/^Six questions:$/{f=1;next} /^## /{f=0} f' \
+  "$ROOT/docs/superpowers/specs/2026-07-28-plan-review-design.md" | flat)"
+eqchk "the spec's question block was found" "yes" \
+  "$(printf '%s' "$SPEC_Q" | grep -q '6\. Does any design decision' && echo yes || echo no)"
+chk "every question is carried verbatim from the spec" "$SPEC_Q" \
+  "$(flat < .claude/spar-plan-review-prompt.txt)"
 chk_absent "no placeholder survives substitution" "{{" \
   "$(cat .claude/spar-plan-review-prompt.txt 2>/dev/null)"
 chk "runner is read-only" "sandbox read-only" "$(cat .claude/spar-run-plan-review.sh 2>/dev/null)"
+# This suite runs the runner through `bash`, which works on a non-executable
+# file — so dropping the chmod would leave every other check green while the
+# ready documents, which invoke it directly, broke.
+eqchk "the generated runner is executable" "yes" \
+  "$([ -x .claude/spar-run-plan-review.sh ] && echo yes || echo no)"
+
+# ── each document's text reaches the reviewer intact ────────────────────────
+# Not hypothetical: this repository's own plan and spec quote both placeholders
+# while describing this file. Two sequential replacements let whichever runs
+# first have its inserted text re-scanned by the second, so a spec quoting
+# {{PLAN}} would come out with the whole plan wedged inside it.
+printf '# Plan\n\nthe plan mentions {{SPEC}} here\n' > collide-plan.md
+printf 'the spec mentions {{PLAN}} here\n' > .claude/spar-plan-spec.txt
+rm -f .claude/spar-plan-review-prompt.txt
+bash "$P" collide-plan.md "$ST"
+COLLIDE="$(cat .claude/spar-plan-review-prompt.txt 2>/dev/null)"
+chk "a spec quoting {{PLAN}} survives intact" "the spec mentions {{PLAN}} here" "$COLLIDE"
+chk "a plan quoting {{SPEC}} survives intact" "the plan mentions {{SPEC}} here" "$COLLIDE"
+printf 'the spec text\n' > .claude/spar-plan-spec.txt
+rm -f collide-plan.md .claude/spar-plan-review-prompt.txt .claude/spar-run-plan-review.sh
+bash "$P" p.md "$ST"
 
 # ── the runner is EXECUTED, not grepped ─────────────────────────────────────
 # A generated script carrying "sandbox read-only" or "mktemp" only in a comment
@@ -79,6 +112,32 @@ rm -f "$RES"; ln -s /dev/null "$RES"
 runner_with "$WRITE_OK"
 eqchk "a symlinked result path is refused" "yes" "$([ -L "$RES" ] && echo yes || echo no)"
 rm -f "$RES"
+
+# A result that appears AFTER the first check but BEFORE the lock is held must
+# still be honoured. The window is real: another invocation can publish and
+# release between the two. A stub mktemp lands exactly inside it — the runner
+# calls mktemp right after taking the lock and rechecks straight after.
+mkstate required
+rm -f .claude/spar-run-plan-review.sh; bash "$P" p.md "$ST"
+rm -f "$RES"
+printf 'sentinel\n' > .claude/spar-plan-review-hash
+cat > "$STUBS/mktemp" <<'MK'
+#!/bin/sh
+printf 'PLAN-REVIEW: FINDINGS\n' > reviews/spar-plan-20260728-120000-abc123.md
+exec /usr/bin/mktemp "$@"
+MK
+chmod +x "$STUBS/mktemp"
+printf '#!/bin/sh\ntouch dispatched\n' > "$STUBS/codex"; chmod +x "$STUBS/codex"
+rm -f dispatched
+( PATH="$STUBS:$PATH"; bash .claude/spar-run-plan-review.sh >/dev/null 2>&1 )
+rm -f "$STUBS/mktemp"
+chk "a result published while waiting for the lock is kept" "PLAN-REVIEW: FINDINGS" \
+  "$(cat "$RES" 2>/dev/null)"
+eqchk "and the reviewer is not dispatched over it" "absent" \
+  "$([ -f dispatched ] && echo present || echo absent)"
+eqchk "and its hash is not overwritten" "sentinel" \
+  "$(cat .claude/spar-plan-review-hash 2>/dev/null)"
+rm -f "$RES" dispatched
 
 # ── the claude family ───────────────────────────────────────────────────────
 printf '#!/bin/sh\nprintf "PLAN-REVIEW: CLEAN\\n"\n' > "$STUBS/claude"; chmod +x "$STUBS/claude"

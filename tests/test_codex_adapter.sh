@@ -248,6 +248,12 @@ READY="$(cat "$ROOT/adapters/codex/skills/spar-ready/SKILL.md")"
 chk "ready skill captures the spec" "spar-plan-spec.txt" "$READY"
 chk "ready skill records plan_review" "plan_review:" "$READY"
 chk "ready skill records plan_review_id" "plan_review_id:" "$READY"
+# Scoped to the authoring section: the path is in section 1's setup block either
+# way, so a whole-document check would pass while section 2 still sent the author
+# back to the mutable original and put the plan and the review on different specs.
+chk "ready skill's authoring section reads the captured spec" ".claude/spar-plan-spec.txt" \
+  "$(awk '/^## 2\. Write the plan/{f=1} f&&/^## 3\./{exit} f' \
+       "$ROOT/adapters/codex/skills/spar-ready/SKILL.md")"
 # Provenance is written at activation, so the direct Codex seat needs it too —
 # the shared launcher covers only the plan path.
 chk "fight skill records the reviewer build" "reviewer_version:" "$FIGHT"

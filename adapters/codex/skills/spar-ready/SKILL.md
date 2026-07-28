@@ -118,9 +118,10 @@ printf 'Ready — plan branch %s (author=codex, reviewer=%s, unattended=%s, plan
 
 ## 2. Write the plan
 
-Read the spec (the `SPEC=` value printed above — a path or an inline
-description; if it is a path, read that file). If it is empty or missing, stop
-and say so.
+Read `.claude/spar-plan-spec.txt` — section 1 captured the spec there, and that
+copy is what the plan will be reviewed against. Read it rather than the `SPEC=`
+path, so an edit to the original after setup cannot put the plan and the review
+on different specs. If it is empty, stop and say so.
 
 Write the implementation plan to `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`:
 bite-sized tasks, each with its own failing test → implementation → verification

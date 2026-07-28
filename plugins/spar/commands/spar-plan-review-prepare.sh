@@ -38,15 +38,27 @@ out="reviews/spar-plan-${prid}.md"
 # string: a plan path holding a space or a `$` would word-split or expand.
 shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
-# Substitution order matters. {{PLAN}} and {{SPEC}} carry arbitrary document
-# text — a plan that quotes "{{SPEC}}" is not hypothetical, this repository's own
-# plans do it — so they go LAST and nothing runs after them.
+# Assembled structurally, not by two sequential replacements. Both inputs are
+# arbitrary document text — this repository's own plans and specs quote
+# "{{SPEC}}" and "{{PLAN}}" while describing this very file — and with sequential
+# replacement whichever goes first has its inserted text re-scanned by the
+# second. Splitting the TEMPLATE on both placeholders and concatenating means no
+# inserted byte is ever looked at again.
 prompt="$(cat "$TPL")"
 spec_text=""
 [ -f "$SPEC" ] && spec_text="$(cat "$SPEC")"
 [ -n "$spec_text" ] || spec_text="(no spec was captured for this plan)"
-prompt="${prompt//\{\{SPEC\}\}/$spec_text}"
-prompt="${prompt//\{\{PLAN\}\}/$(cat "$plan")}"
+plan_text="$(cat "$plan")"
+case "$prompt" in *'{{SPEC}}'*'{{PLAN}}'*) ;; *) exit 1 ;; esac
+head=${prompt%%'{{SPEC}}'*}
+rest=${prompt#*'{{SPEC}}'}
+mid=${rest%%'{{PLAN}}'*}
+tail=${rest#*'{{PLAN}}'}
+# Exactly one of each: a second copy would survive in a fixed part and reach the
+# reviewer as literal placeholder text, which is how the template silently loses
+# a section.
+case "${head}${mid}${tail}" in *'{{SPEC}}'*|*'{{PLAN}}'*) exit 1 ;; esac
+prompt="${head}${spec_text}${mid}${plan_text}${tail}"
 
 mkdir -p .claude reviews
 printf '%s\n' "$prompt" > "$PROMPT"
@@ -89,6 +101,15 @@ if ! mkdir "\$lock" 2>/dev/null; then
 fi
 tmp=\$(mktemp ${Q_OUT}.tmp.XXXXXX) || { rmdir "\$lock"; exit 1; }
 trap 'rm -f "\$tmp"; rmdir "\$lock" 2>/dev/null || true' EXIT
+# Recheck under the lock. Another invocation can publish and release between the
+# check above and this one's mkdir; without this, that invocation would rewrite
+# the hash from a possibly newer plan and leave the retained review paired with a
+# revision it never saw.
+if [ -e ${Q_OUT} ] || [ -L ${Q_OUT} ]; then
+  [ -f ${Q_OUT} ] && [ ! -L ${Q_OUT} ] && exit 0
+  echo "invalid pre-existing plan-review artifact" >&2
+  exit 1
+fi
 # The hash of the plan AS REVIEWED, written by the plugin rather than the author,
 # so /spar:fight can say whether what it is about to run is what was read.
 git hash-object ${Q_PLAN} > ${Q_HASH} 2>/dev/null || true

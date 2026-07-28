@@ -80,11 +80,13 @@ trap - EXIT
 printf 'Ready — plan branch %s (reviewer=%s, unattended=%s, plan-review=%s). Review the plan, then run /spar:fight to execute.\nSPEC=%s\n' "$RDY_BRANCH" "$RDY_REVIEWER" "$RDY_UNATTENDED" "$RDY_PR" "$RDY_SPEC"
 ```
 
-Then run these steps in order, and **stop after ingest** — `/spar:ready` prepares
-the plan but does NOT execute it. Execution is `/spar:fight`.
+Then run every step below in order, and **stop at the last one** — `/spar:ready`
+prepares the plan but does NOT execute it. Execution is `/spar:fight`.
 
-1. **Produce the plan.** Read the spec (the `SPEC=` value printed above — a path
-   or an inline description; if it is a path, read that file). Use the
+1. **Produce the plan.** Read `.claude/spar-plan-spec.txt` — the setup command
+   captured the spec there, and that copy is what the plan will be reviewed
+   against. Read it rather than the `SPEC=` path, so an edit to the original
+   after setup cannot put the plan and the review on different specs. Use the
    `superpowers:writing-plans` skill to write the implementation plan to
    `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`. **Do NOT run writing-plans'
    execution handoff (do not offer subagent/inline execution) — `/spar:fight` is

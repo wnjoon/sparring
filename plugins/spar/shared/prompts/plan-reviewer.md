@@ -25,22 +25,18 @@ Answer each, citing `file:line`.
 2. Is every step satisfiable as written, by an implementer who sees only that one
    task's text?
 3. Would each test the plan specifies actually fail before the change, for the
-   stated reason? A check that passes whatever the implementation does is worse
-   than no check, because it reads as coverage.
+   stated reason?
 4. Does the plan cover the spec — is there a requirement with no task?
 5. Does any task body contain a line beginning with `### `? The extractor that
    hands one task to the implementer splits on exactly that, so a stray one
-   silently truncates the task and everything after it is never delivered.
-6. Does any design decision contradict the spec, the protocol in
-   `plugins/spar/shared/policy.md`, the invariants in `README.md`, or the
-   repository's observable data flow? Name the minimal alternative and its cost.
+   truncates the task.
+6. Does any design decision contradict the spec, the protocol in `policy.md`, the
+   invariants in `README.md`, or the repository's observable data flow? Name the
+   minimal alternative and its cost. Do not rewrite the plan.
 
-Question 6 has a boundary: name contradictions, give the minimal alternative,
-and **do not rewrite or expand the plan**. A reviewer that proposes a different
-plan produces a longer plan, not a better one. The human decides.
-
-Read `README.md` and `plugins/spar/shared/policy.md` before answering question 6
-— it cannot be answered without them.
+The two files question 6 names are `README.md` and
+`plugins/spar/shared/policy.md`. Read both before answering it — it cannot be
+answered without them.
 
 ## Output format (STRICT — a script parses your first line)
 

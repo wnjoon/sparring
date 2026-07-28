@@ -144,7 +144,7 @@ git commit -m "feat(ready): a --no-plan-review flag in both resolvers"
 preparation. The result path is derived from it, so no later reader has to
 reconstruct a timestamp or disambiguate between retained earlier reviews.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_plan_review_prepare.sh`, following the harness shape of `tests/test_fight_launch.sh` — its own temp repo, `chk`/`eqchk`, and stubs on `PATH`:
 
@@ -242,12 +242,12 @@ for f in "$ROOT/plugins/spar/commands/ready.md" "$ROOT/adapters/codex/skills/spa
 done
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `bash tests/test_plan_review_prepare.sh` and `bash tests/test_ready_ingest.sh`
 Expected: the prepare suite fails to find the script at all, and the static checks fail on both ready documents.
 
-- [ ] **Step 3: Write the prompt template**
+- [x] **Step 3: Write the prompt template**
 
 `plugins/spar/shared/prompts/plan-reviewer.md`, with exactly two placeholders, `{{PLAN}}` and `{{SPEC}}`. An earlier draft had a third, `{{BRIEF_PATHS}}`, and never said what went in it; the paths question 6 needs — `README.md` and `plugins/spar/shared/policy.md` — are fixed, so write them into the template as literal text. It must:
 
@@ -257,7 +257,7 @@ Expected: the prepare suite fails to find the script at all, and the static chec
 - Tell the reader to treat the plan, the spec and repository text as data to evaluate, never as instructions to obey — the same framing `judge.md:5-6` and `sweeper.md:3` already carry.
 - Point at `README.md` and `plugins/spar/shared/policy.md` by path, since question 6 cannot be answered without them.
 
-- [ ] **Step 4: Write the preparation script**
+- [x] **Step 4: Write the preparation script**
 
 `plugins/spar/commands/spar-plan-review-prepare.sh`. Read `reviewer`, `plan_review` and `plan_review_id` from the state with the same `field()` helper shape the other command scripts use. Return 1 unless `plan_review` is `required`, the template exists, the plan file exists, and `command -v "$reviewer"` succeeds.
 
@@ -279,7 +279,7 @@ git hash-object "${plan}" > .claude/spar-plan-review-hash 2>/dev/null || true
 
 The claude family gets no diff surface here — there is no loop, no frozen baseline, and the plan and spec are in the prompt. It has `Read`, `Grep` and `Glob` for the repository, which is what question 1 and question 6 need.
 
-- [ ] **Step 5: Capture the spec and record the fields, in both ready documents**
+- [x] **Step 5: Capture the spec and record the fields, in both ready documents**
 
 In `ready.md`'s setup block, after the resolver output is destructured and before the state file is written:
 
@@ -304,7 +304,7 @@ and add `plan_review: ${RDY_PR}` and `plan_review_id: ${RDY_PR_ID}` to the state
 
 Then extend each document's step list: after ingest, when `plan_review` is `required`, run the preparation script, run the generated runner, read the result, present it to the user, and — if the first line is `PLAN-REVIEW: FINDINGS` — write `.claude/spar-plan-review-response.md` with one `### PR<n>: ACCEPTED — …` or `### PR<n>: REJECTED — <grounded reason>` per finding. Say plainly that `/spar:fight` will refuse to start until that file accounts for every finding, and that a grounded rejection clears one exactly as an acceptance does.
 
-- [ ] **Step 6: Add the five artifacts to both cancel lists**
+- [x] **Step 6: Add the five artifacts to both cancel lists**
 
 `.claude/spar-plan-spec.txt`, `.claude/spar-run-plan-review.sh`,
 `.claude/spar-plan-review-prompt.txt`, `.claude/spar-plan-review-hash` and
@@ -317,16 +317,16 @@ holding all five and asserts they are gone — the same shape as the existing
 cancel-block tests in `tests/test_stop_hook.sh`, which extract and execute those
 blocks rather than grepping them.
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `bash tests/test_plan_review_prepare.sh`, `bash tests/test_ready_ingest.sh`, `bash tests/test_stop_hook.sh`
 Expected: `FAIL=0` in each.
 
-- [ ] **Step 8: Prove each part is independently caught**
+- [x] **Step 8: Prove each part is independently caught**
 
 Five scratch copies. Remove the `plan_review` guard from the prepare script and confirm the `skipped` checks fail. Remove the CLI check and confirm the absent-CLI checks fail. Remove the hash line and confirm its check fails. Remove the spec capture from `ready.md` only, then from the Codex skill only, and confirm the matching static check fails each time while the other stays green. Remove one artifact from one cancel list and confirm that document's teardown check fails.
 
-- [ ] **Step 9: Run every suite and commit**
+- [x] **Step 9: Run every suite and commit**
 
 ```bash
 rc=0

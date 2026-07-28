@@ -55,5 +55,17 @@ chk "ready.md records plan_review" "yes" \
   "$(has "$ROOT/plugins/spar/commands/ready.md" 'plan_review:')"
 chk "ready.md records plan_review_id" "yes" \
   "$(has "$ROOT/plugins/spar/commands/ready.md" 'plan_review_id:')"
+# The capture is only authoritative if the plan is written from it. Scoped to the
+# authoring step, not the whole document: the path appears in the setup block
+# regardless, so a document-wide grep would pass while step 1 still sent the
+# author back to the mutable original.
+RM="$ROOT/plugins/spar/commands/ready.md"
+STEP1="$(awk '/^1\. \*\*Produce the plan/{f=1} f&&/^2\. /{exit} f' "$RM")"
+chk "ready.md's authoring step reads the captured spec" "yes" \
+  "$(printf '%s' "$STEP1" | grep -qF '.claude/spar-plan-spec.txt' && echo yes || echo no)"
+# The old "stop after ingest" wording predates the review step, which comes
+# after ingest — an author following it literally skips the review entirely.
+chk "ready.md no longer says to stop after ingest" "no" \
+  "$(has "$RM" 'stop after ingest')"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
