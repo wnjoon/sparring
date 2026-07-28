@@ -2234,5 +2234,65 @@ chk "the extracted finding appears exactly once in the judge prompt" "1" \
   "$(grep -c 'unmistakable-first' .claude/spar-judge-prompt.txt 2>/dev/null || echo 0)"
 
 
+# ── economics: a default install measures nothing ───────────────────────────
+# The reader is replaced with a stub that records every invocation. With no
+# configured value the engine must not consult it with a real line count, and
+# must not run the git scans that produce one.
+fresh_dir; write_state task 0; mkdir -p reviews
+no_skip
+printf 'a\nb\nc\n' > f.txt
+cat > .claude/fake-reader.sh <<'READER'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$PWD/.claude/reader-calls.txt"
+printf 'model=\neffort=\nwriter=\nsource=default\n'
+READER
+chmod +x .claude/fake-reader.sh
+SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
+# Several dispatches, so this cannot pass by there being only one call site.
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] mod.py too big\n- file: mod.py:1\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf -- '### F1-1: REJECTED — no\n' > "$RP1"
+SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
+SPAR_CONFIG_READER="$PWD/.claude/fake-reader.sh" run_hook >/dev/null
+chk "the reader was consulted more than once, so the next check can fail" "yes" \
+  "$([ "$(wc -l < .claude/reader-calls.txt)" -gt 1 ] && echo yes || echo "only $(wc -l < .claude/reader-calls.txt)")"
+chk "an unconfigured install never measures a line count" "none" \
+  "$(awk '$2 != 0 { n++ } END { print (n ? n " calls carried a count" : "none") }' .claude/reader-calls.txt)"
+
+
+# ...and when something IS configured it still measures. A git shim forwarding
+# to the real git is the only way to see the scan from outside, and this is what
+# proves the short-circuit above did not simply disable the feature.
+#
+# The plan also asked for the count to be memoised per process. Removing the
+# memoisation failed no test, so I traced the paths: every branch that reaches
+# a call site blocks before another one can fire, so there is at most one per
+# hook invocation and the memo had nothing to save. Dropped rather than shipped
+# unexercised.
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'mod.py\n' > mod.py
+git add -A >/dev/null 2>&1
+git -c user.email=t@t -c user.name=t commit -qm base
+printf '[reviewer.codex]\nmodel = "gpt-5.6-sol"\n[writer.claude]\ntier = "cheap"\n' > .claude/spar-cfg.toml
+mkdir -p .claude/shim
+REALGIT="$(command -v git)"
+cat > .claude/shim/git <<SHIM
+#!/usr/bin/env bash
+case " \$* " in *" --numstat "*) printf 'x\n' >> "$PWD/.claude/numstat-calls.txt" ;; esac
+exec "$REALGIT" "\$@"
+SHIM
+chmod +x .claude/shim/git
+# Round 1 findings on mod.py, answered, so this invocation both dispatches the
+# matcher and builds a fix brief — two call sites, one hook run.
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] mod.py is wrong\n- file: mod.py:1\n- problem: p\n- suggestion: s\n' > "$RF1"
+printf -- '### F1-1: FIXED — did it\n' > "$RP1"
+( PATH="$PWD/.claude/shim:$PATH"; SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null )
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] mod.py still wrong\n- file: mod.py:1\n- problem: p\n- suggestion: s\n\n### F2-2 [MECHANICAL] other.py\n- file: other.py:2\n- problem: q\n- suggestion: t\n' > "$RFb2"
+rm -f .claude/numstat-calls.txt
+( PATH="$PWD/.claude/shim:$PATH"; SPAR_CONFIG_FILE="$PWD/.claude/spar-cfg.toml" run_hook >/dev/null )
+chk "a configured install still measures" "yes" \
+  "$([ -s .claude/numstat-calls.txt ] && echo yes || echo "never measured")"
+
+
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"

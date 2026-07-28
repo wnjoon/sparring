@@ -308,7 +308,6 @@ sweep_response_file() { echo "reviews/spar-${REVIEW_ID}-sweep-response.md"; }
 is_regular_artifact() { [ -f "$1" ] && [ ! -L "$1" ]; }
 artifact_path_exists() { [ -e "$1" ] || [ -L "$1" ]; }
 
-# ── finding registry (Phase 2a: deterministic fingerprint) ──────────────────
 # ── finding grammar (ONE implementation) ────────────────────────────────────
 # Every consumer of a reviewer finding reads it through here. The title
 # normalisation below IS the fingerprint definition: two copies that drift make
@@ -662,9 +661,31 @@ diff_line_count() {
   printf '%s\n' "$(( ${tracked:-0} + untracked ))"
 }
 
+# Does this install configure anything at all? Asked with a line count of 0,
+# which the reader does not need in order to answer it: `source=` reports
+# whether a file was read, and neither the model nor the writer tier varies with
+# size. Only the effort ladder does, so a real count is measured afterwards and
+# only when it can change something. Without this an install that configures
+# nothing — the shipped default, where config.toml is entirely comments — paid a
+# git diff, a git ls-files, an awk per untracked file and a python spawn on
+# every runner emission to produce no flags at all.
+economics_configured() { # $1=family
+  local k v src="" model="" writer=""
+  [ -x "$CONFIG_READER" ] || return 1
+  while IFS='=' read -r k v; do
+    case "$k" in source) src="$v" ;; model) model="$v" ;; writer) writer="$v" ;; esac
+  done < <("$CONFIG_READER" "$1" 0 2>/dev/null)
+  [ "$src" = config ] || return 1
+  [ -n "$model" ] || [ -n "$writer" ] && return 0
+  # A ladder still yields an effort at a nonzero size, so a file holding only an
+  # [effort] table must not be read as unconfigured.
+  grep -q '^[[:space:]]*ladder[[:space:]]*=' \
+    "${SPAR_CONFIG_FILE:-${PLUGIN_ROOT}/shared/config.toml}" 2>/dev/null
+}
+
 economics_flags() { # $1=family → prints flags, or nothing
   local fam="$1" k v model="" effort="" src=""
-  [ -x "$CONFIG_READER" ] || return 0
+  economics_configured "$fam" || return 0
   while IFS='=' read -r k v; do
     case "$k" in model) model="$v" ;; effort) effort="$v" ;; source) src="$v" ;; esac
   done < <("$CONFIG_READER" "$fam" "$(diff_line_count)" 2>/dev/null)
@@ -1179,7 +1200,7 @@ build_fix_brief() { # $1 = round → 0 if a brief was written
   local n="$1" rf tier="" src="" k v
   rm -f "$FIX_BRIEF"
   rf=$(review_file "$n"); [ -f "$rf" ] || return 1
-  [ -x "$CONFIG_READER" ] || return 1
+  economics_configured "$AUTHOR" || return 1
   while IFS='=' read -r k v; do
     case "$k" in writer) tier="$v" ;; source) src="$v" ;; esac
   done < <("$CONFIG_READER" "$AUTHOR" "$(diff_line_count)" 2>/dev/null)
