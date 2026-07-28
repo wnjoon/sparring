@@ -42,7 +42,7 @@ which searches only the current round's review, and only for that exact fingerpr
 
 This is not hypothetical, though the evidence for it is external to the repository and should be read that way. On 2026-07-28 the first judge dispatch this repository had ever needed failed this way — observed in the session log as `cannot extract finding for judge:` — and the dispute went to the user instead. The zero-judge count across 29 runs was counted from `reviews/` in that session, not from anything a later reader can re-derive here. **The code diagnosis above stands on its own and does not depend on either claim.**
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/test_stop_hook.sh`, before the `PASS=`/`FAIL=` summary:
 
@@ -70,12 +70,12 @@ chk "and the user is not asked to adjudicate instead" "absent" \
   "$(printf '%s' "$OUT" | grep -qF 'judge is unavailable' && echo present || echo absent)"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: `FAIL: a re-worded stalemate dispatches the judge` and the three checks below it. The block message will contain "The blind judge is unavailable", and `.claude/spar.log` will carry `cannot extract finding for judge:`.
 
-- [ ] **Step 3: Give the judge the resolver the gate already uses**
+- [x] **Step 3: Give the judge the resolver the gate already uses**
 
 In `prepare_judge`, replace the single extraction line with:
 
@@ -92,20 +92,20 @@ In `prepare_judge`, replace the single extraction line with:
 
 `resolve_finding_text` is defined at `:1013`, above `prepare_judge` at `:1027`, so no reordering is needed.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: `FAIL=0`, with four more checks than before.
 
-- [ ] **Step 5: Prove the test discriminates**
+- [x] **Step 5: Prove the test discriminates**
 
 Copy the tree to a scratch directory, restore `extract_finding "$(review_file "$ROUND")" "$fp"`, run the suite, and record which checks fail — all four new ones must. Then, in a second copy, make `resolve_finding_text` always return 1 and confirm the escalation path still works (the run must block with "judge is unavailable" and not crash), which is what shows the fail-open behaviour was preserved rather than removed.
 
-- [ ] **Step 6: Record the defect and its evidence**
+- [x] **Step 6: Record the defect and its evidence**
 
 Add to `docs/design-decisions.md`, under the Phase 2 section that describes the judge, a short paragraph: the judge was unreachable for re-worded stalemates from its introduction until 2026-07-28; the streak is canonical while the completing round is a variant; the parked-finding path had the resolver and the judge did not; zero judge dispatches across 29 runs is consistent with this and was not investigated at the time.
 
-- [ ] **Step 7: Run every suite and commit**
+- [x] **Step 7: Run every suite and commit**
 
 ```bash
 rc=0
