@@ -309,7 +309,7 @@ A run records `reviewer: codex` and nothing about which build did the reviewing.
 
 `hard_cap` is a separate, smaller correction. `README.md:89` tells the user to "set the `hard_cap` state field to override", and no supported entry point writes it while `fight.md:175` forbids hand-editing the state file. But the engine **does** honour an explicit value (`stop-hook.sh:201-217`) and tests depend on that (`tests/test_stop_hook.sh:1390-1398`), so the fix is to say there is no supported override and that generated runs use twice `max_rounds` — **not** that the value is fixed. `policy.md:61` already states only the default; confirm and leave it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Sanitisation must happen at activation as well as in the writer, because the state file is the first thing a raw version string reaches. Test it where the forgery would land.
 
@@ -353,11 +353,11 @@ chk_absent "an escape sequence is stripped from the outcome" "$(printf '\033')" 
 
 The two seat-specific activation blocks are static text, so assert on them the way `tests/test_codex_adapter.sh:231-243` already asserts on mirror surfaces. Add to `tests/test_codex_adapter.sh` a check that the fight skill's state block emits `reviewer_version:`, and to `tests/test_stop_hook.sh`'s existing static checks of the Claude command (`:134-137`) the same for `fight.md`.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run each named suite. Expected failures: both launcher checks, the first and second outcome checks, the escape-sequence check, and both static seat checks. **The "missing version is not an error" property is not asserted separately** — the writer already exits 0 on an absent field, so a check for that would pass before the change and prove nothing; the `unknown` assertion is what carries it.
 
-- [ ] **Step 3: Write one sanitiser and use it in both places**
+- [x] **Step 3: Write one sanitiser and use it in both places**
 
 The value is third-party output written into YAML-ish frontmatter. Bound it to printable ASCII on one line:
 
@@ -382,7 +382,7 @@ reviewer_version=$(sanitise_version "$(field reviewer_version)")
 
 and emit `echo "reviewer_version: ${reviewer_version}"` immediately after the `reviewer:` line (`:53`).
 
-- [ ] **Step 4: Capture it at activation, in all three entry points**
+- [x] **Step 4: Capture it at activation, in all three entry points**
 
 In `spar-fight-launch.sh`, before the state heredoc:
 
@@ -397,19 +397,19 @@ reviewer_version="$("$reviewer" --version 2>/dev/null | head -1 \
 
 and add `reviewer_version: ${reviewer_version}` to the emitted frontmatter. Make the same two changes in `fight.md`'s setup block and in `adapters/codex/skills/spar-fight/SKILL.md`'s state heredoc, using `$SPAR_REVIEWER` as those files already do.
 
-- [ ] **Step 5: Surface it in the run report**
+- [x] **Step 5: Surface it in the run report**
 
 `spar-report.sh` reads `reviewer` from the outcome (`:78`) and folds it into a pairing string (`:90-94`) that is all the report ever shows of either seat. The report is the user-facing record of a run, so a provenance field it omits is a field nobody sees. Read `reviewer_version` the same way, default it to `unknown`, and print it beside the pairing. Add a matching assertion to `tests/test_spar_report.sh`.
 
-- [ ] **Step 6: Correct the README**
+- [x] **Step 6: Correct the README**
 
 Replace `README.md:89`'s "set the `hard_cap` state field to override" with a statement that generated runs use twice `max_rounds` and there is no supported user override. Do not write that the value is fixed — the engine honours an explicit one and `tests/test_stop_hook.sh:1390-1398` depends on it. Confirm `policy.md:61` claims only the default and leave it alone.
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run all five named suites. Expected `FAIL=0` in each.
 
-- [ ] **Step 8: Prove each part is independently caught**
+- [x] **Step 8: Prove each part is independently caught**
 
 Five scratch copies:
 1. Remove the `|| reviewer_version=unknown` fallback in the writer → the `unknown` check fails.
@@ -418,7 +418,7 @@ Five scratch copies:
 4. Remove the field from `fight.md` only, then from the Codex skill only → the corresponding static check fails each time and the launcher checks stay green.
 5. Remove the report line → the `test_spar_report.sh` assertion fails.
 
-- [ ] **Step 9: Run every suite and commit**
+- [x] **Step 9: Run every suite and commit**
 
 ```bash
 rc=0
