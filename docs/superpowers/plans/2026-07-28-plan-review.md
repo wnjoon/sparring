@@ -24,7 +24,8 @@
 
 **Files:**
 - Modify: `plugins/spar/commands/spar-ready-resolve.sh`, `plugins/spar/commands/spar-fight-resolve.sh`
-- Modify: `plugins/spar/commands/ready.md:3`, `plugins/spar/commands/fight.md:3` (the `argument-hint` lines)
+- Modify: `plugins/spar/commands/ready.md`, `plugins/spar/commands/fight.md` — the `argument-hint` on line 3 **and** the destructuring at `ready.md:24-30` / `fight.md:22-28`
+- Modify: `adapters/codex/skills/spar-ready/SKILL.md:32-38`, `adapters/codex/skills/spar-fight/SKILL.md:71-77` — the same destructuring
 - Test: `tests/test_ready_resolve.sh`, `tests/test_fight_resolve.sh`
 
 **Interfaces:**
@@ -83,13 +84,23 @@ Then extend the final `printf` to five fields, with the free text last. Make the
 
 - [ ] **Step 4: Update both argument hints**
 
-`ready.md:3` and `fight.md:3` carry an `argument-hint` line the host displays. Add `[--no-plan-review]` to each, in the same position relative to the other flags. Also update each resolver's header comment, which documents the printed field order — that comment is the only place the contract is written down.
+`ready.md:3` and `fight.md:3` carry an `argument-hint` line the host displays. While in `spar-fight-resolve.sh`, fix its header usage line too: it names `spar-resolve-family.sh`, a file that no longer exists. Add `[--no-plan-review]` to each, in the same position relative to the other flags. Also update each resolver's header comment, which documents the printed field order — that comment is the only place the contract is written down.
 
 - [ ] **Step 5: Update every caller that reads the resolver output**
 
 `ready.md` and `fight.md` both destructure the tab-separated result into shell variables (`ready.md:24-30`, `fight.md:16-22`). A fifth field breaks the last one silently: the old final field was the free text, and it will now receive `plan_review`. Add the new variable to both, and to the Codex mirrors `adapters/codex/skills/spar-ready/SKILL.md` and `adapters/codex/skills/spar-fight/SKILL.md`, which destructure the same output.
 
-This is the step most likely to be missed, because nothing fails loudly: the spec text becomes `true`, the plan gets written against the word "true", and no test in Task 1 covers it. Grep for every use of the resolver before finishing.
+This is the step most likely to be missed, because nothing fails loudly: the spec text becomes `true` and the plan gets written against the word "true".
+
+So it gets a check rather than a warning. Each of the four documents destructures with the same `${VAR%%$'\t'*}` / `${VAR#*$'\t'}` chain, and the number of peels is what the field order depends on. Assert the new variable exists and the free text still lands last, in `tests/test_ready_ingest.sh` and `tests/test_codex_adapter.sh`:
+
+```bash
+for f in "$ROOT/plugins/spar/commands/ready.md" "$ROOT/adapters/codex/skills/spar-ready/SKILL.md"; do
+  chk "$(basename "$f") destructures the plan-review field" 'PLAN_REVIEW=' "$(cat "$f")"
+done
+```
+
+Then confirm behaviourally rather than by substring: run the resolver on `--no-plan-review -- some spec` and check the fifth field is `some spec` and the fourth is `false`.
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
@@ -119,14 +130,14 @@ git commit -m "feat(ready): a --no-plan-review flag in both resolvers"
 - Create: `plugins/spar/shared/prompts/plan-reviewer.md`
 - Modify: `plugins/spar/commands/ready.md`, `adapters/codex/skills/spar-ready/SKILL.md`
 - Modify: `plugins/spar/commands/cancel.md`, `adapters/codex/skills/spar-cancel/SKILL.md`
-- Test: `tests/test_plan_review_prepare.sh` (new), `tests/test_ready_ingest.sh`
+- Test: `tests/test_plan_review_prepare.sh` (new), `tests/test_ready_ingest.sh`, `tests/test_stop_hook.sh` (the cancel-block teardown)
 
 **Interfaces:**
 - Consumes: `plan_review` from Task 1's resolver output.
 - Produces: `spar-plan-review-prepare.sh <plan-path> <state-file>` writes `.claude/spar-plan-review-prompt.txt` and `.claude/spar-run-plan-review.sh`, and exits 0. It exits non-zero without writing either when the template is missing, when the reviewer CLI is absent, or when `plan_review` is not `required`. The runner it generates writes `reviews/spar-plan-<plan_review_id>.md` and `.claude/spar-plan-review-hash`.
 - Produces: `/spar:ready` writes `plan_review: required|skipped` and `plan_review_id` into the plan state, and `.claude/spar-plan-spec.txt`.
 
-**The captured spec is authoritative.** `/spar:ready` receives its spec as a path or as inline text and today only prints it (`ready.md:69`). Capture it verbatim: a path is read and copied, inline text is written as-is. A spec file edited after capture does not retroactively change what the plan was written against, and the review must judge the plan against what it was given.
+**The captured spec is authoritative.** `/spar:ready` receives its spec as a path or as inline text and today only prints it (`ready.md:69`). A path is copied byte for byte; inline text is written with a trailing newline added. That one difference is worth stating rather than calling both "verbatim". A spec file edited after capture does not retroactively change what the plan was written against, and the review must judge the plan against what it was given.
 
 **`plan_review_id`** is generated the same way the loop's `review_id` is
 (`fight.md:84`: `date +%Y%m%d-%H%M%S` plus three random hex bytes) and written at
@@ -162,12 +173,51 @@ mkstate required
 bash "$P" p.md .claude/spar-plan.local.md
 chk "prompt written" "Plan" "$(cat .claude/spar-plan-review-prompt.txt 2>/dev/null)"
 chk "prompt carries the captured spec" "the spec text" "$(cat .claude/spar-plan-review-prompt.txt 2>/dev/null)"
-chk "runner written" "codex exec" "$(cat .claude/spar-run-plan-review.sh 2>/dev/null)"
 chk "runner is read-only" "sandbox read-only" "$(cat .claude/spar-run-plan-review.sh 2>/dev/null)"
-chk "runner names the id-derived result path" "reviews/spar-plan-20260728-120000-abc123.md" \
-  "$(cat .claude/spar-run-plan-review.sh 2>/dev/null)"
-chk "runner records the plan hash" "spar-plan-review-hash" "$(cat .claude/spar-run-plan-review.sh 2>/dev/null)"
-chk "runner checks the CLI exit status" "exited non-zero" "$(cat .claude/spar-run-plan-review.sh 2>/dev/null)"
+
+# The runner is EXECUTED, not grepped. A generated script carrying "sandbox
+# read-only" or "mktemp" only in a comment satisfies a substring check and does
+# nothing; this suite has been bitten by exactly that shape before.
+RES="reviews/spar-plan-20260728-120000-abc123.md"
+runner_with() { # $1=stub body → run the generated runner with that CLI on PATH
+  printf '%s\n' '#!/bin/sh' "$1" > "$STUBS/codex"; chmod +x "$STUBS/codex"
+  ( PATH="$STUBS:$PATH"; bash .claude/spar-run-plan-review.sh >/dev/null 2>&1 )
+}
+# The codex family writes the result itself via --output-last-message.
+rm -f "$RES"
+runner_with 'for a in "$@"; do case "$prev" in --output-last-message) printf "PLAN-REVIEW: CLEAN\n" > "$a";; esac; prev="$a"; done'
+chk "the runner publishes a result" "PLAN-REVIEW: CLEAN" "$(cat "$RES" 2>/dev/null)"
+eqchk "and records the plan hash" "$(git hash-object p.md)" \
+  "$(cat .claude/spar-plan-review-hash 2>/dev/null)"
+
+# A CLI that fails must publish nothing, even if it wrote bytes first.
+rm -f "$RES"
+runner_with 'for a in "$@"; do case "$prev" in --output-last-message) printf "partial\n" > "$a";; esac; prev="$a"; done
+exit 1'
+eqchk "a failing CLI publishes nothing" "absent" "$([ -f "$RES" ] && echo present || echo absent)"
+
+# An existing regular result is final — that is what makes the runner idempotent,
+# and it is why the checker rather than the runner must quarantine a bad one.
+printf 'PLAN-REVIEW: CLEAN\n' > "$RES"
+runner_with 'exit 1'
+chk "an existing result is left alone" "PLAN-REVIEW: CLEAN" "$(cat "$RES")"
+
+# A symlinked output path is refused outright.
+rm -f "$RES"; ln -s /dev/null "$RES"
+runner_with 'exit 0'
+eqchk "a symlinked result path is refused" "yes" "$([ -L "$RES" ] && echo yes || echo no)"
+rm -f "$RES"
+
+# The claude family gets the prompt on stdin and writes stdout.
+sed -i '' 's/^reviewer: codex/reviewer: claude/' "$ST" 2>/dev/null \
+  || sed -i 's/^reviewer: codex/reviewer: claude/' "$ST"
+printf '#!/bin/sh\nprintf "PLAN-REVIEW: CLEAN\\n"\n' > "$STUBS/claude"; chmod +x "$STUBS/claude"
+rm -f .claude/spar-run-plan-review.sh
+bash "$P" p.md "$ST"
+chk "the claude runner is isolated" "safe-mode" "$(cat .claude/spar-run-plan-review.sh)"
+rm -f "$RES"
+( PATH="$STUBS:$PATH"; bash .claude/spar-run-plan-review.sh >/dev/null 2>&1 )
+chk "the claude family publishes a result too" "PLAN-REVIEW: CLEAN" "$(cat "$RES" 2>/dev/null)"
 
 # skipped means prepare nothing at all
 rm -f .claude/spar-run-plan-review.sh .claude/spar-plan-review-prompt.txt
@@ -175,14 +225,8 @@ mkstate skipped
 bash "$P" p.md .claude/spar-plan.local.md; RC=$?
 eqchk "skipped → non-zero" "1" "$RC"
 eqchk "skipped → no runner" "absent" "$([ -f .claude/spar-run-plan-review.sh ] && echo present || echo absent)"
+eqchk "skipped → no prompt either" "absent" "$([ -f .claude/spar-plan-review-prompt.txt ] && echo present || echo absent)"
 
-# an absent reviewer CLI is fail-open, not a crash
-mkstate required
-EMPTY=$(mktemp -d)
-rm -f .claude/spar-run-plan-review.sh
-( PATH="$EMPTY:/usr/bin:/bin"; bash "$P" p.md .claude/spar-plan.local.md ); RC=$?
-eqchk "absent CLI → non-zero" "1" "$RC"
-eqchk "absent CLI → no runner" "absent" "$([ -f .claude/spar-run-plan-review.sh ] && echo present || echo absent)"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
 ```
@@ -205,7 +249,7 @@ Expected: the prepare suite fails to find the script at all, and the static chec
 
 - [ ] **Step 3: Write the prompt template**
 
-`plugins/spar/shared/prompts/plan-reviewer.md`, with `{{PLAN}}`, `{{SPEC}}` and `{{BRIEF_PATHS}}` placeholders. It must:
+`plugins/spar/shared/prompts/plan-reviewer.md`, with exactly two placeholders, `{{PLAN}}` and `{{SPEC}}`. An earlier draft had a third, `{{BRIEF_PATHS}}`, and never said what went in it; the paths question 6 needs — `README.md` and `plugins/spar/shared/policy.md` — are fixed, so write them into the template as literal text. It must:
 
 - Say the reader is reviewing a plan before execution, is read-only, and must not modify anything.
 - Carry the six brief questions from the spec verbatim, including question 6's boundary — name contradictions with the spec, protocol, invariants or data flow, give the minimal alternative and its cost, do not rewrite the plan.
@@ -217,7 +261,11 @@ Expected: the prepare suite fails to find the script at all, and the static chec
 
 `plugins/spar/commands/spar-plan-review-prepare.sh`. Read `reviewer`, `plan_review` and `plan_review_id` from the state with the same `field()` helper shape the other command scripts use. Return 1 unless `plan_review` is `required`, the template exists, the plan file exists, and `command -v "$reviewer"` succeeds.
 
-Substitute the template, write the prompt, then generate the runner **mirroring `emit_runner`'s hardening rather than inventing a new shape** (`stop-hook.sh:712-800` is the reference): a `reviews` directory check that refuses a symlink, a refusal to overwrite an existing non-regular output path, a lock directory, `mktemp` plus a hard-link publish, a CLI exit-status check before publishing, and the family split — `codex exec --sandbox read-only --skip-git-repo-check --output-last-message` versus `claude -p --safe-mode --tools Read Grep Glob` with the prompt on stdin.
+**Substitution, in this order.** Use the same `prompt=${prompt//\{\{X\}\}/$v}` bash replacement `prepare_round` uses (`stop-hook.sh:1001-1006`), and substitute `{{PLAN}}` and `{{SPEC}}` **last**. Both carry arbitrary document text, and a plan that quotes `{{SPEC}}` — which this very plan does — would otherwise have that text expanded by a later pass. Nothing else is substituted, so with those two last there is no second pass to worry about.
+
+**Quoting into the generated runner.** Paths reach the runner from the state file and from `plan_review_id`, so they are not fixed strings. Escape each with the single-quote wrap `stop-hook.sh`'s `shq()` uses before embedding it, and add a fixture whose plan path contains a space and a `$` to prove it.
+
+Substitute the template, write the prompt, then generate the runner **mirroring `emit_runner`'s hardening rather than inventing a new shape** (`stop-hook.sh:776-860` is the reference — it moved when the previous phase added functions above it, so confirm the line before trusting it): a `reviews` directory check that refuses a symlink, a refusal to overwrite an existing non-regular output path, a lock directory, `mktemp` plus a hard-link publish, a CLI exit-status check before publishing, and the family split — `codex exec --sandbox read-only --skip-git-repo-check --output-last-message` versus `claude -p --safe-mode --tools Read Grep Glob` with the prompt on stdin.
 
 The runner records the hash before dispatching:
 
@@ -226,6 +274,8 @@ git hash-object "${plan}" > .claude/spar-plan-review-hash 2>/dev/null || true
 ```
 
 `git hash-object` rather than `sha256sum` or `shasum`: those differ between Linux and macOS, and git is already a hard dependency.
+
+**Both new scripts must be executable.** `chmod +x` them and assert the mode in a test — every other file in `plugins/spar/commands/` is `-rwxr-xr-x` except the sourced library, and a script committed without the bit fails only at the moment someone needs it.
 
 The claude family gets no diff surface here — there is no loop, no frozen baseline, and the plan and spec are in the prompt. It has `Read`, `Grep` and `Glob` for the repository, which is what question 1 and question 6 need.
 
@@ -239,12 +289,16 @@ In `ready.md`'s setup block, after the resolver output is destructured and befor
 if [ -f "$RDY_SPEC" ]; then cp "$RDY_SPEC" .claude/spar-plan-spec.txt
 else printf '%s\n' "$RDY_SPEC" > .claude/spar-plan-spec.txt; fi
 RDY_PR_ID="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-if [ "$RDY_PLAN_REVIEW" = false ]; then RDY_PR=skipped
-elif ! command -v "$RDY_REVIEWER" >/dev/null 2>&1; then
-  RDY_PR=skipped
-  echo "Note: '$RDY_REVIEWER' is not on PATH, so the plan review is skipped."
-else RDY_PR=required; fi
+if [ "$RDY_PLAN_REVIEW" = false ]; then RDY_PR=skipped; else RDY_PR=required; fi
 ```
+
+**No absent-CLI branch, and this goes after `mkdir -p .claude`.** An earlier draft
+had one, mirroring a row the spec has since removed: `ready.md:35` already exits
+when the chosen reviewer is not on `PATH`, so by the time this code runs the CLI
+is present and a branch for its absence is unreachable — a test for it would have
+to defeat the earlier check to reach the code it claims to cover. And the capture
+writes into `.claude/`, which `ready.md:43` creates; placing it earlier writes to
+a directory that does not exist.
 
 and add `plan_review: ${RDY_PR}` and `plan_review_id: ${RDY_PR_ID}` to the state heredoc. Make the same change in the Codex ready skill with its own variable names.
 
@@ -289,7 +343,9 @@ git commit -m "feat(ready): capture the spec and prepare an independent plan rev
 **Files:**
 - Create: `plugins/spar/commands/spar-plan-review-check.sh`
 - Modify: `plugins/spar/commands/fight.md`, `adapters/codex/skills/spar-fight/SKILL.md`
-- Test: `tests/test_plan_review_check.sh` (new), `tests/test_stop_hook.sh`
+- Modify: `README.md` — the status paragraphs at `:10` and `:28`, and the roadmap row
+- Modify: `docs/design-decisions.md` — replace the "not yet designed" Phase 9 note
+- Test: `tests/test_plan_review_check.sh` (new), `tests/test_stop_hook.sh`, `tests/test_codex_adapter.sh`
 
 **Interfaces:**
 - Consumes: the state fields and artifacts Task 2 writes; the `plan_review` flag from Task 1.
@@ -303,7 +359,8 @@ The precondition sits immediately before `plan_set_field phase running` (`fight.
 |---|---|---|
 | `plan_review` is `skipped` or absent | 0 | none |
 | `--no-plan-review` was given at fight time | 0 | records `overridden`, says so |
-| Result file missing, or first line is not a `PLAN-REVIEW:` marker | 1 | name the runner to run |
+| Result file missing | 1 | name the runner to run |
+| First line is not a `PLAN-REVIEW:` marker | 1 | move it aside as `.invalid-N`, then name the runner |
 | `PLAN-REVIEW: CLEAN` | 0 | none |
 | `PLAN-REVIEW: FINDINGS` and the response file is missing | 1 | name the response path and the finding ids |
 | `FINDINGS` and any `PR<n>` has no matching response section | 1 | name the ids still needing one |
@@ -359,6 +416,20 @@ printf -- '### PR1: ACCEPTED — fixed\n### PR2: REJECTED — the cited line is 
   > .claude/spar-plan-review-response.md
 eqchk "a grounded rejection clears a finding" "0" "$(bash "$C" p.md "$ST" >/dev/null 2>&1; echo $?)"
 
+# The verdict and the reason are part of the shape.
+printf -- '### PR1: ACCEPTED — fixed\n### PR2: BANANA\n' > .claude/spar-plan-review-response.md
+eqchk "a malformed verdict does not clear" "1" "$(bash "$C" p.md "$ST" >/dev/null 2>&1; echo $?)"
+printf -- '### PR1: ACCEPTED — fixed\n### PR2: REJECTED — \n' > .claude/spar-plan-review-response.md
+eqchk "an empty reason does not clear" "1" "$(bash "$C" p.md "$ST" >/dev/null 2>&1; echo $?)"
+
+# A malformed result is quarantined so the runner can produce a fresh one.
+mkstate required; printf 'STATUS: CONVERGED\n' > "reviews/spar-plan-${PRID}.md"
+bash "$C" p.md "$ST" >/dev/null 2>&1
+eqchk "a bad result is moved aside" "absent" \
+  "$([ -f "reviews/spar-plan-${PRID}.md" ] && echo present || echo absent)"
+eqchk "and kept under .invalid-1" "present" \
+  "$([ -f "reviews/spar-plan-${PRID}.md.invalid-1" ] && echo present || echo absent)"
+
 # hash mismatch is a note, not a refusal
 printf 'deadbeef\n' > .claude/spar-plan-review-hash
 OUT="$(bash "$C" p.md "$ST" 2>&1)"; RC=$?
@@ -375,6 +446,22 @@ Add to `tests/test_stop_hook.sh`'s existing static checks of the Claude command,
 ```bash
 chk "/spar:fight gates on the plan review" 'spar-plan-review-check.sh' \
   "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+# Presence is not order. The gate must precede the phase flip, or a refused plan
+# is already `running` and /spar:cancel is the only way out.
+chk "and does so before flipping the phase" "yes" \
+  "$(awk '/spar-plan-review-check\.sh/{c=NR} /plan_set_field phase running/{p=NR} END{print (c && p && c < p) ? "yes" : "no"}' \
+     "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+```
+
+And the fight-time override, which the design lists as a required test and an
+earlier draft of this plan had no check for at all — on a state file with **no**
+`plan_review` key, so it also covers the `plan_put_field` correction:
+
+```bash
+printf -- '---\nactive: true\nphase: planned\nmode: per-task\nreviewer: codex\nplan_path: p.md\ntasks: 1\ncurrent: 1\n---\n1\tpending\tTask 1: A\n' > "$ST"
+# …run the fight activation block with --no-plan-review…
+chk "the override is recorded on a state that lacked the field" "plan_review: overridden" \
+  "$(cat "$ST")"
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -384,7 +471,9 @@ Expected: the checker suite cannot find the script; both static checks fail.
 
 - [ ] **Step 3: Write the checker**
 
-`plugins/spar/commands/spar-plan-review-check.sh`. Read `plan_review`, `plan_review_id` and the reviewer from the state. Parse finding ids from the result with a single awk pass on `^### PR[0-9]+`, and response ids with `^### PR[0-9]+:`, then report ids present in the first and absent from the second. Compare `git hash-object "$plan"` against the recorded hash and print the note when they differ.
+`plugins/spar/commands/spar-plan-review-check.sh`. Read `plan_review`, `plan_review_id` and the reviewer from the state.
+
+**The checker quarantines a malformed result; nothing else can.** The generated runner exits 0 the moment a regular result file exists (`stop-hook.sh:796` is the same line in the loop's runners) — that is what makes it idempotent, and it means telling the author to "re-run the runner" against a malformed result is telling them to run something that will do nothing. So on a bad first line the checker renames the file to `<result>.invalid-N`, picking the lowest N not already taken, and *then* names the runner. Without that the only way past a malformed result is `--no-plan-review`, which is the unclearable gate this design set out not to build. Parse finding ids from the result with a single awk pass on `^### PR[0-9]+`, and response ids from lines matching `^### PR[0-9]+: (ACCEPTED|REJECTED) — .` — **the verdict and a non-empty reason are part of the shape, not decoration**. Matching on `^### PR[0-9]+:` alone would let `### PR1: BANANA`, or an `ACCEPTED` with nothing after the dash, clear a finding, and a disposition that says nothing is the ritual this requirement exists to avoid. Report ids present in the result and absent from that stricter set. Compare `git hash-object "$plan"` against the recorded hash and print the note when they differ.
 
 Every refusal message must name the exact next action — the runner path, or the response path plus the outstanding ids. A precondition that says only "not allowed" is a lock without a key even when a key exists.
 
@@ -395,14 +484,18 @@ Immediately before `plan_set_field phase running`, in `fight.md` and in the Code
 ```bash
   PRCHK="${CLAUDE_PLUGIN_ROOT}/commands/spar-plan-review-check.sh"
   if [ "$SPAR_PLAN_REVIEW" = false ]; then
-    plan_set_field plan_review overridden "$PLAN_STATE"
+    plan_put_field plan_review overridden "$PLAN_STATE"
     echo "Note: starting without a plan review because --no-plan-review was given."
-  elif [ -x "$PRCHK" ] && ! bash "$PRCHK" "$PLAN" "$PLAN_STATE"; then
+  elif ! bash "$PRCHK" "$PLAN" "$PLAN_STATE"; then
     exit 1
   fi
 ```
 
-`[ -x "$PRCHK" ]` is the fail-open: an installation whose checker is missing behaves as it did before this phase rather than refusing every plan. Use each document's own plugin-root variable — the Codex skill resolves `SPAR_ROOT` rather than `CLAUDE_PLUGIN_ROOT`.
+**`plan_put_field`, not `plan_set_field`.** The latter is a pure replace and does nothing on a state file written before the field existed — `spar-plan-lib.sh:31-35` says so in its own comment — while the former appends a missing key. A plan prepared before this phase carries no `plan_review` line, and `--no-plan-review` on it must still record the override rather than silently do nothing.
+
+**No `[ -x ]` guard on the checker.** An earlier draft skipped the check when the script was missing and called that fail-open. It is not: fail-open exists so a *hook* never holds a session hostage, and this is a deliberate precondition outside the hook. A missing command script means a broken installation, and `fight.md` already invokes `spar-fight-launch.sh` with no such guard. Invoke it and let it fail loudly.
+
+Use each document's own plugin-root variable — the Codex skill resolves `SPAR_ROOT` rather than `CLAUDE_PLUGIN_ROOT`.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
@@ -415,7 +508,9 @@ Six scratch copies: remove the `FINDINGS` branch and confirm the no-response and
 
 - [ ] **Step 7: Record the decision and commit**
 
-Add a Phase 9 section to `docs/design-decisions.md` replacing the "not yet designed" note: what was built, that enforcement is a `/spar:fight` precondition rather than a Stop-hook branch and why the hook branch was rejected, that the brief includes bounded design critique and why the first draft's exclusion was wrong, and that a plan edited after review is reported rather than re-reviewed — with the objection to that recorded, since an independent review argued the other way.
+`README.md:10` says "Phases 1–6 and 8 are implemented" and `:28` walks the release history; both go stale the moment this ships, and the README's own rule is that it is updated when implementation changes reality. Add Phase 9 at `:10`, mark its roadmap row, and say at `:28` what it does — a plan gets one independent reading, and `/spar:fight` will not start until every finding has a disposition.
+
+Then add a Phase 9 section to `docs/design-decisions.md` replacing the "not yet designed" note: what was built, that enforcement is a `/spar:fight` precondition rather than a Stop-hook branch and why the hook branch was rejected, that the brief includes bounded design critique and why the first draft's exclusion was wrong, and that a plan edited after review is reported rather than re-reviewed — with the objection to that recorded, since an independent review argued the other way.
 
 ```bash
 rc=0
