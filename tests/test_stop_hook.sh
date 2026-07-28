@@ -2203,5 +2203,20 @@ for fam in claude codex; do
 done
 
 
+# ── one finding grammar ─────────────────────────────────────────────────────
+# A finding with no `- file:` line must still parse with its title in the title
+# column. Tab-separated output collapses the empty file column and shifts the
+# title left, which corrupts the fingerprint and makes the matcher's file
+# prefilter compare a title against a file name.
+in_review 1
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] some title here\n- problem: p\n- suggestion: s\n\n### F1-2 [MECHANICAL] located finding\n- file: a.py:10\n- problem: q\n- suggestion: t\n' > "$RF1"
+printf -- '### F1-1: REJECTED — not a defect\n### F1-2: REJECTED — not a defect\n' > "$RP1"
+run_hook >/dev/null
+chk "a finding with no location keeps an empty file column" \
+  "$(printf ' | some title here')" "$(cut -f1 .claude/spar-registry.tsv | head -1)"
+chk "and the located finding is unaffected" \
+  "$(printf 'a.py | located finding')" "$(cut -f1 .claude/spar-registry.tsv | sed -n 2p)"
+
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
