@@ -523,8 +523,11 @@ spec. The result lands in `reviews/spar-plan-<id>.md` behind a
 the reviewer's word inside a task loop and nothing produced outside one may be
 mistaken for it. The author answers each finding in
 `.claude/spar-plan-review-response.md`, and `/spar:fight` will not activate the
-plan until every one has a disposition. On by default; `--no-plan-review` skips
-it and records `plan_review: overridden` rather than skipping silently.
+plan until every one has a disposition. On by default. `--no-plan-review` at
+`/spar:ready` records `plan_review: skipped`; the same flag at `/spar:fight`
+records `overridden` — the two are kept apart because they answer different
+questions about a state file, and either way the decision is on the record
+rather than silent.
 
 **Enforcement is a `/spar:fight` precondition, not a Stop-hook branch.** The
 first draft put a `planned`-phase branch in the dispatcher. It was rejected

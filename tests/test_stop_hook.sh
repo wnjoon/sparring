@@ -150,24 +150,45 @@ chk "and does so before flipping the phase" "yes" \
 chk "the override appends rather than replaces" 'plan_put_field plan_review overridden' \
   "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
 
-# The override is behavioural, not a substring: run the real activation block
-# against a state file that has NO plan_review key, which is exactly the case a
-# pure replace gets wrong.
-fresh_dir
-mkdir -p reviews
-printf -- '---\nactive: true\nphase: planned\nmode: per-task\nreviewer: codex\nplan_path: p.md\ntasks: 1\ncurrent: 1\ncurrent_review_id:\n---\n1\tpending\tTask 1: A\n' > .claude/spar-plan.local.md
-printf '# Plan\n\n### Task 1: A\n\ndo it\n' > p.md
-. "$CLAUDE_PLUGIN_ROOT/commands/spar-plan-lib.sh"
-PLAN_STATE=.claude/spar-plan.local.md
-SPAR_PLAN_REVIEW=false
-PRCHK="$CLAUDE_PLUGIN_ROOT/commands/spar-plan-review-check.sh"
-if [ "$SPAR_PLAN_REVIEW" = false ]; then
-  plan_put_field plan_review overridden "$PLAN_STATE"
-elif ! bash "$PRCHK" p.md "$PLAN_STATE"; then :; fi
+# The override, run through the REAL activation block rather than a copy of it.
+# A copy is the shape of test that stays green while the document it stands in
+# for stops calling plan_put_field, writes to the wrong state path, or drops the
+# branch entirely — the substring checks above cannot see any of that.
+fight_block() { # fight.md's first fenced bash block, with $ARGUMENTS filled in
+  awk '/^```bash$/{f=1; next} /^```$/{if (f) exit} f' \
+    "$CLAUDE_PLUGIN_ROOT/commands/fight.md" \
+  | sed "s/^\\\$ARGUMENTS\$/$1/"
+}
+run_activation() { # $1 = the argument string /spar:fight was given
+                   # $2 = extra state frontmatter lines (empty → no plan_review key)
+  fresh_dir; mkdir -p reviews
+  git config user.email sparring@example.invalid; git config user.name sparring-test
+  printf '# Plan\n\n### Task 1: A\n\ndo it\n' > p.md
+  git add p.md && git commit -q -m base
+  { printf -- '---\nactive: true\nphase: planned\nmode: per-task\nreviewer: codex\n'
+    [ -n "${2:-}" ] && printf '%s\n' "$2"
+    printf 'plan_path: p.md\ntasks: 1\ncurrent: 1\ncurrent_review_id:\n---\n1\tpending\tTask 1: A\n'
+  } > .claude/spar-plan.local.md
+  fight_block "$1" | bash >/dev/null 2>&1
+}
+
+# No plan_review key at all — the state a plan prepared before this phase has,
+# and exactly the case a pure replace gets wrong.
+run_activation '--no-plan-review' ''
 chk "the override is recorded on a state that lacked the field" "plan_review: overridden" \
-  "$(cat "$PLAN_STATE")"
+  "$(cat .claude/spar-plan.local.md)"
 chk "and the task table below it is untouched" "Task 1: A" \
-  "$(tail -1 "$PLAN_STATE")"
+  "$(tail -1 .claude/spar-plan.local.md)"
+chk "and the plan actually activated" "phase: running" \
+  "$(cat .claude/spar-plan.local.md)"
+
+# The other side of the same block: with no override and a review outstanding,
+# activation must be refused and the plan must still be startable afterwards.
+run_activation '' "$(printf 'plan_review: required\nplan_review_id: 20260728-120000-abc123')"
+chk "an unreviewed plan is refused" "phase: planned" \
+  "$(cat .claude/spar-plan.local.md)"
+chk "and no loop was started" "absent" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
 
 # ── 4d. Phase 4 skip: small + safe only, always reported and persisted ──
 skip_repo() {
