@@ -33,7 +33,7 @@ Three copies of this grammar exist today, and the title normalisation they each 
 
 Unifying also fixes a live defect. `parse_findings` emits tab-separated fields and its callers read them with `IFS=$'\t'`. Bash treats tab as IFS whitespace, so a finding with no `- file:` line emits `id\ttag\t\tcanon` and the two adjacent tabs collapse into one: the title lands in the `file` variable and the title variable is empty. The fingerprint becomes `"some title | "` instead of `" | some title"`, and `build_matcher`'s file-overlap prefilter then compares titles against file names. Switching the projection to `\037` — a non-whitespace separator that preserves empty fields — is what makes the unification safe rather than a rename.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/test_stop_hook.sh`, before the `PASS=`/`FAIL=` summary:
 
@@ -53,12 +53,12 @@ chk "and the located finding is unaffected" \
   "$(printf 'a.py | located finding')" "$(cut -f1 .claude/spar-registry.tsv | sed -n 2p)"
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: `FAIL: a finding with no location keeps an empty file column`, because today the registry's first column reads `some title here | `.
 
-- [ ] **Step 3: Write the single parser**
+- [x] **Step 3: Write the single parser**
 
 Replace `parse_findings` (`:313-343`) with the shared implementation. Place it where `parse_findings` is today so the registry helpers below it keep reading top-to-bottom:
 
@@ -114,13 +114,13 @@ parse_findings() { # $1 = review file
 }
 ```
 
-- [ ] **Step 4: Point every caller at the new separator**
+- [x] **Step 4: Point every caller at the new separator**
 
 Change the five `parse_findings` readers from `IFS=$'\t'` to `IFS=$'\037'`. They are at `:399` (`fold_registry`), `:513` (`fingerprints_of`), `:551` and `:565` (the productivity helpers), and `:1032` (`build_matcher`). Each currently reads `while IFS=$'\t' read -r id tag file nt; do`. Leave the body unchanged.
 
 Then delete `parse_findings_verbose` (`:1151-1179`) and change its single caller at `:1264` (`build_fix_brief`) to call `parse_findings_all`. Its read loop already uses `IFS=$'\037'` and the field order is unchanged.
 
-- [ ] **Step 5: Make `extract_finding` share the normalisation**
+- [x] **Step 5: Make `extract_finding` share the normalisation**
 
 `extract_finding` must keep buffering raw markdown, which the record-emitting parser does not do, so it stays a separate awk program. Remove its private `norm()` and have it take the canonical form from the shared parser instead, so there is one definition rather than two that happen to agree:
 
@@ -146,16 +146,16 @@ extract_finding() { # $1=review file  $2=fingerprint
 }
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: `FAIL=0`, with two more checks than before.
 
-- [ ] **Step 7: Prove the tests discriminate**
+- [x] **Step 7: Prove the tests discriminate**
 
 Copy the tree to a scratch directory. Change the projection in `parse_findings` back to `printf '%s\t%s\t%s\t%s\n'` and the five readers back to `IFS=$'\t'`. Run the suite and record which checks fail — the two new ones must be among them. Restore. Then, in a second copy, change `norm()`'s `gsub(/[^a-z0-9]+/, " ", s)` to `gsub(/[^a-z0-9]+/, "", s)` and confirm the existing fingerprint and stalemate tests fail; this proves the shared normalisation is actually the one in use.
 
-- [ ] **Step 8: Run every suite and commit**
+- [x] **Step 8: Run every suite and commit**
 
 ```bash
 for t in tests/test_*.sh; do bash "$t" >/dev/null || echo "FAILED: $t"; done

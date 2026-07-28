@@ -960,7 +960,9 @@ extract_finding() { # $1=review file  $2=fingerprint
   [ -n "$want_id" ] || return 0
   awk -v want="$want_id" '
     /^### F[0-9]+-[0-9]+/ {
-      if (hit) { printf "%s", buf; exit }
+      # hit=0 before exit: awk runs END on the way out, and END emits the buffer
+      # too, so leaving the flag set prints the same block a second time.
+      if (hit) { printf "%s", buf; hit = 0; exit }
       hit = ($2 == want); buf = hit ? $0 "\n" : ""
       next
     }

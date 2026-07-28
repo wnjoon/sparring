@@ -2218,5 +2218,21 @@ chk "and the located finding is unaffected" \
   "$(printf 'a.py | located finding')" "$(cut -f1 .claude/spar-registry.tsv | sed -n 2p)"
 
 
+# Extracting a finding that is followed by another must emit its block once.
+# awk runs END on the way out of `exit`, so a flag left set prints the buffer a
+# second time — and the judge prompt is where that text lands.
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'STATUS: FINDINGS\n\n### F1-1 [MECHANICAL] first finding\n- file: a.py:10\n- problem: unmistakable-first\n- suggestion: s\n\n### F1-2 [MECHANICAL] second finding\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RF1"
+printf -- '### F1-1: REJECTED — no\n### F1-2: REJECTED — no\n' > "$RP1"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [MECHANICAL] first finding\n- file: a.py:10\n- problem: unmistakable-first\n- suggestion: s\n\n### F2-2 [MECHANICAL] second finding\n- file: b.py:3\n- problem: q\n- suggestion: t\n' > "$RFb2"
+printf -- '### F2-1: REJECTED — no\n### F2-2: REJECTED — no\n' > "$RPb2"
+run_hook >/dev/null
+chk "a judge was dispatched" "present" \
+  "$([ -f .claude/spar-judge-prompt.txt ] && echo present || echo absent)"
+chk "the extracted finding appears exactly once in the judge prompt" "1" \
+  "$(grep -c 'unmistakable-first' .claude/spar-judge-prompt.txt 2>/dev/null || echo 0)"
+
+
 echo; echo "PASS=$PASS FAIL=$FAIL"
 exit "$FAIL"
