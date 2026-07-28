@@ -36,7 +36,7 @@ The flag must exist before either command can honour it, and it belongs in both:
 
 Both resolvers already parse repeated-flag errors the same way (`spar-ready-resolve.sh:16-27`), so follow that shape exactly: a bare `--no-plan-review`, the same followed by a space, and a `seen_*` guard that errors on a second occurrence.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/test_ready_resolve.sh`. Note its existing expectations are whole-output comparisons, so **every one of them changes** when a field is added — that is the point, and updating them is part of this step, not collateral damage.
 
@@ -56,12 +56,12 @@ chk "the flag does not survive into the spec text" "absent" \
 
 Add the equivalent to `tests/test_fight_resolve.sh`, using its `mkbin` stubs and its field order — `plan_review` is field 4 and the task text field 5.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `bash tests/test_ready_resolve.sh` and `bash tests/test_fight_resolve.sh`
 Expected: the new checks FAIL, and so do the pre-existing whole-output comparisons, because the field count changed. Both are expected; a pre-existing check that still passes means the field was not added.
 
-- [ ] **Step 3: Parse the flag in both resolvers**
+- [x] **Step 3: Parse the flag in both resolvers**
 
 In `spar-ready-resolve.sh`, beside the existing initialisers (`:11`):
 
@@ -82,11 +82,11 @@ and in the `while :;` loop, matching the `--unattended` arms exactly:
 
 Then extend the final `printf` to five fields, with the free text last. Make the same two changes in `spar-fight-resolve.sh`, following its own initialiser and loop shape rather than transplanting this one.
 
-- [ ] **Step 4: Update both argument hints**
+- [x] **Step 4: Update both argument hints**
 
 `ready.md:3` and `fight.md:3` carry an `argument-hint` line the host displays. While in `spar-fight-resolve.sh`, fix its header usage line too: it names `spar-resolve-family.sh`, a file that no longer exists. Add `[--no-plan-review]` to each, in the same position relative to the other flags. Also update each resolver's header comment, which documents the printed field order — that comment is the only place the contract is written down.
 
-- [ ] **Step 5: Update every caller that reads the resolver output**
+- [x] **Step 5: Update every caller that reads the resolver output**
 
 `ready.md` and `fight.md` both destructure the tab-separated result into shell variables (`ready.md:24-30`, `fight.md:16-22`). A fifth field breaks the last one silently: the old final field was the free text, and it will now receive `plan_review`. Add the new variable to both, and to the Codex mirrors `adapters/codex/skills/spar-ready/SKILL.md` and `adapters/codex/skills/spar-fight/SKILL.md`, which destructure the same output.
 
@@ -102,16 +102,16 @@ done
 
 Then confirm behaviourally rather than by substring: run the resolver on `--no-plan-review -- some spec` and check the fifth field is `some spec` and the fourth is `false`.
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run both resolver suites, then the whole suite — the destructuring change touches files other suites assert on.
 Expected: `FAIL=0` everywhere.
 
-- [ ] **Step 7: Prove the tests discriminate**
+- [x] **Step 7: Prove the tests discriminate**
 
 In a scratch copy, remove the two `--no-plan-review` arms from `spar-ready-resolve.sh` only, and confirm the ready suite's new checks fail while the fight suite's still pass. Repeat the other way round. Then remove the fifth field from one resolver's `printf` and confirm its whole-output comparisons fail.
 
-- [ ] **Step 8: Run every suite and commit**
+- [x] **Step 8: Run every suite and commit**
 
 ```bash
 rc=0
