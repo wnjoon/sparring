@@ -582,6 +582,21 @@ plan that fails should block `/spar:fight` or merely warn.
     Deliberately the strict form (any repeat) rather than a "third appearance"
     counter: the evidence is two runs, relaxing later is easy, and rounds lost to
     a rule that was too generous cannot be recovered.
+  - **The sweep did not obey this cap until 2026-07-28.** The sweep-findings
+    branch predates the two-level cap and kept comparing against `max_rounds`,
+    so a run that had legitimately extended past the soft cap was ended the
+    moment the sweep spoke — with rounds still available and a block message
+    claiming a budget that was not exhausted. It cost a real run on 2026-07-28:
+    round 6 of 10, sweep findings, plan abandoned with three tasks unstarted.
+    The hard cap is now the only cap the *sweep* consults. The soft cap still
+    ends a non-productive round, exactly as described above — that terminal is
+    live and tested (`tests/test_stop_hook.sh:1406`, `:1412`), not stale
+    duplication.
+    Routing adds one sweep response and one reviewer round; what that round
+    finds is bounded by the ordinary cap, and the sweep cannot re-arm because
+    `set_sweep_state` marks it done and the convergence branch checks
+    `SWEEP_DONE` first. This is the same failure the loop keeps producing — a
+    rule changed in one place and left standing in another.
   - **Why the rounds must be granted inside the run.** There is no cheap manual
     continuation, and the obvious-looking one is wrong: a fresh `/spar:fight`
     sets `base_sha` to HEAD, and the reviewer sees `git diff $BASE`. Commit the

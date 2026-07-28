@@ -756,8 +756,12 @@ chk "post-sweep reviewer convergence → approve" '{}' "$OUT"
 chk "post-sweep convergence keeps findings result" 'sweep: findings' \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
-# ── 44. sweep findings at cap → honest blocked outcome, no response/fix loop ──
+# ── 44. sweep findings at the HARD cap → honest blocked outcome, no fix loop ──
+# hard_cap is pinned to 5 so the two caps coincide: below the hard cap the
+# findings are routed instead, which the block further down now covers.
 sweep_review_repo 5
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md
 mkdir -p src/auth
 printf 'session\n' > src/auth/session.sh
 RF5="reviews/spar-20260721-120000-abc123-r5.md"
@@ -765,9 +769,9 @@ printf 'STATUS: CONVERGED\n' > "$RF5"
 run_hook >/dev/null
 printf 'SWEEP: FINDINGS\n\n### S-1 [MECHANICAL] cap issue\n' > "$SF"
 OUT=$(run_hook)
-chk "sweep findings at cap → blocked report" 'at cap' "$OUT"
-chk "sweep findings at cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
-chk "sweep findings at cap → durable reason" 'reason: sweep-findings-at-cap' \
+chk "sweep findings at the hard cap → blocked report" 'hard cap' "$OUT"
+chk "sweep findings at the hard cap → deactivated" 'active: false' "$(cat .claude/spar.local.md)"
+chk "sweep findings at the hard cap → durable reason" 'reason: sweep-findings-at-cap' \
   "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
 # ── 45. history triggers: 3+ rounds and any prior design finding ──
@@ -984,14 +988,16 @@ chk "cap report captured the ledger decision" "#### P1: keep the flag" "$(cat "$
 chk "cap report survives the deactivated-loop cleanup" "present" \
   "$(run_hook >/dev/null; [ -f "$RPT" ] && echo present || echo absent)"
 
-# T3. sweep findings at the cap → report generated with the sweep recorded
+# T3. sweep findings at the HARD cap → report generated with the sweep recorded
 fresh_dir; write_state review 5; mkdir -p reviews
+sed -i '' 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md 2>/dev/null \
+  || sed -i 's/^max_rounds: 5/max_rounds: 5\nhard_cap: 5/' .claude/spar.local.md
 sed -i '' 's/^phase: review/phase: sweep/' .claude/spar.local.md 2>/dev/null \
   || sed -i 's/^phase: review/phase: sweep/' .claude/spar.local.md
 printf 'SWEEP: FINDINGS\n\n### S-1 [MECHANICAL] missing test\n- file: a.py:1\n- problem: p\n- suggestion: s\n' \
   > reviews/spar-20260721-120000-abc123-sweep.md
 OUT=$(run_hook)
-chk "sweep findings at cap → still blocks" 'at cap' "$OUT"
+chk "sweep findings at the hard cap → still blocks" 'hard cap' "$OUT"
 chk_file "sweep-findings-at-cap → report generated" "$RPT"
 chk "report names the sweep-findings-at-cap outcome" "outcome: sweep-findings-at-cap" \
   "$(cat "$RPT" 2>/dev/null)"
@@ -2365,6 +2371,35 @@ chk "the judge prompt carries the finding text" "reworded here" \
   "$(cat .claude/spar-judge-prompt.txt 2>/dev/null)"
 chk "and the user is not asked to adjudicate instead" "absent" \
   "$(printf '%s' "$OUT" | grep -qF 'judge is unavailable' && echo present || echo absent)"
+
+
+# ── sweep findings use the hard cap, not the soft one ───────────────────────
+# A run that extended past the soft cap under the productivity rule still has
+# rounds; killing it the moment the sweep speaks discards them, and the block
+# message's "already used all 5 reviewer rounds" is false by then.
+sweep_review_repo 6
+RF6="reviews/spar-20260721-120000-abc123-r6.md"
+printf 'STATUS: CONVERGED\n' > "$RF6"
+run_hook >/dev/null
+printf 'SWEEP: FINDINGS\n\n### S-1 [MECHANICAL] something left\n' > "$SF"
+OUT=$(run_hook)
+chk "past the soft cap, sweep findings are routed, not dropped" 'respond to sweep' "$OUT"
+chk "and the run is still active" 'active: true' "$(cat .claude/spar.local.md)"
+printf -- '### S-1: FIXED — handled\n' > "$SRESP"
+OUT=$(run_hook)
+chk "the sweep response advances to a reviewer round" 'round 7' "$OUT"
+
+# At the hard cap it still terminates honestly.
+sweep_review_repo 10
+RF10="reviews/spar-20260721-120000-abc123-r10.md"
+printf 'STATUS: CONVERGED\n' > "$RF10"
+run_hook >/dev/null
+printf 'SWEEP: FINDINGS\n\n### S-1 [MECHANICAL] something left\n' > "$SF"
+OUT=$(run_hook)
+chk "at the hard cap, sweep findings still end the run" 'hard cap' "$OUT"
+chk "hard-cap sweep exit deactivates" 'active: false' "$(cat .claude/spar.local.md)"
+chk "hard-cap sweep exit records the honest reason" 'reason: sweep-findings-at-cap' \
+  "$(cat reviews/spar-20260721-120000-abc123-outcome.md)"
 
 
 echo; echo "PASS=$PASS FAIL=$FAIL"

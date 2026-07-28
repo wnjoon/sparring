@@ -1695,16 +1695,23 @@ bash ${SWEEP_RUNNER}
 \`\`\`" "sparring [${REVIEW_ID}]: invalid sweep output"
     fi
     rm -f "$SWEEP_RETRY_FILE"
-    if [ "$ROUND" -ge "$MAX_ROUNDS" ]; then
-      log "sweep findings at round cap $MAX_ROUNDS"
+    # The hard cap, not the soft one. The reviewer-round cap extends past the
+    # soft cap while rounds stay productive, and a run that took that extension
+    # still has rounds to spend — ending here discards them, and the message
+    # below would claim a budget that was not exhausted. Routing costs one sweep
+    # response and one reviewer round; what that round finds is bounded by the
+    # ordinary cap, and the sweep cannot re-arm because set_sweep_state marks it
+    # done and the convergence branch checks SWEEP_DONE before sweeping again.
+    if [ "$ROUND" -ge "$HARD_CAP" ]; then
+      log "sweep findings at hard cap $HARD_CAP"
       set_sweep_state true findings
       record_outcome sweep-findings-at-cap findings
       generate_report
       deactivate_state
-      block "The final sweep found unresolved issues, but the loop already used
-all ${MAX_ROUNDS} reviewer rounds. Do not fix them inside this loop. Report
+      block "The final sweep found unresolved issues, but the loop has reached
+its hard cap of ${HARD_CAP} rounds. Do not fix them inside this loop. Report
 ${SF} as an unconverged/blocked result; the sweep findings were not silently
-dropped." "sparring [${REVIEW_ID}]: sweep findings at cap"
+dropped." "sparring [${REVIEW_ID}]: sweep findings at hard cap"
     fi
     if ! is_regular_artifact "$SRESP"; then
       block "The final sweep found issues. Read ${SF}, handle every finding,
