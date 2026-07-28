@@ -215,7 +215,7 @@ The block message says only "fix every `[MECHANICAL]` finding, decide each `[DES
 
 Keep it short — this is read on every findings round and becomes wallpaper if it is long. Do **not** make it a required response field: the hook can check such a field is present but never that it is true, and that decision is deferred until the advice has been observed.
 
-- [ ] **Step 1: Capture the baseline size, then write the failing tests**
+- [x] **Step 1: Capture the baseline size, then write the failing tests**
 
 Before editing anything, record what the message costs today, because Step 5 compares against it:
 
@@ -243,12 +243,12 @@ OUT=$(run_hook)
 chk "an ordinary response is still accepted and advances the round" 'round 2' "$OUT"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `bash tests/test_stop_hook.sh`
 Expected: the first three checks FAIL. The fourth already passes and must keep passing — it is the control, and it is behavioural rather than a search for a phrase.
 
-- [ ] **Step 3: Extend the block message**
+- [x] **Step 3: Extend the block message**
 
 Append to the existing reason string, after "Then stop again." and before `${BRIEF_NOTE}`:
 
@@ -266,17 +266,17 @@ Three things this loop has paid for repeatedly, each worth the minute it costs:
 
 "where one exists" matters: the engine is shared between seats, and only the command and skill documents are mirrored.
 
-- [ ] **Step 4: Record it in the protocol, and repair the sentence while there**
+- [x] **Step 4: Record it in the protocol, and repair the sentence while there**
 
 `policy.md:43-47`'s item 4 currently reads "…which is why item 6 has a MECHANICAL stalemate path at all; and write a response file…" — a clause that lost its subject in an earlier edit. Repair it, and add one sentence: the author is given fix guidance in the block message; it is advice rather than an enforced field, because the hook can verify such a field is present but never that it is true, and the next round re-reviews the fix either way.
 
-- [ ] **Step 5: Run the tests, then measure the cost**
+- [x] **Step 5: Run the tests, then measure the cost**
 
 Run: `bash tests/test_stop_hook.sh` — expected `FAIL=0`.
 
 Re-run the Step 1 measurement and compare. Put **both** numbers in the commit message below, replacing the placeholders. If the addition more than doubles the message, cut wording rather than dropping a discipline.
 
-- [ ] **Step 6: Run every suite and commit**
+- [x] **Step 6: Run every suite and commit**
 
 ```bash
 rc=0
