@@ -83,6 +83,13 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 SPAR_ID="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 SPAR_BASE="$(git rev-parse HEAD 2>/dev/null || echo none)"
+# Best-effort and one call per run: a CLI that will not report a version must not
+# stop a run, and this is the version the run STARTED with — a CLI that updates
+# mid-run will have done some rounds under a build this does not name. Normalised
+# to one bounded printable line so it cannot forge a frontmatter field.
+SPAR_REVIEWER_VERSION="$("$SPAR_REVIEWER" --version 2>/dev/null | head -1 \
+  | tr -d '\000-\037\177' | LC_ALL=C tr -cd '\040-\176' | cut -c1-120)"
+[ -n "$SPAR_REVIEWER_VERSION" ] || SPAR_REVIEWER_VERSION=unknown
 SPAR_STATE_TMP="$(mktemp .claude/spar.local.md.tmp.XXXXXX)"
 trap 'rm -f "$SPAR_STATE_TMP"' EXIT
 {
@@ -94,6 +101,7 @@ round: 0
 review_id: ${SPAR_ID}
 base_sha: ${SPAR_BASE}
 reviewer: ${SPAR_REVIEWER}
+reviewer_version: ${SPAR_REVIEWER_VERSION}
 include_dirty: ${SPAR_INCLUDE_DIRTY}
 unattended: ${SPAR_UNATTENDED}
 max_rounds: 5

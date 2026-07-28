@@ -84,4 +84,42 @@ eqchk "malformed owner_session → nonzero exit" "2" "$RC"
 chk "malformed owner_session → says so" "owner_session" "$OUT"
 
 cd /; rm -rf "$TMP"
+# ── provenance: the launcher records the reviewer build it saw ───────────────
+# Stubs on PATH, not the developer's real CLI: the suite must never depend on
+# what happens to be installed.
+# Own plan state: earlier cases leave $ST holding a deliberately bad author, and
+# the launcher rightly refuses that.
+# The suite tears its temp repo down at `cd /; rm -rf "$TMP"` above, so this
+# block builds its own rather than reaching for one that no longer exists.
+PTMP=$(mktemp -d); cd "$PTMP"; git init -q; git commit -q --allow-empty -m init
+prov_state() {
+  mkdir -p .claude reviews
+  printf -- '---\nactive: true\nphase: running\nmode: per-task\nreviewer: codex\nplan_path: p.md\ntasks: 2\ncurrent: 1\ncurrent_review_id:\n---\n1\tpending\tTask 1: Alpha\n' > "$ST"
+  printf 'Implement Task 1: Alpha\n' > .claude/task.txt   # an earlier case removes it
+}
+STUBS=$(mktemp -d)
+printf '#!/bin/sh\necho "codex-cli 9.9.9-test"\n' > "$STUBS/codex"; chmod +x "$STUBS/codex"
+prov_state
+rm -f "$SPAR"; ( PATH="$STUBS:$PATH"; bash "$L" "$ST" .claude/task.txt >/dev/null 2>&1 )
+chk "launch records the reviewer build it saw" 'reviewer_version: codex-cli 9.9.9-test' \
+  "$(cat .claude/spar.local.md)"
+# A version string is third-party output written into frontmatter a later reader
+# parses line-by-line. It must not be able to forge a field.
+prov_state
+printf '#!/bin/sh\nprintf "v1\\nreviewer: claude\\n"\n' > "$STUBS/codex"; chmod +x "$STUBS/codex"
+rm -f "$SPAR"; ( PATH="$STUBS:$PATH"; bash "$L" "$ST" .claude/task.txt >/dev/null 2>&1 )
+eqchk "a multi-line version cannot forge a second reviewer line" "1" \
+  "$(grep -c '^reviewer:' .claude/spar.local.md)"
+# An escape sequence must not survive into the state file either.
+prov_state
+printf '#!/bin/sh\nprintf "v1\\033[31m\\n"\n' > "$STUBS/codex"; chmod +x "$STUBS/codex"
+rm -f "$SPAR"; ( PATH="$STUBS:$PATH"; bash "$L" "$ST" .claude/task.txt >/dev/null 2>&1 )
+# eqchk, not chk: chk greps with -E here and `[31m` would read as a character
+# class, so the check would fail on the very value it is meant to accept.
+eqchk "an escape sequence is stripped at activation" "v1[31m" \
+  "$(sed -n 's/^reviewer_version: //p' .claude/spar.local.md | head -1)"
+rm -rf "$STUBS"
+cd /; rm -rf "$PTMP"
+
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

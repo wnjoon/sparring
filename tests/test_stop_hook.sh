@@ -135,6 +135,9 @@ chk "/spar creates initial state through mktemp" 'mktemp .claude/spar.local.md.t
   "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
 chk "/spar atomically publishes initial state" 'mv "$SPAR_STATE_TMP" .claude/spar.local.md' \
   "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+# Same for the direct Claude seat: the shared launcher covers the plan path only.
+chk "/spar records the reviewer build" 'reviewer_version:' \
+  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
 
 # ── 4d. Phase 4 skip: small + safe only, always reported and persisted ──
 skip_repo() {

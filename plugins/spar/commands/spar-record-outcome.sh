@@ -21,6 +21,17 @@ field() { sed -n "s/^${1}: *//p" "$state_file" 2>/dev/null | head -1; }
 review_id=$(field review_id)
 round=$(field round)
 reviewer=$(field reviewer)
+# A version string comes from a third-party CLI and is written into frontmatter
+# that later readers parse line-by-line. Anything outside printable ASCII — a
+# newline that would forge a field, a tab, a terminal escape — is dropped rather
+# than quoted, because every consumer of this value only ever displays it. The
+# activation sites normalise the same way; this is the second line of defence,
+# for a state file written by an older version or edited by hand.
+sanitise_version() { # $1=raw → one bounded printable line
+  printf '%s' "$1" | tr -d '\000-\037\177' | LC_ALL=C tr -cd '\040-\176' | cut -c1-120
+}
+reviewer_version=$(sanitise_version "$(field reviewer_version)")
+[ -n "$reviewer_version" ] || reviewer_version=unknown
 
 safe_id="$review_id"
 if ! printf '%s' "$safe_id" | grep -qE '^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$'; then
@@ -51,6 +62,9 @@ trap 'rm -f "$tmp"' EXIT
   echo "review_id: ${review_id}"
   echo "rounds: ${round}"
   echo "reviewer: ${reviewer}"
+  # printf, not echo: a backslash survives the printable filter, and under an
+  # inherited `xpg_echo` shopt `echo` would expand `\n` and forge a field here.
+  printf '%s\n' "reviewer_version: ${reviewer_version}"
   echo "sweep: ${sweep_result}"
   echo "recorded_at: $(date -u +%FT%TZ)"
   echo "---"

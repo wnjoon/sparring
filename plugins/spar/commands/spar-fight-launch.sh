@@ -34,6 +34,14 @@ case "$unattended" in true) ;; ''|false) unattended=false ;; *) unattended=false
 id="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 base="$(git rev-parse HEAD 2>/dev/null || echo none)"
 
+# Best-effort and one call per run: a CLI that will not report a version must not
+# stop a run, and this is the version the run STARTED with — a CLI that updates
+# mid-run will have done some rounds under a build this does not name. Normalised
+# to one bounded printable line so it cannot forge a frontmatter field.
+reviewer_version="$("$reviewer" --version 2>/dev/null | head -1 \
+  | tr -d '\000-\037\177' | LC_ALL=C tr -cd '\040-\176' | cut -c1-120)"
+[ -n "$reviewer_version" ] || reviewer_version=unknown
+
 mkdir -p .claude
 tmp="$(mktemp .claude/spar.local.md.tmp.XXXXXX)"
 trap 'rm -f "$tmp"' EXIT
@@ -49,6 +57,7 @@ STATE_EOF
   [ -n "$author" ] && printf 'author: %s\n' "$author"
   cat <<STATE_EOF
 reviewer: ${reviewer}
+reviewer_version: ${reviewer_version}
 STATE_EOF
   [ -n "$owner_session" ] && printf 'owner_session: %s\n' "$owner_session"
   cat <<STATE_EOF
