@@ -30,4 +30,42 @@ chk "whole → 1 task" "1" "$(plan_field tasks "$ST")"
 chk "whole heading" "WHOLE PLAN" "$(plan_task_line 1 "$ST" | cut -f3)"
 
 rm -rf "$TMP"
+# ── Phase 9: the fifth resolver field is destructured, and the spec stays last ─
+# Nothing fails loudly if this is missed: the spec text silently becomes the word
+# "true" and the plan gets written against it.
+# chk here is an exact-equality check, so ask for a computed yes/no.
+has() { grep -qF -- "$2" "$1" && echo yes || echo no; }
+# The Claude seat's two documents. The Codex mirrors are asserted in
+# tests/test_codex_adapter.sh, which is the suite that fails when a mirror
+# drifts — putting them here would leave that suite green on a broken adapter.
+chk "ready.md destructures plan_review" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/ready.md" 'RDY_PLAN_REVIEW=')"
+chk "fight.md destructures plan_review" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/fight.md" 'SPAR_PLAN_REVIEW=')"
+# Behavioural, not a substring: the resolver's own output must put the flag in
+# field 4 and the free text in field 5.
+RR="$ROOT/plugins/spar/commands/spar-ready-resolve.sh"
+chk "the flag lands in field 4" "false" "$(bash "$RR" "--no-plan-review -- some spec" | cut -f4)"
+chk "and the spec in field 5" "some spec" "$(bash "$RR" "--no-plan-review -- some spec" | cut -f5)"
+
+# ── Phase 9: the Claude seat captures the spec and records the fields ───────
+chk "ready.md captures the spec" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/ready.md" 'spar-plan-spec.txt')"
+chk "ready.md records plan_review" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/ready.md" 'plan_review:')"
+chk "ready.md records plan_review_id" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/ready.md" 'plan_review_id:')"
+# The capture is only authoritative if the plan is written from it. Scoped to the
+# authoring step, not the whole document: the path appears in the setup block
+# regardless, so a document-wide grep would pass while step 1 still sent the
+# author back to the mutable original.
+RM="$ROOT/plugins/spar/commands/ready.md"
+STEP1="$(awk '/^1\. \*\*Produce the plan/{f=1} f&&/^2\. /{exit} f' "$RM")"
+chk "ready.md's authoring step reads the captured spec" "yes" \
+  "$(printf '%s' "$STEP1" | grep -qF '.claude/spar-plan-spec.txt' && echo yes || echo no)"
+# The old "stop after ingest" wording predates the review step, which comes
+# after ingest — an author following it literally skips the review entirely.
+chk "ready.md no longer says to stop after ingest" "no" \
+  "$(has "$RM" 'stop after ingest')"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

@@ -138,6 +138,81 @@ chk "/spar atomically publishes initial state" 'mv "$SPAR_STATE_TMP" .claude/spa
 # Same for the direct Claude seat: the shared launcher covers the plan path only.
 chk "/spar records the reviewer build" 'reviewer_version:' \
   "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+# Activation lives in one helper now, so these three follow the code they are
+# about. Left pointed at fight.md they would assert that the duplicate is back.
+ACTIVATE="$CLAUDE_PLUGIN_ROOT/commands/spar-plan-activate.sh"
+chk "activation gates on the plan review" 'spar-plan-review-check.sh' "$(cat "$ACTIVATE")"
+# Presence is not order. The gate must precede the phase flip, or a refused plan
+# is already `running` and /spar:cancel is the only way out of it.
+chk "and does so before flipping the phase" "yes" \
+  "$(awk '/spar-plan-review-check\.sh/{c=NR} /plan_set_field phase running/{p=NR} END{print (c && p && c < p) ? "yes" : "no"}' \
+     "$ACTIVATE")"
+# plan_put_field, not plan_set_field: a plan prepared before this phase has no
+# plan_review line, and a pure replace would silently record nothing.
+chk "the override appends rather than replaces" 'plan_put_field plan_review overridden' \
+  "$(cat "$ACTIVATE")"
+
+# The wiring: what can still drift once the body is shared.
+chk "/spar:fight activates through the shared helper" 'spar-plan-activate.sh' \
+  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+# The seat argument selects the stamps and the wording. Passed wrong, a Claude
+# run would stamp author: codex and name the wrong commands.
+chk "and names its own seat" 'spar-plan-activate.sh" "$PLAN_STATE" "$SPAR_PLAN_REVIEW" claude' \
+  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+chk "and no longer carries its own copy" "absent" \
+  "$(grep -q 'plan_set_field phase running' "$CLAUDE_PLUGIN_ROOT/commands/fight.md" && echo present || echo absent)"
+
+# The override, run through the REAL activation block rather than a copy of it.
+# A copy is the shape of test that stays green while the document it stands in
+# for stops calling plan_put_field, writes to the wrong state path, or drops the
+# branch entirely — the substring checks above cannot see any of that.
+fight_block() { # fight.md's first fenced bash block, with $ARGUMENTS filled in
+  awk '/^```bash$/{f=1; next} /^```$/{if (f) exit} f' \
+    "$CLAUDE_PLUGIN_ROOT/commands/fight.md" \
+  | sed "s/^\\\$ARGUMENTS\$/$1/"
+}
+run_activation() { # $1 = the argument string /spar:fight was given
+                   # $2 = extra state frontmatter lines (empty → no plan_review key)
+  fresh_dir; mkdir -p reviews
+  git config user.email sparring@example.invalid; git config user.name sparring-test
+  printf '# Plan\n\n### Task 1: A\n\ndo it\n' > p.md
+  git add p.md && git commit -q -m base
+  { printf -- '---\nactive: true\nphase: planned\nmode: per-task\nreviewer: codex\n'
+    [ -n "${2:-}" ] && printf '%s\n' "$2"
+    printf 'plan_path: p.md\ntasks: 1\ncurrent: 1\ncurrent_review_id:\n---\n1\tpending\tTask 1: A\n'
+  } > .claude/spar-plan.local.md
+  fight_block "$1" | bash >/dev/null 2>&1
+  ACTIVATION_RC=$?
+}
+
+# No plan_review key at all — the state a plan prepared before this phase has,
+# and exactly the case a pure replace gets wrong.
+run_activation '--no-plan-review' ''
+chk "the override case exits clean" "0" "$ACTIVATION_RC"
+chk "the override is recorded on a state that lacked the field" "plan_review: overridden" \
+  "$(cat .claude/spar-plan.local.md)"
+chk "and the task table below it is untouched" "Task 1: A" \
+  "$(tail -1 .claude/spar-plan.local.md)"
+chk "and the plan actually activated" "phase: running" \
+  "$(cat .claude/spar-plan.local.md)"
+# The seat argument is the only thing keeping this seat unstamped now, and no
+# other check in this suite looks at the author field. Written as a computed
+# yes/no through this suite's own chk: it has no chk_absent, and calling one
+# would be a check that can neither pass nor fail.
+chk "and the claude seat stamped no author" "absent" \
+  "$(grep -q '^author:' .claude/spar-plan.local.md && echo present || echo absent)"
+
+# The other side of the same block: with no override and a review outstanding,
+# activation must be refused and the plan must still be startable afterwards.
+run_activation '' "$(printf 'plan_review: required\nplan_review_id: 20260728-120000-abc123')"
+# The exit status first: an untouched state and no loop file are also what a
+# block that did nothing at all leaves behind, so on their own these two cannot
+# tell a refusal from a missing helper call. Only the status distinguishes them.
+chk "an unreviewed plan is refused" "1" "$ACTIVATION_RC"
+chk "leaving the phase where it was" "phase: planned" \
+  "$(cat .claude/spar-plan.local.md)"
+chk "and no loop was started" "absent" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
 
 # ── 4d. Phase 4 skip: small + safe only, always reported and persisted ──
 skip_repo() {
@@ -2062,6 +2137,13 @@ for doc in plugins/spar/commands/cancel.md adapters/codex/skills/spar-cancel/SKI
   fresh_dir; mkdir -p reviews
   write_state review 1
   printf 'a brief\n' > .claude/spar-fix-brief.md
+  # The plan-review working files belong to the plan layer, not the loop, so
+  # cleanup() never sees them and only these two documents can remove them.
+  PR_ARTIFACTS=".claude/spar-plan-spec.txt .claude/spar-run-plan-review.sh
+.claude/spar-plan-review-prompt.txt .claude/spar-plan-review-hash
+.claude/spar-plan-review-response.md"
+  for f in $PR_ARTIFACTS; do printf 'x\n' > "$f"; done
+  printf 'PLAN-REVIEW: CLEAN\n' > reviews/spar-plan-20260101-000000-aaaaaa.md
   BLOCK="$(cancel_block "$ROOT/$doc")"
   chk "$doc has a runnable cancel block" "present" \
     "$(printf '%s' "$BLOCK" | grep -q 'rm -f' && echo present || echo absent)"
@@ -2075,6 +2157,13 @@ for doc in plugins/spar/commands/cancel.md adapters/codex/skills/spar-cancel/SKI
     "$([ -f .claude/spar-fix-brief.md ] && echo present || echo absent)"
   chk "$doc still removes the state file" "absent" \
     "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+  LEFT=""
+  for f in $PR_ARTIFACTS; do [ -e "$f" ] && LEFT="$LEFT $f"; done
+  chk "$doc removes every plan-review working file" "none" "${LEFT:-none}"
+  # The review itself is evidence, not scratch: it survives cancellation exactly
+  # as reviews/spar-<id>-r<N>.md does.
+  chk "$doc keeps the plan review itself" "present" \
+    "$([ -f reviews/spar-plan-20260101-000000-aaaaaa.md ] && echo present || echo absent)"
   # Proves the premise of the env -u above rather than asserting it in a comment:
   # with the plugin root reachable, cancel.md's outcome writer runs and leaves
   # reviews/spar-<id>-outcome.md behind, and this check would fail.

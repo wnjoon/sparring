@@ -7,7 +7,7 @@
 
 **Status: v0.8.0 — the Codex-hosted author seat is done, verified end to end against live models: Codex authored a fix, `claude -p` reviewed it blind and raised real findings, Codex fixed them, and the re-review converged. `adapters/codex/install.sh` registers the same two hooks with Codex and installs the author-seat skills; `adapters/codex/verify-live.sh` sets that run up and judges its artifacts.**
 
-Phases 1–6 and 8 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar:fight` gives you:
+Phases 1–9 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar:fight` gives you:
 
 - an **enforced** review loop that iterates until the *reviewer* declares convergence;
 - a **blind judge** that rules factual (`[MECHANICAL]`) stalemates;
@@ -25,7 +25,7 @@ Phases 1–6 and 8 are implemented; the core loop is verified end-to-end against
 
 
 
-Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phase 6 (the Codex-hosted mirror) closes in v0.8.0, after a live run in an isolated Codex home: trust accepted, the user-scope `SessionStart` hook firing before the skill's first action, and a planted off-by-one going FINDINGS → fix → blind re-review → CONVERGED with `claude -p` as the reviewer. That run also found three defects no test had, all fixed here. Phase 7 (model economics) is design only. The two-level round cap arrived in v0.7.0 after three dogfooding runs ended at the cap with nothing contested — see [the design note](docs/superpowers/specs/2026-07-26-productive-round-extension-design.md). The [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
+Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phase 6 (the Codex-hosted mirror) closes in v0.8.0, after a live run in an isolated Codex home: trust accepted, the user-scope `SessionStart` hook firing before the skill's first action, and a planted off-by-one going FINDINGS → fix → blind re-review → CONVERGED with `claude -p` as the reviewer. That run also found three defects no test had, all fixed here. Phase 7 (model economics — reviewer model and effort config, a tiered fix writer) is merged and unreleased; nothing it adds is on by default. Phase 9 (plan review) lands here: a plan written by `/spar:ready` gets one independent reading before it is fought, and `/spar:fight` will not start until every finding has a disposition — accepted or rejected with a grounded reason. A grounded rejection clears a finding; agreement is not required. `--no-plan-review` skips the pass and records that it was skipped. The two-level round cap arrived in v0.7.0 after three dogfooding runs ended at the cap with nothing contested — see [the design note](docs/superpowers/specs/2026-07-26-productive-round-extension-design.md). The [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
 
 ## Direction
 
@@ -139,9 +139,9 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 4 | Safe skip + changed-surface intent harvest + risk-triggered final sweep + durable exit reason | ✅ done |
 | 5 | Unattended mode + final report (`/spar:report`) | ✅ done |
 | 6 | Codex-hosted adapter: mirror the seats (Codex authors, `claude -p` reviews) and reuse the same Stop-hook gatekeeper via Codex's own `Stop` hook | ✅ done |
-| 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | planned |
+| 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | ✅ done |
 | 8 | `/spar:ready` + `/spar:fight` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) fight loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | ✅ done |
-| 9 | Plan review: one blind pass over a `/spar:ready` plan before it is fought — do its claims about the code hold, is every step satisfiable, does it cover the spec | planned |
+| 9 | Plan review: one blind pass over a `/spar:ready` plan before it is fought — do its claims about the code hold, is every step satisfiable, does it cover the spec — enforced as a `/spar:fight` precondition | ✅ done |
 
 ## Install
 
@@ -163,7 +163,7 @@ plugins/spar/            Claude Code plugin (commands, Stop hook)
   commands/              /spar:ready, /spar:fight, /spar:cancel, /spar:report, setup guards + surface helpers
   hooks/                 Stop dispatcher + round engine + SessionStart
   shared/policy.md       loop policy — source of truth for both seats
-  shared/prompts/        reviewer / judge / matcher / sweeper templates
+  shared/prompts/        reviewer / judge / matcher / sweeper / plan-reviewer templates
 adapters/codex/          Codex-hosted seat: hooks.json template, installer, skills
 docs/superpowers/        specs, plans, and design-decisions per phase
 tests/                   pure-bash hook + resolver tests
