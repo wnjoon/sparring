@@ -46,6 +46,17 @@ field() { # $1=key $2=file
   sed -n "s/^${1}: *//p" "$2" 2>/dev/null | head -1
 }
 
+# The live state describes whichever run is active NOW. As a fallback it is sound
+# only for the run it belongs to: a report asked for an older id would otherwise
+# state this run's reviewer, rounds, author and sweep as that run's facts, and
+# nothing in the report would mark them as borrowed. Every live-state read goes
+# through here so the check cannot be present on some fields and missing on
+# others — which is exactly how it stood: one of five sites had it.
+from_state() { # $1=key → its value, or empty when the live state is another run's
+  [ "$(field review_id "$STATE")" = "$review_id" ] || return 0
+  field "$1" "$STATE"
+}
+
 # Reject a symlink at the report path or at ANY existing ancestor directory —
 # writing through a symlinked parent (even a deep one) is unsafe.
 reject_unsafe_path() {
@@ -73,22 +84,15 @@ reject_unsafe_path
 # The outcome file is authoritative (record_outcome always runs first at every
 # terminal path); the live state file is the fallback while it is still present.
 reason=$(field reason "$OUTCOME"); [ -n "$reason" ] || reason=unknown
-rounds=$(field rounds "$OUTCOME"); [ -n "$rounds" ] || rounds=$(field round "$STATE")
+rounds=$(field rounds "$OUTCOME"); [ -n "$rounds" ] || rounds=$(from_state round)
 case "$rounds" in ''|*[!0-9]*) rounds=0 ;; esac
 reviewer=$(field reviewer "$OUTCOME")
 # The build, not only the family: the same CLI on the same code has given very
 # different findings across versions. It names the build the run was OBSERVED to
 # start with, not the one that necessarily performed every round — a CLI that
 # updated mid-run is not visible here.
-#
-# The live state is a fallback only for the run it belongs to. A report asked for
-# an older id would otherwise inherit the current run's build and state it as
-# fact; `unknown` is the honest answer there.
 reviewer_version=$(field reviewer_version "$OUTCOME")
-if [ -z "$reviewer_version" ] \
-  && [ "$(field review_id "$STATE")" = "$review_id" ]; then
-  reviewer_version=$(field reviewer_version "$STATE")
-fi
+[ -n "$reviewer_version" ] || reviewer_version=$(from_state reviewer_version)
 # Printable ASCII only — the value originates in third-party output. A backslash
 # survives that filter, so it is emitted with printf, never echo: under
 # `xpg_echo` an inherited shopt this script does not control, `echo` expands
@@ -96,14 +100,14 @@ fi
 reviewer_version=$(printf '%s' "$reviewer_version" \
   | tr -d '\000-\037\177' | LC_ALL=C tr -cd '\040-\176' | cut -c1-120)
 [ -n "$reviewer_version" ] || reviewer_version=unknown
-[ -n "$reviewer" ] || reviewer=$(field reviewer "$STATE")
+[ -n "$reviewer" ] || reviewer=$(from_state reviewer)
 # The pairing is a property of BOTH seats, so it must be derived from the pair.
 # Hardcoding "claude author" was safe only while Claude was the only host; with a
 # Codex author seat it inverts the label — reporting a codex↔codex loop as
 # cross-model. `author` is absent in every pre-Phase-6 run, hence the claude
 # default, matching stop-hook.sh's own resolution.
 author=$(field author "$OUTCOME")
-[ -n "$author" ] || author=$(field author "$STATE")
+[ -n "$author" ] || author=$(from_state author)
 case "$author" in ''|claude) author=claude ;; codex) ;; *) author=unknown ;; esac
 case "$reviewer" in codex|claude) ;; *) reviewer=unknown ;; esac
 if [ "$author" = unknown ] || [ "$reviewer" = unknown ]; then
@@ -113,7 +117,7 @@ elif [ "$author" = "$reviewer" ]; then
 else
   pairing="cross-model (${author} author ↔ ${reviewer} reviewer)"
 fi
-sweep=$(field sweep "$OUTCOME"); [ -n "$sweep" ] || sweep=$(field sweep_result "$STATE")
+sweep=$(field sweep "$OUTCOME"); [ -n "$sweep" ] || sweep=$(from_state sweep_result)
 case "$sweep" in not-run|not-triggered|pending|clean|findings|error) ;; *) sweep=not-run ;; esac
 
 # ── findings tally ──────────────────────────────────────────────────────────
