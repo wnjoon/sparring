@@ -5,7 +5,7 @@
 
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: v0.9.1 — a plan now gets an independent reading before it is fought. `/spar:ready` prepares one review of the plan it just wrote, and `/spar:fight` refuses to start until every finding has a disposition: accepted, or rejected with a reason grounded in the plan, the spec or the code. A grounded rejection clears a finding — agreement is not required. `--no-plan-review` skips the pass and records that it was skipped. The Codex-hosted seat is verified end to end and uses Codex-native `spar-ready`/`spar-fight`/`spar-cancel` guidance. Model economics ships alongside it: the reviewer's model and effort are configurable, and nothing is enabled by default.**
+**Status: v0.9.2 — a plan gets an independent reading before it is fought. `/spar:ready` prepares one review of the plan it just wrote, and `/spar:fight` refuses to start until every finding has a disposition: accepted, or rejected with a reason grounded in the plan, the spec or the code. A grounded rejection clears a finding — agreement is not required. `--no-plan-review` skips the pass and records that it was skipped. Both seats are verified end to end and use their own command spellings. The Codex release-gate checklist exercises the plan path too, so the seat that mirrors this one is checked against the feature rather than around it. Model economics ships alongside: the reviewer's model and effort are configurable, and nothing is enabled by default.**
 
 Phases 1–9 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar:fight` gives you:
 
