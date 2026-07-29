@@ -39,37 +39,12 @@ if [ -f "$PLAN_STATE" ]; then
     echo "Error: a plan is ready — run /spar:fight with no task to execute it, or clear it with /spar:cancel." >&2
     exit 1
   fi
-  . "${CLAUDE_PLUGIN_ROOT}/commands/spar-plan-lib.sh"
-  PHASE="$(plan_field phase "$PLAN_STATE")"
-  if [ "$PHASE" = "running" ]; then
-    echo "Error: this plan is already being fought. Continue by stopping, or /spar:cancel to abandon it." >&2
-    exit 1
-  fi
-  [ "$PHASE" = "planned" ] || { echo "Error: plan state is not ready to fight (phase: $PHASE)." >&2; exit 1; }
-  if [ -f .claude/spar.local.md ]; then echo "Error: a fight loop is already active. Use /spar:cancel first."; exit 1; fi
-  PLAN="$(plan_field plan_path "$PLAN_STATE")"
-  MODE="$(plan_field mode "$PLAN_STATE")"
-  [ -f "$PLAN" ] || { echo "Error: plan file not found: $PLAN" >&2; exit 1; }
-  # The plan review is a precondition of activation, checked after the phase and
-  # plan-file checks so its message is never the first thing a user sees when the
-  # real problem is a missing plan. plan_put_field, not plan_set_field: a plan
-  # prepared before this phase carries no plan_review line and a pure replace
-  # would record the override silently nowhere. No [ -x ] guard on the checker —
-  # a missing command script is a broken install, and fail-open exists so a hook
-  # never holds a session hostage, which this deliberately is not.
-  PRCHK="${CLAUDE_PLUGIN_ROOT}/commands/spar-plan-review-check.sh"
-  if [ "$SPAR_PLAN_REVIEW" = false ]; then
-    plan_put_field plan_review overridden "$PLAN_STATE"
-    echo "Note: starting without a plan review because --no-plan-review was given."
-  elif ! bash "$PRCHK" "$PLAN" "$PLAN_STATE"; then
-    exit 1
-  fi
-  plan_set_field phase running "$PLAN_STATE"
-  H1="$(plan_task_line 1 "$PLAN_STATE" | cut -f3)"
-  if [ "$MODE" = "whole" ]; then cp "$PLAN" .claude/spar-fight-task.txt
-  else awk -v h="### ${H1}" '$0==h{f=1} f&&/^### /&&$0!=h&&seen{exit} $0==h{seen=1} f{print}' "$PLAN" > .claude/spar-fight-task.txt; fi
-  bash "${CLAUDE_PLUGIN_ROOT}/commands/spar-fight-launch.sh" "$PLAN_STATE" .claude/spar-fight-task.txt || { echo "Error: could not launch task 1." >&2; exit 1; }
-  echo "Fight started on the ready plan (task 1/$(plan_field tasks "$PLAN_STATE")). Implement task 1 following its steps in ${PLAN}, then stop — the sparring reviewer engages automatically and the fight advances task-by-task on convergence."
+  # Activation — the phase checks, the plan-review gate, the phase flip, task 1
+  # and the launch — lives in one helper both seats call. It used to be copied
+  # here and in the Codex skill, and the copies drifted: the gate landed in each
+  # by hand and ended up in a different place in the two. The seat argument is
+  # the only thing this entry point still decides.
+  bash "${CLAUDE_PLUGIN_ROOT}/commands/spar-plan-activate.sh" "$PLAN_STATE" "$SPAR_PLAN_REVIEW" claude || exit 1
   exit 0
 fi
 if [ -z "$SPAR_TASK" ]; then

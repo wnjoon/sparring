@@ -108,48 +108,14 @@ if [ -f "$PLAN_STATE" ]; then
     echo "Error: a plan is ready — run spar-fight with no task to execute it, or clear it with spar-cancel." >&2
     exit 1
   fi
-  . "$SPAR_ROOT/commands/spar-plan-lib.sh"
-  PHASE="$(plan_field phase "$PLAN_STATE")"
-  if [ "$PHASE" = "running" ]; then
-    echo "Error: this plan is already being fought. Continue by stopping, or spar-cancel to abandon it." >&2
-    exit 1
-  fi
-  [ "$PHASE" = "planned" ] || { echo "Error: plan state is not ready to fight (phase: $PHASE)." >&2; exit 1; }
-  PLAN="$(plan_field plan_path "$PLAN_STATE")"
-  MODE="$(plan_field mode "$PLAN_STATE")"
-  [ -f "$PLAN" ] || { echo "Error: plan file not found: $PLAN" >&2; exit 1; }
-  # The plan review is a precondition of activation, checked after the phase and
-  # plan-file checks so its message is never the first thing a user sees when the
-  # real problem is a missing plan — and BEFORE the author/owner stamps below, so
-  # a refused run leaves the state exactly as it found it. plan_put_field, not
-  # plan_set_field, for the same reason those two use it. No [ -x ] guard on the
-  # checker — a missing command script is a broken install, and fail-open exists
-  # so a hook never holds a session hostage, which this deliberately is not.
-  PRCHK="$SPAR_ROOT/commands/spar-plan-review-check.sh"
-  if [ "$SPAR_PLAN_REVIEW" = false ]; then
-    plan_put_field plan_review overridden "$PLAN_STATE"
-    echo "Note: starting without a plan review because --no-plan-review was given."
-  elif ! bash "$PRCHK" "$PLAN" "$PLAN_STATE"; then
-    exit 1
-  fi
-  # Claim the plan for THIS seat and THIS session. Both are stamped on the plan,
-  # not on the task, because the hook launches every task after the first and
-  # would otherwise drop them at the first advance. plan_put_field, not
-  # plan_set_field: a plan prepared by the Claude command — or by an older
-  # version — has neither key, and a pure replace would silently leave the run
-  # ungated and attributed to the wrong author family.
-  #
-  # Re-stamping a plan prepared elsewhere is correct, not a hijack: whoever fights
-  # the plan is the one writing the code, so this session is its author and owner.
-  plan_put_field author codex "$PLAN_STATE"
-  plan_put_field owner_session "$SPAR_SESSION" "$PLAN_STATE"
-  plan_set_field phase running "$PLAN_STATE"
-  H1="$(plan_task_line 1 "$PLAN_STATE" | cut -f3)"
-  if [ "$MODE" = "whole" ]; then cp "$PLAN" .claude/spar-fight-task.txt
-  else awk -v h="### ${H1}" '$0==h{f=1} f&&/^### /&&$0!=h&&seen{exit} $0==h{seen=1} f{print}' "$PLAN" > .claude/spar-fight-task.txt; fi
-  bash "$SPAR_ROOT/commands/spar-fight-launch.sh" "$PLAN_STATE" .claude/spar-fight-task.txt \
-    || { echo "Error: could not launch task 1." >&2; exit 1; }
-  echo "Fight started on the ready plan (task 1/$(plan_field tasks "$PLAN_STATE")). Implement task 1 following its steps in ${PLAN}, then stop."
+  # Activation — the phase checks, the plan-review gate, this seat's author and
+  # owner_session stamps, the phase flip, task 1 and the launch — lives in one
+  # helper both seats call. It used to be copied here and in fight.md, and the
+  # copies drifted: the gate landed in each by hand and ended up in a different
+  # place in the two. The seat argument and the session are the only things this
+  # entry point still decides; the helper refuses an empty or malformed session
+  # rather than activating an unowned plan.
+  bash "$SPAR_ROOT/commands/spar-plan-activate.sh" "$PLAN_STATE" "$SPAR_PLAN_REVIEW" codex "$SPAR_SESSION" || exit 1
   exit 0
 fi
 if [ -z "$SPAR_TASK" ]; then

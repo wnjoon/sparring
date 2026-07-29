@@ -138,17 +138,29 @@ chk "/spar atomically publishes initial state" 'mv "$SPAR_STATE_TMP" .claude/spa
 # Same for the direct Claude seat: the shared launcher covers the plan path only.
 chk "/spar records the reviewer build" 'reviewer_version:' \
   "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
-chk "/spar:fight gates on the plan review" 'spar-plan-review-check.sh' \
-  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+# Activation lives in one helper now, so these three follow the code they are
+# about. Left pointed at fight.md they would assert that the duplicate is back.
+ACTIVATE="$CLAUDE_PLUGIN_ROOT/commands/spar-plan-activate.sh"
+chk "activation gates on the plan review" 'spar-plan-review-check.sh' "$(cat "$ACTIVATE")"
 # Presence is not order. The gate must precede the phase flip, or a refused plan
 # is already `running` and /spar:cancel is the only way out of it.
 chk "and does so before flipping the phase" "yes" \
   "$(awk '/spar-plan-review-check\.sh/{c=NR} /plan_set_field phase running/{p=NR} END{print (c && p && c < p) ? "yes" : "no"}' \
-     "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+     "$ACTIVATE")"
 # plan_put_field, not plan_set_field: a plan prepared before this phase has no
 # plan_review line, and a pure replace would silently record nothing.
 chk "the override appends rather than replaces" 'plan_put_field plan_review overridden' \
+  "$(cat "$ACTIVATE")"
+
+# The wiring: what can still drift once the body is shared.
+chk "/spar:fight activates through the shared helper" 'spar-plan-activate.sh' \
   "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+# The seat argument selects the stamps and the wording. Passed wrong, a Claude
+# run would stamp author: codex and name the wrong commands.
+chk "and names its own seat" 'spar-plan-activate.sh" "$PLAN_STATE" "$SPAR_PLAN_REVIEW" claude' \
+  "$(cat "$CLAUDE_PLUGIN_ROOT/commands/fight.md")"
+chk "and no longer carries its own copy" "absent" \
+  "$(grep -q 'plan_set_field phase running' "$CLAUDE_PLUGIN_ROOT/commands/fight.md" && echo present || echo absent)"
 
 # The override, run through the REAL activation block rather than a copy of it.
 # A copy is the shape of test that stays green while the document it stands in
@@ -181,6 +193,12 @@ chk "and the task table below it is untouched" "Task 1: A" \
   "$(tail -1 .claude/spar-plan.local.md)"
 chk "and the plan actually activated" "phase: running" \
   "$(cat .claude/spar-plan.local.md)"
+# The seat argument is the only thing keeping this seat unstamped now, and no
+# other check in this suite looks at the author field. Written as a computed
+# yes/no through this suite's own chk: it has no chk_absent, and calling one
+# would be a check that can neither pass nor fail.
+chk "and the claude seat stamped no author" "absent" \
+  "$(grep -q '^author:' .claude/spar-plan.local.md && echo present || echo absent)"
 
 # The other side of the same block: with no override and a review outstanding,
 # activation must be refused and the plan must still be startable afterwards.

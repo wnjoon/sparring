@@ -561,6 +561,21 @@ runs where it worked. The note is the honest middle — it tells the reader that
 review below describes an earlier revision, and leaves the judgment where the rest
 of this system leaves it.
 
+**Activation lives in one helper, `spar-plan-activate.sh`.** Both fight entry
+points used to carry their own copy of the sequence from the phase checks through
+the launch. The trigger for merging them was a finding about a *test*: the
+override was covered by a check that reimplemented the branch it was meant to
+guard, so it stayed green while the document could break. Extracting the body
+made one behavioural path testable for both seats, and removed the second copy
+that had already drifted — the plan-review gate was added to each by hand and
+ended up in a different position in the two. The seat argument is now the only
+thing the entry points differ by: it selects the command names in messages,
+whether the author/owner stamps are written, and the tail of the success line.
+The helper resolves its siblings from `BASH_SOURCE`, so the two plugin-root
+variables never enter shared code. Codex's ordering — the gate before the stamps,
+not merely before the phase flip — became the shared one, so a refusal writes
+nothing at all.
+
 **A malformed result is quarantined, not refused in place.** The generated runner
 exits 0 the moment a regular result file exists, which is what makes it safe to
 re-run; telling an author to re-run it over a truncated or foreign-marker file

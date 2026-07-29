@@ -257,15 +257,19 @@ chk "ready skill's authoring section reads the captured spec" ".claude/spar-plan
 # Provenance is written at activation, so the direct Codex seat needs it too —
 # the shared launcher covers only the plan path.
 chk "fight skill records the reviewer build" "reviewer_version:" "$FIGHT"
-chk "fight skill gates on the plan review" "spar-plan-review-check.sh" "$FIGHT"
+# Activation lives in one helper now, shared with the Claude seat, so these
+# follow the code they are about. Left pointed at the skill they would assert
+# that the duplicate is back.
+ACTIVATE="$(cat "$ROOT/plugins/spar/commands/spar-plan-activate.sh")"
+chk "activation gates on the plan review" "spar-plan-review-check.sh" "$ACTIVATE"
 # Presence is not order. The gate must precede the phase flip, or a refused plan
 # is already `running` and the cancel skill is the only way out of it.
 chk "and does so before flipping the phase" "yes" \
   "$(awk '/spar-plan-review-check\.sh/{c=NR} /plan_set_field phase running/{p=NR} END{print (c && p && c < p) ? "yes" : "no"}' \
-     "$ROOT/adapters/codex/skills/spar-fight/SKILL.md")"
+     "$ROOT/plugins/spar/commands/spar-plan-activate.sh")"
 # plan_put_field, not plan_set_field: a plan prepared before this phase has no
 # plan_review line, and a pure replace would silently record nothing.
-chk "fight skill appends the override" "plan_put_field plan_review overridden" "$FIGHT"
+chk "activation appends the override" "plan_put_field plan_review overridden" "$ACTIVATE"
 chk "fight skill refuses when enforcement is unproven" "NOT be enforced" "$FIGHT"
 
 # The marker must be checked for IDENTITY, not mere existence: one left by an
@@ -278,14 +282,20 @@ chk "fight skill rejects a stale marker" "is stale" "$FIGHT"
 # prepared plan on the floor, or reviews a dirty tree while claiming otherwise.
 chk "fight skill dispatches a prepared plan" "spar-plan.local.md" "$FIGHT"
 chk "fight skill refuses a task arg with a plan pending" "run spar-fight with no task" "$FIGHT"
-chk "fight skill launches through the shared launcher" "spar-fight-launch.sh" "$FIGHT"
+chk "activation launches through the shared launcher" "spar-fight-launch.sh" "$ACTIVATE"
 chk "fight skill runs the clean-worktree guard" "spar-check-worktree.sh" "$FIGHT"
 # A plan prepared by the Claude command has neither key, and plan_set_field is a
 # pure replace — stamping with it would leave the run ungated and mis-attributed.
-chk "fight skill stamps the author with an inserting write" "plan_put_field author codex" "$FIGHT"
-chk "fight skill stamps the session with an inserting write" "plan_put_field owner_session" "$FIGHT"
-chk_absent "fight skill never stamps the seat with a replace-only write" \
-  "plan_set_field owner_session" "$FIGHT"
+chk "activation stamps the author with an inserting write" "plan_put_field author codex" "$ACTIVATE"
+chk "activation stamps the session with an inserting write" "plan_put_field owner_session" "$ACTIVATE"
+chk_absent "activation never stamps the seat with a replace-only write" \
+  "plan_set_field owner_session" "$ACTIVATE"
+
+# The wiring: what can still drift once the body is shared.
+chk "fight skill activates through the shared helper" "spar-plan-activate.sh" "$FIGHT"
+chk "and names its own seat" 'spar-plan-activate.sh" "$PLAN_STATE" "$SPAR_PLAN_REVIEW" codex "$SPAR_SESSION"' "$FIGHT"
+chk "and no longer carries its own copy" "absent" \
+  "$(grep -q 'plan_set_field phase running' "$ROOT/adapters/codex/skills/spar-fight/SKILL.md" && echo present || echo absent)"
 chk "fight skill resolves flags instead of hardcoding them" "spar-fight-resolve.sh" "$FIGHT"
 chk_absent "fight skill has no placeholder task" "TASK_DESCRIPTION_GOES_HERE" "$FIGHT"
 
@@ -437,5 +447,40 @@ done
 # The args path is already covered by the loop's git-exclude patterns.
 chk "the args file is hidden from the review surface" ".claude/spar*" \
   "$(cat "$ROOT/adapters/codex/skills/spar-fight/SKILL.md")"
+
+# ── the one behavioural test in this suite ──────────────────────────────────
+# Everything above greps the document; this runs it. The Claude seat has had an
+# execution test since the previous phase and this seat has never had one, so a
+# skill that greps correctly and activates wrongly went unnoticed. Its own temp
+# repo, because the cases above do not need one and must not inherit its state.
+CTMP=$(mktemp -d); ( cd "$CTMP" && cd "$(pwd -P)" || exit 1
+  git init -q; git config user.email t@t; git config user.name t
+  mkdir -p .claude reviews
+  PLAN_STATE=".claude/spar-plan.local.md"
+  printf '# Plan\n\n### Task 1: A\n\ndo it\n' > p.md
+  git add p.md && git commit -q -m base
+  # No plan_review key: the state a plan prepared before Phase 9 has, and the
+  # case a replace-only write gets wrong.
+  printf -- '---\nactive: true\nphase: planned\nmode: per-task\nreviewer: claude\nplan_path: p.md\nbranch: b\ntasks: 1\ncurrent: 1\ncurrent_review_id:\n---\n1\tpending\tTask 1: A\n' \
+    > "$PLAN_STATE"
+  # The skill refuses without a live-hook marker matching this session, and reads
+  # its arguments from a file. Neither is what this test is about.
+  export CODEX_THREAD_ID=t1
+  printf 't1\n' > "$(git rev-parse --git-dir)/spar-hook-live"
+  printf -- '--no-plan-review\n' > .claude/spar-args.txt
+  export SPAR_PLUGIN_ROOT="$ROOT/plugins/spar"
+  # reviewer=claude above and a stub on PATH: spar-fight-launch.sh asks the
+  # reviewer CLI for its version, and a real call would put this test on a network.
+  STUBS=$(mktemp -d); printf '#!/bin/sh\necho 1.0.0\n' > "$STUBS/claude"
+  chmod +x "$STUBS/claude"; PATH="$STUBS:$PATH"
+  awk '/^```bash$/{f=1; next} /^```$/{if (f) exit} f' \
+    "$ROOT/adapters/codex/skills/spar-fight/SKILL.md" | bash >/dev/null 2>&1
+  cat "$PLAN_STATE" > "$CTMP/after.txt"
+  rm -rf "$STUBS" )
+AFTER="$(cat "$CTMP/after.txt" 2>/dev/null)"; rm -rf "$CTMP"
+chk "the codex block records the override" "plan_review: overridden" "$AFTER"
+chk "and stamps its own seat" "author: codex" "$AFTER"
+chk "and the owning session" "owner_session: t1" "$AFTER"
+chk "and the plan activated" "phase: running" "$AFTER"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
