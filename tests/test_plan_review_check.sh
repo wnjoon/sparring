@@ -161,6 +161,12 @@ eqchk "findings without a response refuse" "1" "$RC"
 chk "and name the response path" "spar-plan-review-response.md" "$OUT"
 chk "and the first id" "PR1" "$OUT"
 chk "and the second" "PR2" "$OUT"
+OUT="$(bash "$C" p.md "$ST" codex 2>&1)"; RC=$?
+eqchk "codex findings without a response refuse" "1" "$RC"
+chk "and name codex fight as the next action" "spar-fight" "$OUT"
+chk "and name codex cancel as the escape" "spar-cancel" "$OUT"
+chk_absent "without claude fight spelling" "/spar:fight" "$OUT"
+chk_absent "without claude cancel spelling" "/spar:cancel" "$OUT"
 
 printf -- '### PR1: ACCEPTED — fixed the plan\n' > .claude/spar-plan-review-response.md
 OUT="$(bash "$C" p.md "$ST" 2>&1)"; RC=$?

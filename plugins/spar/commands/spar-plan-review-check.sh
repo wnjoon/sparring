@@ -187,7 +187,8 @@ if [ -n "$outstanding" ]; then
       "         ### PR<n>: REJECTED — <reason grounded in the plan, spec or code>" \
       "" \
       "       A grounded rejection clears a finding exactly as an acceptance does." \
-      "       Read the findings in ${res}."
+      "       Read the findings in ${res}." \
+      "       After writing the disposition, run ${FIGHT_CMD} again; use ${CANCEL_CMD} to abandon this plan."
 fi
 
 report_hash
