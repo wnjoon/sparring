@@ -153,6 +153,19 @@ for item in "trust" "scope" "SessionStart" "CONVERGED"; do
 done
 chk "checklist tells the human to run codex themselves" "codex" "$CL"
 chk "checklist prints the isolated home to use" "CODEX_HOME=" "$CL"
+# 6b. Phase 9 added a plan path to this seat and the checklist went a whole
+# release without mentioning it — items 1-4 all drive spar-fight with a task,
+# which is the single-task path.
+chk "the checklist drives the plan path" "spar-ready" "$CL"
+chk "and names the flag it must print" "plan-review=required" "$CL"
+chk "and asks for the seat-correct refusal" "spar-cancel" "$CL"
+# The one thing artifacts cannot show, so the human is asked for it explicitly.
+# Anchored on wording unique to this item: "refuse" alone already appears in
+# item 3's text, so a bare match passed before the item existed.
+chk "and asks the human whether fight refused first" "did spar-fight refuse" "$CL"
+# A CLEAN review has no missing disposition and cannot produce a refusal, so the
+# item has to say what to do then rather than leaving the human stuck.
+chk "and says what to do when the review comes back clean" "CLEAN" "$CL"
 
 # 6c. paths the human is told to TYPE are shell-quoted; a space must not break
 # the commands and a $(...) must not run when they are pasted.
@@ -319,6 +332,18 @@ plant_report() { # $1=workspace $2=outcome [$3=pairing line] [$4=raised]
     "$2" "${3-claude — cross-model (codex author ↔ claude reviewer)}" "${4-2 (MECHANICAL 2, DESIGN 0)}" \
     > "$1/repo/reviews/spar-20260726-120000-aaaaaa-report.md"
 }
+# The plan path's artifacts: the review result, and the plan state carrying the
+# stamps only the Codex seat's activation writes. The plan state is NOT deleted at
+# a terminal path — cleanup() removes the loop state, and spar-cancel removes the
+# plan state — so unlike plant_run this one leaves it behind.
+plant_plan_run() { # $1=workspace [$2=first line of the result]
+  mkdir -p "$1/repo/reviews" "$1/repo/.claude"
+  printf '%s\n' "${2-PLAN-REVIEW: FINDINGS}" \
+    > "$1/repo/reviews/spar-plan-20260726-110000-bbbbbb.md"
+  printf -- '---\nactive: true\nphase: running\nauthor: codex\nreviewer: claude\nowner_session: %s\nplan_review: required\nplan_review_id: 20260726-110000-bbbbbb\n---\n' \
+    "${3-sess-live-9}" > "$1/repo/.claude/spar-plan.local.md"
+}
+
 # What a REAL finished run leaves: round files, a response, an outcome and a
 # report — and no .claude/spar.local.md, because cleanup() deletes it on every
 # terminal path. Fixtures that planted the state file were modelling something
@@ -332,6 +357,10 @@ plant_run() { # $1=workspace $2=outcome
   printf -- 'reason: %s\n' "$2" > "$r/spar-20260726-120000-aaaaaa-outcome.md"
   plant_report "$1" "$2"
   rm -f "$1/repo/.claude/spar.local.md"
+  # Since Phase 9 a real run through this seat also goes through spar-ready and
+  # its plan review, so what it leaves includes those. A fixture modelling a run
+  # that SKIPPED the plan path removes them again, explicitly.
+  plant_plan_run "$1"
 }
 
 # A python3 that answers the stdin-fed trust reader as an OLD interpreter would.
@@ -365,6 +394,10 @@ chk "check before a run → item 1 unresolved" "ITEM 1: NEEDS YOUR ANSWER" "$OUT
 chk "check before a run → item 2 unresolved" "ITEM 2: NEEDS YOUR ANSWER" "$OUT"
 chk "check before a run → item 3 unresolved" "ITEM 3: NEEDS YOUR ANSWER" "$OUT"
 chk "check before a run → item 4 unresolved" "ITEM 4: NEEDS YOUR ANSWER" "$OUT"
+# Absence with no evidence of a run cannot tell "the human skipped item 5" from
+# "no session ran", and check is documented to run before a session too — so it
+# reports, it does not fail. Same shape item 3 already uses.
+chk "check before a run → item 5 unresolved" "ITEM 5: NEEDS YOUR ANSWER" "$OUT"
 chk "check before a run → says the marker is absent" "no liveness marker" "$OUT"
 chk_absent "check before a run → never claims a pass" "CONFIRMED" "$OUT"
 chk "check before a run → exit 0, nothing failed" "0" "$RC"
@@ -399,6 +432,55 @@ chk "happy path → item 4 confirmed" "ITEM 4: CONFIRMED" "$OUT"
 chk "happy path → item 3 rests on the run, not on deleted state" "spar-fight activated" "$OUT"
 chk "happy path → item 4 evidence names the outcome" "converged" "$OUT"
 chk "happy path → exit 0" "0" "$RC"
+
+# 9b. the plan path, judged from its own artifacts
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-live-9
+plant_run "$PWD/ws" converged; plant_plan_run "$PWD/ws"
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "plan path present → item 5 confirmed" "ITEM 5: CONFIRMED" "$OUT"
+# The refusal itself leaves nothing durable, so a pass here must not read as
+# covering it. Said out loud in the verdict rather than left to the reader.
+chk "and says the refusal cannot be judged from artifacts" \
+  "no artifact records a refusal" "$OUT"
+chk "plan path present → exit 0" "0" "$RC"
+
+# 9c. a result that is not a plan review is a failure, not a pass. Without this
+# fixture the marker assertion is a check that cannot fail.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-live-9
+plant_run "$PWD/ws" converged; plant_plan_run "$PWD/ws" 'STATUS: CONVERGED'
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "a foreign marker in the plan result → item 5 failed" "ITEM 5: FAILED" "$OUT"
+chk "a foreign marker → nonzero exit" "1" "$RC"
+
+# 9d. the plan state must carry the stamps only this seat's activation writes.
+# A hand-written state proves nothing about the seat.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-live-9
+plant_run "$PWD/ws" converged
+mkdir -p ./ws/repo/reviews ./ws/repo/.claude
+printf 'PLAN-REVIEW: CLEAN\n' > ./ws/repo/reviews/spar-plan-20260726-110000-bbbbbb.md
+printf -- '---\nactive: true\nphase: running\nreviewer: claude\n---\n' \
+  > ./ws/repo/.claude/spar-plan.local.md
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "an unstamped plan state → item 5 failed" "ITEM 5: FAILED" "$OUT"
+chk "and the evidence names what is missing" "author" "$OUT"
+
+# 9e. a run happened and skipped the plan path entirely → failed, not unknown.
+# The removal is the fixture: plant_run leaves the plan artifacts because a real
+# run does, so a run that skipped item 5 is modelled by taking them away.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-live-9
+plant_run "$PWD/ws" converged
+rm -f ./ws/repo/reviews/spar-plan-*.md ./ws/repo/.claude/spar-plan.local.md
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "a run with no plan artifacts → item 5 failed" "ITEM 5: FAILED" "$OUT"
+chk "and says the run happened without it" "left no plan-path artifacts" "$OUT"
 
 # 10. a marker naming a different session than the loop owned is a failure
 fresh
@@ -894,7 +976,12 @@ fresh
 bash "$V" setup --dir ./ws >/dev/null 2>&1
 plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-e
 OUT=$(bash "$V" check --dir ./ws 2>&1)
-chk "each verdict is followed by evidence" "4" \
+# Counted against the number of verdicts, not against a literal: a hardcoded 4
+# had to be edited when item 5 was added, which is an edit that can be made by
+# lowering the expectation instead of fixing the output.
+N_ITEMS="$(printf '%s\n' "$OUT" | grep -c '^ITEM ')"
+chk "check emits a verdict per item" "5" "$N_ITEMS"
+chk "each verdict is followed by evidence" "$N_ITEMS" \
   "$(printf '%s\n' "$OUT" | grep -A1 '^ITEM ' | grep -c '^  [^ ]')"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
