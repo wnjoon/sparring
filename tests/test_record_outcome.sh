@@ -39,6 +39,45 @@ chk "round persisted" "rounds: 3" "$(cat "$OUT")"
 chk "reviewer persisted" "reviewer: codex" "$(cat "$OUT")"
 chk "sweep result persisted" "sweep: clean" "$(cat "$OUT")"
 
+# author is the one header field the outcome file never carried, so a report
+# assembled after the loop state is gone had no source for it and took the
+# historical claude default — inverting the pairing sentence for a Codex-authored
+# run. `fresh` writes a state with no author line, which only ever exercises the
+# default arm, so each case gets its own state and its own review id.
+oc_state() { # $1=review-id  $2=author line, or empty to omit it
+  { printf -- '---\nactive: true\nphase: review\nround: 3\nreview_id: %s\n' "$1"
+    printf 'base_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nreviewer: codex\n'
+    [ -n "$2" ] && printf '%s\n' "$2"
+    printf 'max_rounds: 5\n---\ntask\n'
+  } > .claude/spar.local.md
+}
+
+ID_CODEX=20260729-010000-aaaaaa
+oc_state "$ID_CODEX" 'author: codex'
+bash "$WRITER" converged .claude/spar.local.md clean
+chk "the outcome records a codex author" "author: codex" \
+  "$(cat "reviews/spar-${ID_CODEX}-outcome.md")"
+
+# Absent means claude — the convention every reader already applies. Written out
+# rather than omitted, so a consumer of the outcome file needs no default.
+ID_PLAIN=20260729-020000-bbbbbb
+oc_state "$ID_PLAIN" ''
+bash "$WRITER" converged .claude/spar.local.md clean
+chk "and claude when the state says nothing" "author: claude" \
+  "$(cat "reviews/spar-${ID_PLAIN}-outcome.md")"
+
+# Same discipline reviewer gets: an unexpected value must not reach the
+# frontmatter as itself.
+ID_BOGUS=20260729-030000-cccccc
+oc_state "$ID_BOGUS" 'author: banana'
+bash "$WRITER" converged .claude/spar.local.md clean
+chk "and refuses a bogus author" "author: unknown" \
+  "$(cat "reviews/spar-${ID_BOGUS}-outcome.md")"
+
+# Back to the shared fixture the cases below expect.
+fresh
+bash "$WRITER" converged .claude/spar.local.md clean
+
 # Immutable/idempotent: a second terminal call cannot rewrite the first reason.
 bash "$WRITER" cap .claude/spar.local.md findings
 chk "existing outcome is not rewritten" "reason: converged" "$(cat "$OUT")"

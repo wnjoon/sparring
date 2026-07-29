@@ -106,6 +106,11 @@ reviewer_version=$(printf '%s' "$reviewer_version" \
 # Codex author seat it inverts the label — reporting a codex↔codex loop as
 # cross-model. `author` is absent in every pre-Phase-6 run, hence the claude
 # default, matching stop-hook.sh's own resolution.
+#
+# The outcome file now carries the field, so the live-state read below is the
+# fallback only for an outcome written before that — every current run records it
+# at its terminal path. Reaching that fallback for a finished run used to mean
+# taking the claude default and reporting a Codex-authored run as Claude-authored.
 author=$(field author "$OUTCOME")
 [ -n "$author" ] || author=$(from_state author)
 case "$author" in ''|claude) author=claude ;; codex) ;; *) author=unknown ;; esac
