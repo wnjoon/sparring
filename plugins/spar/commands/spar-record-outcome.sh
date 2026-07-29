@@ -21,6 +21,7 @@ field() { sed -n "s/^${1}: *//p" "$state_file" 2>/dev/null | head -1; }
 review_id=$(field review_id)
 round=$(field round)
 reviewer=$(field reviewer)
+author=$(field author)
 # A version string comes from a third-party CLI and is written into frontmatter
 # that later readers parse line-by-line. Anything outside printable ASCII — a
 # newline that would forge a field, a tab, a terminal escape — is dropped rather
@@ -40,6 +41,10 @@ if ! printf '%s' "$safe_id" | grep -qE '^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$'; then
 fi
 case "$round" in ''|*[!0-9]*) round=0;; esac
 case "$reviewer" in codex|claude) ;; *) reviewer=unknown;; esac
+# Absent means claude — the historical default for every pre-Phase-6 run, and what
+# stop-hook.sh and spar-report.sh both resolve it to. Resolved here rather than
+# left empty so a reader of the outcome file needs no default of its own.
+case "$author" in ''|claude) author=claude ;; codex) ;; *) author=unknown ;; esac
 
 if [ -e reviews ] || [ -L reviews ]; then
   [ -d reviews ] && [ ! -L reviews ] \
@@ -62,6 +67,7 @@ trap 'rm -f "$tmp"' EXIT
   echo "review_id: ${review_id}"
   echo "rounds: ${round}"
   echo "reviewer: ${reviewer}"
+  echo "author: ${author}"
   # printf, not echo: a backslash survives the printable filter, and under an
   # inherited `xpg_echo` shopt `echo` would expand `\n` and forge a field here.
   printf '%s\n' "reviewer_version: ${reviewer_version}"

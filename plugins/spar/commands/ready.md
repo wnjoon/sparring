@@ -38,7 +38,17 @@ command -v "$RDY_REVIEWER" >/dev/null 2>&1 || { echo "Error: '$RDY_REVIEWER' CLI
 # Isolate this run on a dedicated branch in the CURRENT directory. No separate
 # worktree, so the working directory — and thus every state path the Stop hook
 # reads — never changes mid-run. All task commits land on this branch.
-RDY_SLUG="$(printf '%s' "$RDY_SPEC" | sed 's#.*/##; s/\.[A-Za-z0-9]*$//' | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-' | sed 's/^-*//; s/-*$//' | cut -c1-40)"
+# Basename and extension stripping is for a spec that IS a file. Applied to an
+# inline description it cuts everything before the last '/' the prose happens to
+# contain, and the branch name starts mid-sentence.
+if [ -f "$RDY_SPEC" ]; then RDY_SLUG_SRC="$(printf '%s' "$RDY_SPEC" | sed 's#.*/##; s/\.[A-Za-z0-9]*$//')"
+else RDY_SLUG_SRC="$RDY_SPEC"; fi
+# The squeeze matters because the ASCII filter deletes characters BETWEEN the
+# dashes that spaces became: a non-Latin phrase would otherwise leave a run of
+# them. Deliberately ASCII-only — git takes UTF-8 refs, but a branch name is not
+# where the topic is read, and byte-safe truncation of multibyte text is
+# machinery this does not need.
+RDY_SLUG="$(printf '%s' "$RDY_SLUG_SRC" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-' | tr -s '-' | sed 's/^-*//; s/-*$//' | cut -c1-40)"
 [ -n "$RDY_SLUG" ] || RDY_SLUG=run
 RDY_BRANCH="spar/${RDY_SLUG}-$(date +%Y%m%d-%H%M%S)"
 git checkout -b "$RDY_BRANCH" || { echo "Error: could not create branch $RDY_BRANCH."; exit 1; }

@@ -308,6 +308,49 @@ TRUSTPY
     reject_unless_regular "$cand" && rpt="$cand"
   done
 
+  # The plan path's artifacts, discovered here rather than at item 5 so a planted
+  # one lands in the IGNORED EVIDENCE block printed just below. Noting it after
+  # that block has already printed is a note nobody reads.
+  #
+  # The result is the one the STATE names, not whichever spar-plan-*.md sorts last.
+  # More than one is expected — item 5 tells the human to cancel and re-run
+  # spar-ready when the first review comes back CLEAN, and spar-cancel keeps the
+  # results — so picking by glob would let a stale review from an abandoned attempt
+  # vouch for the plan that actually ran, including one started with
+  # --no-plan-review.
+  plan_state=""
+  for cand in "$repo/.claude/spar-plan.local.md"; do
+    [ -e "$cand" ] || [ -L "$cand" ] || continue
+    reject_unless_regular "$cand" && plan_state="$cand"
+  done
+  plan_rid=""
+  if [ -n "$plan_state" ]; then
+    plan_rid="$(sed -n 's/^plan_review_id: *//p' "$plan_state" | head -1)"
+    # Interpolated into a path, so validated like every other id in this codebase.
+    printf '%s' "$plan_rid" | grep -qE '^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$' || plan_rid=""
+  fi
+  # Every candidate is validated, whether or not a state names it: tamper
+  # reporting must not depend on the state existing, and a result on disk is
+  # itself evidence the plan review ran.
+  # One pass decides both: whether any usable result exists at all, and whether
+  # the one the state NAMES is among them. Selecting the named file separately
+  # afterwards would need a second existence test, and a `[ -f ]` there follows a
+  # symlink — handing item 5 a file this loop had just reported as ignored. Picking
+  # it inside the loop means the named result is only ever the validated one.
+  plan_any=""
+  plan_res=""
+  for cand in "$repo"/reviews/spar-plan-*.md; do
+    [ -e "$cand" ] || [ -L "$cand" ] || continue
+    case "$cand" in *-response.md|*.invalid-*) continue ;; esac
+    reject_unless_regular "$cand" || continue
+    plan_any="$cand"
+    # Not "the last candidate the glob returned": the state may name an earlier
+    # one, and a run that produced two results is the documented path.
+    [ -n "$plan_rid" ] && case "$cand" in
+      */"spar-plan-${plan_rid}.md") plan_res="$cand" ;;
+    esac
+  done
+
   # Said once, before any verdict, so a planted artifact is visible up front
   # rather than buried under whichever item happened to look for it.
   [ -n "$ignored" ] && printf 'IGNORED EVIDENCE (not regular files):\n%s\n' "$ignored"
@@ -406,6 +449,73 @@ TRUSTPY
       0*) printf '  note: no findings were raised, so the debate path (FINDINGS then a re-review) was not exercised by this run.\n\n' ;;
     esac
   fi
+
+  # Item 5 — the plan path. Phase 9's gate lives here and items 1-4 never touch
+  # it. Three artifacts carry what can be judged: the review result, its marker,
+  # and the stamps only this seat's activation writes into the plan state.
+  #
+  # Absence is not automatically a failure. check is documented to run before a
+  # session as well as after, and a bare absence cannot tell "the human skipped
+  # item 5" from "no session ran at all" — so it only fails when other durable
+  # evidence shows the run happened. Same rule item 3 follows.
+  if [ -n "$plan_any" ] && [ -z "$plan_state" ]; then
+    # A review was produced and no plan state remains to say the plan was ever
+    # activated through this seat. spar-cancel leaves exactly this — it keeps the
+    # review and deletes the state — so the checklist warns about it, but it is
+    # still an item that was not carried through.
+    say 5 "FAILED" \
+      "$(basename "$plan_any") exists but there is no plan state, so nothing shows the plan was activated through this seat — spar-cancel leaves this shape"
+    failed=1
+  elif [ -z "$plan_res" ] && [ -z "$plan_state" ]; then
+    # The same evidence item 3 uses: a round artifact, a report, or a loop state
+    # whose owner_session matches the marker. Any of them means the run got as far
+    # as activating, and a run that activated without going through spar-ready
+    # skipped this item.
+    #
+    # This treats a session still part-way through item 4 as a failure too, since
+    # item 5 comes after item 4. That is deliberate and it is the specified
+    # behaviour: check is documented to be run when the session is over, so a
+    # mid-run reading is off-label, and "item 5 is not done" is true there. See
+    # the plan's note on the alternative that was considered.
+    if [ -n "$ran" ] || [ -n "$rpt" ] \
+      || { [ -n "$owner" ] && [ "$owner" = "$seen" ]; }; then
+      say 5 "FAILED" \
+        "the live run happened but left no plan-path artifacts under $repo — spar-ready and its plan review were never exercised"
+      failed=1
+    else
+      say 5 "NEEDS YOUR ANSWER" \
+        "no plan-path artifacts and no sign of a run — did you get to item 5?"
+    fi
+  elif [ -z "$plan_res" ]; then
+    if [ -z "$plan_rid" ]; then
+      say 5 "FAILED" \
+        "a plan state exists but carries no usable plan_review_id, so nothing names the review that gated it"
+    else
+      say 5 "FAILED" \
+        "the plan state names plan_review_id $plan_rid but reviews/spar-plan-${plan_rid}.md is not there — this plan was activated without the review it claims"
+    fi
+    failed=1
+  else
+    plan_marker="$(head -1 "$plan_res" | tr -d '\r')"
+    plan_author="$(sed -n 's/^author: *//p' "${plan_state:-/dev/null}" | head -1)"
+    plan_owner="$(sed -n 's/^owner_session: *//p' "${plan_state:-/dev/null}" | head -1)"
+    case "$plan_marker" in
+      "PLAN-REVIEW: CLEAN"|"PLAN-REVIEW: FINDINGS") plan_ok=1 ;;
+      *) plan_ok=0 ;;
+    esac
+    if [ "$plan_ok" -eq 0 ]; then
+      say 5 "FAILED" \
+        "$(basename "$plan_res") does not start with a PLAN-REVIEW marker (found: ${plan_marker:-empty}) — the loop's own STATUS: marker must never be mistaken for this pass's"
+      failed=1
+    elif [ "$plan_author" != codex ] || [ -z "$plan_owner" ]; then
+      say 5 "FAILED" \
+        "$(basename "$plan_res") is a valid plan review, but the plan state records author: ${plan_author:-none} and owner_session: ${plan_owner:-none} — activation through this seat writes both, so without them nothing shows the Codex seat activated the plan"
+      failed=1
+    else
+      say 5 "CONFIRMED" \
+        "$(basename "$plan_res") holds $plan_marker and the plan state records author: codex, owner_session: $plan_owner — spar-ready produced a review and this seat activated the plan. NOTE: no artifact records a refusal, so whether spar-fight actually gated before the disposition is item 5's part (a), yours to answer."
+    fi
+  fi
   exit "$failed"
 fi
 
@@ -493,6 +603,49 @@ Nothing here touches your real Codex configuration.
 4. END TO END. Give spar-fight the task in TASK.md and let the loop run to a
    verdict. Do not fix anything by hand. Expect FINDINGS on the off-by-one, then
    a fix, then a blind re-review, then CONVERGED.
+
+5. THE PLAN PATH. Items 1-4 all give spar-fight a task, which is the single-task
+   path. Phase 9 added an independent review of the plan itself, and none of it is
+   touched above.
+
+   In the same session:
+
+       spar-ready make sum_to reject a non-integer n, with a test
+
+   Expect the setup output to say plan-review=required.
+
+   THEN STOP THE SKILL. The moment reviews/spar-plan-<id>.md appears, interrupt it
+   before it writes .claude/spar-plan-review-response.md — the skill answers the
+   findings itself and then stops, so once it returns nothing is outstanding and
+   the gate has nothing to refuse. Interrupting is the point of this item; without
+   it the next two questions cannot be asked at all.
+
+   With the result written and no disposition yet, run spar-fight.
+   WRITE DOWN: (a) did spar-fight refuse? (b) did the refusal name spar-fight and
+   spar-cancel, or /spar:fight and /spar:cancel — the Claude spellings, which do
+   not exist in this session?
+   Why you and not the check step: nothing durable records that a refusal
+   happened, so the artifacts afterwards look identical whether it refused or
+   never gated at all. (b) is the defect 0.9.1 fixed; this is the item that would
+   have caught it.
+
+   IF THE REVIEW CAME BACK CLEAN there is no finding to leave outstanding, and the
+   gate correctly does not refuse. Say so and move on — or, to exercise the
+   refusal anyway: run spar-cancel FIRST, because spar-ready refuses while a plan
+   is ready or a loop is active, and by this point you have both. Then spar-ready
+   again on a change whose plan you expect to draw a finding (a test that cannot
+   fail is the reliable one). The earlier CLEAN result stays under reviews/ and
+   check reads the later id, so it does not interfere.
+   Do NOT hand-edit the review to manufacture a finding: the author must never
+   write reviewer output, and check reads a planted artifact as tampering.
+
+   If you cancel and stop there without re-activating, expect item 5 to report
+   FAILED — spar-cancel keeps the review but deletes the plan state, so its stamps
+   are gone. That verdict is correct for the artifacts, not a bug.
+
+   Then let the skill finish, or write the disposition yourself, and run spar-fight
+   again — it should start, and the plan state should gain author: codex and an
+   owner_session.
 
 When the session is over:
 
