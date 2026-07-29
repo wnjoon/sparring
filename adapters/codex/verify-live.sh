@@ -604,30 +604,37 @@ Nothing here touches your real Codex configuration.
    verdict. Do not fix anything by hand. Expect FINDINGS on the off-by-one, then
    a fix, then a blind re-review, then CONVERGED.
 
-5. THE PLAN PATH. Items 1-4 all give spar-fight a task, which is the single-task
-   path. Phase 9 added an independent review of the plan itself, and none of it is
-   touched above.
+5. THE PLAN PATH — THE GATE REFUSING IS THE WHOLE ITEM. Items 1-4 all give
+   spar-fight a task, which is the single-task path. Phase 9 added an independent
+   review of the plan itself, and none of it is touched above.
 
-   In the same session:
-
-       spar-ready make sum_to reject a non-integer n, with a test
-
-   Expect the setup output to say plan-review=required.
-
-   THEN STOP THE SKILL. The moment reviews/spar-plan-<id>.md appears, interrupt it
-   before it writes .claude/spar-plan-review-response.md — the skill answers the
-   findings itself and then stops, so once it returns nothing is outstanding and
-   the gate has nothing to refuse. Interrupting is the point of this item; without
-   it the next two questions cannot be asked at all.
-
-   With the result written and no disposition yet, run spar-fight.
+   THE ONE THING TO OBSERVE: run spar-fight while a plan review has findings and
+   NO disposition has been written, and watch it refuse.
    WRITE DOWN: (a) did spar-fight refuse? (b) did the refusal name spar-fight and
    spar-cancel, or /spar:fight and /spar:cancel — the Claude spellings, which do
    not exist in this session?
+   Nothing else in this item is the test. An earlier version of this checklist put
+   the setup first and a real run stopped at the setup and reported back, so the
+   observation was never made — which is why it is stated before the steps that
+   produce it.
    Why you and not the check step: nothing durable records that a refusal
    happened, so the artifacts afterwards look identical whether it refused or
-   never gated at all. (b) is the defect 0.9.1 fixed; this is the item that would
-   have caught it.
+   never gated at all. (b) is the defect 0.9.1 fixed.
+
+   To reach that state, in the same session:
+
+   5a. spar-ready make sum_to reject a non-integer n, with a test
+       Expect the setup output to say plan-review=required.
+
+   5b. The moment reviews/spar-plan-<id>.md appears, INTERRUPT the skill — before
+       it writes .claude/spar-plan-review-response.md. It answers its own findings
+       and then stops, so once it returns nothing is outstanding and there is
+       nothing to refuse. This is a prerequisite, not the finish line: after
+       interrupting, go run spar-fight. That is (a) and (b) above.
+
+   5c. Then let the skill finish, or write the disposition yourself, and run
+       spar-fight again — it should start, and the plan state should gain
+       author: codex and an owner_session.
 
    IF THE REVIEW CAME BACK CLEAN there is no finding to leave outstanding, and the
    gate correctly does not refuse. Say so and move on — or, to exercise the
@@ -642,10 +649,6 @@ Nothing here touches your real Codex configuration.
    If you cancel and stop there without re-activating, expect item 5 to report
    FAILED — spar-cancel keeps the review but deletes the plan state, so its stamps
    are gone. That verdict is correct for the artifacts, not a bug.
-
-   Then let the skill finish, or write the disposition yourself, and run spar-fight
-   again — it should start, and the plan state should gain author: codex and an
-   owner_session.
 
 When the session is over:
 

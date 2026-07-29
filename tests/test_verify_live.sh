@@ -163,6 +163,14 @@ chk "and asks for the seat-correct refusal" "spar-cancel" "$CL"
 # Anchored on wording unique to this item: "refuse" alone already appears in
 # item 3's text, so a bare match passed before the item existed.
 chk "and asks the human whether fight refused first" "did spar-fight refuse" "$CL"
+# ORDER, not just presence. A live run followed this item, stopped at the setup
+# step it opens with, and reported back — so the observation the item exists for
+# was never made. The question now precedes the steps that produce it, and the
+# interruption is labelled a prerequisite rather than the point.
+chk "the observation comes before the steps that reach it" "yes" \
+  "$(printf '%s\n' "$CL" \
+     | awk '/did spar-fight refuse/{q=NR} /^   5a\./{s=NR} END{print (q && s && q < s) ? "yes" : "no"}')"
+chk "and the interruption is not framed as the finish line" "prerequisite, not the finish line" "$CL"
 # A CLEAN review has no missing disposition and cannot produce a refusal, so the
 # item has to say what to do then rather than leaving the human stuck.
 chk "and says what to do when the review comes back clean" "CLEAN" "$CL"

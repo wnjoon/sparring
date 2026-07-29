@@ -380,6 +380,39 @@ from this future-decisions document after landing.
   stamps the resolved `plugins/spar` path into each installed skill so a skill
   read from `~/.codex/skills/` still finds the helper scripts.
 
+### A checklist item is judged by whether it produced its observation
+
+`verify-live.sh setup` prints a checklist a human drives, and `check` judges the
+artifacts afterwards. The split exists because some things leave no artifact — the
+trust prompt's wording, whether a gate actually refused — so those stay with the
+human. That much was Phase 6's design and it holds.
+
+What Phase 6 did not say is that such an item can fail by being *arranged* wrongly
+while every sentence it needs is present. Item 5, added for Phase 9's plan review,
+opened with the setup steps (run `spar-ready`, interrupt when the review appears)
+and put the actual test — run `spar-fight` and watch it refuse — in a following
+paragraph. It also called the interruption "the point of this item". A real run
+followed it, interrupted at the right moment, and reported back. The observation
+the item exists for was never made, and nothing in the artifacts could tell.
+
+Two things follow.
+
+**The observation goes before the steps that reach it.** Item 5 now opens with the
+one thing to watch and the two questions, then gives the setup as `5a`/`5b`/`5c`,
+with the interruption labelled a prerequisite rather than the finish line. A
+prerequisite dramatised as the goal is a stopping point.
+
+**A test that greps for the sentence cannot see the arrangement.** The suite's
+checks for item 5 all passed while the item could not produce its answer. There is
+now an ordering check — the question's line number must precede the first setup
+step's — because "the words are present" and "the words are in an order that works"
+are different properties, and only the first was ever asserted.
+
+This is the same class as the earlier finding in that item, where the CLEAN escape
+hatch named a command that refuses in the state the item leaves the human in: the
+words were right and following them did not work. Prose a human executes is code,
+and it gets reviewed as code or it gets defects.
+
 ## Phase 7 — model economics
 
 **Tiering contract** *(EP)*: judgment never delegates; typing may.
