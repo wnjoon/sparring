@@ -13,7 +13,18 @@
 # different place in the two — and only one of them was ever executed by a test.
 #
 # Every refusal leaves the plan state exactly as it found it.
+# Not `set -e`. Both entry points use it, and this used to run under theirs, so
+# every write below is checked explicitly instead — the same fail-fast, stated
+# rather than inherited. errexit is the wrong tool here: plan_field is
+# `sed … | head -1`, and with pipefail a sed that outlives the head it feeds
+# takes SIGPIPE, which would abort activation on a reader that worked.
 set -uo pipefail
+# No message of its own: under the entry points' `set -e` the shell's own
+# diagnostic was the last thing printed, and adding prose here would change what
+# a failed activation says.
+must() { # $1.. = command; propagate its failure
+  "$@" || exit 1
+}
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$DIR/spar-plan-lib.sh"
 
@@ -47,7 +58,10 @@ fi
 [ "$PHASE" = "planned" ] || { echo "Error: plan state is not ready to fight (phase: $PHASE)." >&2; exit 1; }
 
 if [ -f .claude/spar.local.md ]; then
-  echo "Error: a fight loop is already active. Use ${CANCEL_CMD} first." >&2
+  # stdout, not stderr. Every other refusal here goes to stderr; this one did not
+  # in fight.md's plan branch, and moving it would be an observable change this
+  # refactor is not allowed to make. Preserved deliberately, not by accident.
+  echo "Error: a fight loop is already active. Use ${CANCEL_CMD} first."
   exit 1
 fi
 
@@ -69,7 +83,7 @@ MODE="$(plan_field mode "$PLAN_STATE")"
 # and fail-open exists so a hook never holds a session hostage, which this
 # deliberately is not.
 if [ "$NO_REVIEW_FLAG" = false ]; then
-  plan_put_field plan_review overridden "$PLAN_STATE"
+  must plan_put_field plan_review overridden "$PLAN_STATE"
   echo "Note: starting without a plan review because --no-plan-review was given."
 elif ! bash "$DIR/spar-plan-review-check.sh" "$PLAN" "$PLAN_STATE" "$SEAT"; then
   exit 1
@@ -82,15 +96,21 @@ fi
 # Re-stamping a plan prepared elsewhere is correct, not a hijack: whoever fights
 # the plan is the one writing the code, so this session is its author and owner.
 if [ "$SEAT" = codex ]; then
-  plan_put_field author codex "$PLAN_STATE"
-  plan_put_field owner_session "$SESSION" "$PLAN_STATE"
+  must plan_put_field author codex "$PLAN_STATE"
+  must plan_put_field owner_session "$SESSION" "$PLAN_STATE"
 fi
 
-plan_set_field phase running "$PLAN_STATE"
+must plan_set_field phase running "$PLAN_STATE"
 
+# Checked too: a task file that failed to write would hand the loop an empty or
+# missing task while the phase already says running.
 H1="$(plan_task_line 1 "$PLAN_STATE" | cut -f3)"
-if [ "$MODE" = "whole" ]; then cp "$PLAN" .claude/spar-fight-task.txt
-else awk -v h="### ${H1}" '$0==h{f=1} f&&/^### /&&$0!=h&&seen{exit} $0==h{seen=1} f{print}' "$PLAN" > .claude/spar-fight-task.txt; fi
+if [ "$MODE" = "whole" ]; then
+  cp "$PLAN" .claude/spar-fight-task.txt || exit 1
+else
+  awk -v h="### ${H1}" '$0==h{f=1} f&&/^### /&&$0!=h&&seen{exit} $0==h{seen=1} f{print}' "$PLAN" \
+    > .claude/spar-fight-task.txt || exit 1
+fi
 
 bash "$DIR/spar-fight-launch.sh" "$PLAN_STATE" .claude/spar-fight-task.txt \
   || { echo "Error: could not launch task 1." >&2; exit 1; }

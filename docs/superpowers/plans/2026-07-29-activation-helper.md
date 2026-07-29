@@ -324,7 +324,7 @@ git commit -m "feat(fight): one activation helper for both seats"
 **Interfaces:**
 - Consumes: `spar-plan-activate.sh <state-file> <plan-review-flag> <seat> [session-id]` from Task 1.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 **Every static assertion that names an activation internal has to move with the
 code, or the suites cannot pass.** They assert that a *document* contains a
@@ -442,7 +442,7 @@ are the regression guard, the Codex counterpart of `run_activation`, and a
 regression guard that only starts passing after the change guards nothing. The
 checks that fail in step 2 are the static ones.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `bash tests/test_stop_hook.sh`, `bash tests/test_codex_adapter.sh`
 
@@ -459,7 +459,7 @@ Expected, precisely:
   fixture is wrong, not the code.
 - `run_activation` passes, unchanged.
 
-- [ ] **Step 3: Replace `fight.md`'s copy**
+- [x] **Step 3: Replace `fight.md`'s copy**
 
 Everything from `. "${CLAUDE_PLUGIN_ROOT}/commands/spar-plan-lib.sh"` through the
 `echo "Fight started …"` line becomes:
@@ -472,7 +472,7 @@ Everything from `. "${CLAUDE_PLUGIN_ROOT}/commands/spar-plan-lib.sh"` through th
 The `SPAR_TASK`-with-a-plan refusal above it stays — it is about argument
 handling, not activation.
 
-- [ ] **Step 4: Replace the Codex skill's copy**
+- [x] **Step 4: Replace the Codex skill's copy**
 
 The same, with that document's own root variable and its session:
 
@@ -483,7 +483,7 @@ The same, with that document's own root variable and its session:
 
 Its liveness check and `SPAR_TASK` refusal stay where they are.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run all suites:
 
@@ -497,7 +497,7 @@ Expected: `rc=0`. In particular `run_activation` in `tests/test_stop_hook.sh` �
 the behavioural test that predates this task — must still pass untouched. If it
 needed editing to accommodate the refactor, the refactor changed behaviour.
 
-- [ ] **Step 6: Prove the wiring is independently caught**
+- [x] **Step 6: Prove the wiring is independently caught**
 
 Four scratch copies:
 
@@ -511,7 +511,7 @@ Four scratch copies:
 4. Drop `"$SPAR_SESSION"` from the Codex call → `owner_session` is empty in the
    activated state; assert on it if nothing else catches this.
 
-- [ ] **Step 7: Update the design record and commit**
+- [x] **Step 7: Update the design record and commit**
 
 Add a short paragraph to the Phase 9 section of `docs/design-decisions.md`:
 that activation now lives in one helper, that the trigger was a finding about a

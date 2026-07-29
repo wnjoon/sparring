@@ -182,11 +182,13 @@ run_activation() { # $1 = the argument string /spar:fight was given
     printf 'plan_path: p.md\ntasks: 1\ncurrent: 1\ncurrent_review_id:\n---\n1\tpending\tTask 1: A\n'
   } > .claude/spar-plan.local.md
   fight_block "$1" | bash >/dev/null 2>&1
+  ACTIVATION_RC=$?
 }
 
 # No plan_review key at all — the state a plan prepared before this phase has,
 # and exactly the case a pure replace gets wrong.
 run_activation '--no-plan-review' ''
+chk "the override case exits clean" "0" "$ACTIVATION_RC"
 chk "the override is recorded on a state that lacked the field" "plan_review: overridden" \
   "$(cat .claude/spar-plan.local.md)"
 chk "and the task table below it is untouched" "Task 1: A" \
@@ -203,7 +205,11 @@ chk "and the claude seat stamped no author" "absent" \
 # The other side of the same block: with no override and a review outstanding,
 # activation must be refused and the plan must still be startable afterwards.
 run_activation '' "$(printf 'plan_review: required\nplan_review_id: 20260728-120000-abc123')"
-chk "an unreviewed plan is refused" "phase: planned" \
+# The exit status first: an untouched state and no loop file are also what a
+# block that did nothing at all leaves behind, so on their own these two cannot
+# tell a refusal from a missing helper call. Only the status distinguishes them.
+chk "an unreviewed plan is refused" "1" "$ACTIVATION_RC"
+chk "leaving the phase where it was" "phase: planned" \
   "$(cat .claude/spar-plan.local.md)"
 chk "and no loop was started" "absent" \
   "$([ -f .claude/spar.local.md ] && echo present || echo absent)"

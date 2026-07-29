@@ -66,9 +66,15 @@ refuses "any other phase" "$ST" true claude
 
 reset; mkstate planned per-task ''; printf 'x\n' > .claude/spar.local.md
 BEFORE="$(cat "$ST")"
-OUT="$(bash "$A" "$ST" true claude 2>&1)"; RC=$?
+# Streams kept apart: this one refusal went to STDOUT in fight.md's plan branch
+# while every other one went to stderr, and 2>&1 cannot see the difference. It is
+# an odd place for it, which is exactly why a refactor would quietly tidy it.
+ERRF="$(mktemp)"
+OUT="$(bash "$A" "$ST" true claude 2>"$ERRF")"; RC=$?
+ERR="$(cat "$ERRF")"; rm -f "$ERRF"
 eqchk "an active loop blocks activation" "1" "$RC"
-chk "and says a loop is active" "already active" "$OUT"
+chk "and says a loop is active, on stdout" "already active" "$OUT"
+chk_absent "and not on stderr" "already active" "$ERR"
 eqchk "leaving the state untouched" "$BEFORE" "$(cat "$ST")"
 rm -f .claude/spar.local.md
 
@@ -120,6 +126,39 @@ eqchk "the override activates" "0" "$RC"
 chk "and is recorded on a state that lacked the field" "plan_review: overridden" "$(cat "$ST")"
 chk "and it says the review was skipped" "--no-plan-review" "$OUT"
 chk "and the task table survived the append" "Task 2: Beta" "$(tail -1 "$ST")"
+
+# ── a write that fails stops the sequence ───────────────────────────────────
+# The entry points run under `set -e` and this used to run under theirs; in a
+# child shell it does not, so every write is checked by hand. Forced by making
+# .claude unwritable — plan_set_field/plan_put_field write a sibling temp file
+# there before renaming, so the write fails while every read still works.
+reset; mkstate planned per-task ''
+chmod a-w .claude
+OUT="$(bash "$A" "$ST" false claude 2>&1)"; RC=$?
+chmod u+w .claude
+eqchk "a failed override write refuses" "1" "$RC"
+# Where it stopped, not just that it stopped. Unchecked, the sequence runs on and
+# fails again at the task-file redirect, whose diagnostic names that path — with
+# .claude unwritable every later step fails too, so which failure surfaces is the
+# only observable difference. No message of our own to assert: the helper adds
+# none, so that a failed activation still says what the shell said it said.
+chk_absent "and not at the task file" "spar-fight-task.txt" "$OUT"
+chk "and the phase never moved" "phase: planned" "$(cat "$ST")"
+eqchk "and no loop was launched" "absent" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
+
+# The same for the phase write, reached only when the gate is cleared rather than
+# overridden — a different branch, and the one that runs on a normal activation.
+reset; mkstate planned per-task "$(printf 'plan_review: required\nplan_review_id: %s' "$PRID")"
+printf 'PLAN-REVIEW: CLEAN\n' > "reviews/spar-plan-${PRID}.md"
+chmod a-w .claude
+OUT="$(bash "$A" "$ST" true claude 2>&1)"; RC=$?
+chmod u+w .claude
+eqchk "a failed phase write refuses" "1" "$RC"
+chk_absent "and not blaming the task file" "spar-fight-task.txt" "$OUT"
+chk "and the phase is still planned" "phase: planned" "$(cat "$ST")"
+eqchk "and still no loop" "absent" \
+  "$([ -f .claude/spar.local.md ] && echo present || echo absent)"
 
 # ── seat-specific stamps ────────────────────────────────────────────────────
 reset; mkstate planned per-task ''
