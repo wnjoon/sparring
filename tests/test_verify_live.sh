@@ -166,6 +166,13 @@ chk "and asks the human whether fight refused first" "did spar-fight refuse" "$C
 # A CLEAN review has no missing disposition and cannot produce a refusal, so the
 # item has to say what to do then rather than leaving the human stuck.
 chk "and says what to do when the review comes back clean" "CLEAN" "$CL"
+# The escape hatch has a prerequisite: spar-ready refuses while a plan is ready or
+# a loop is active, which is the state the item leaves the human in. Naming the
+# command without naming that is an instruction that errors out.
+chk "and names the prerequisite for re-running ready" "run spar-cancel FIRST" "$CL"
+# And it says the FAILED verdict a cancelled workspace produces is correct, so it
+# is not read as a defect in the harness.
+chk "and explains the verdict after a bare cancel" "not a bug" "$CL"
 
 # 6c. paths the human is told to TYPE are shell-quoted; a space must not break
 # the commands and a $(...) must not run when they are pasted.
@@ -457,18 +464,38 @@ chk "a foreign marker in the plan result → item 5 failed" "ITEM 5: FAILED" "$O
 chk "a foreign marker → nonzero exit" "1" "$RC"
 
 # 9d. the plan state must carry the stamps only this seat's activation writes.
-# A hand-written state proves nothing about the seat.
+# TWO fixtures, because the verdict is one compound condition: a state missing
+# both stamps fails whichever half survives, so neither half would be pinned.
+#
+# (a) the wrong seat, with the owner present. This is the only fixture that dies
+# when the author half is removed.
 fresh
 bash "$V" setup --dir ./ws >/dev/null 2>&1
 plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-live-9
 plant_run "$PWD/ws" converged
 mkdir -p ./ws/repo/reviews ./ws/repo/.claude
 printf 'PLAN-REVIEW: CLEAN\n' > ./ws/repo/reviews/spar-plan-20260726-110000-bbbbbb.md
-printf -- '---\nactive: true\nphase: running\nreviewer: claude\n---\n' \
+printf -- '---\nactive: true\nphase: running\nauthor: claude\nreviewer: codex\nowner_session: sess-live-9\nplan_review_id: 20260726-110000-bbbbbb\n---\n' \
   > ./ws/repo/.claude/spar-plan.local.md
 OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
-chk "an unstamped plan state → item 5 failed" "ITEM 5: FAILED" "$OUT"
-chk "and the evidence names what is missing" "author" "$OUT"
+chk "a plan activated by the other seat → item 5 failed" "ITEM 5: FAILED" "$OUT"
+# Anchored on the value read, not the word "author": plant_report's pairing line
+# already puts "codex author" in item 4's evidence, so a bare match passes
+# whatever item 5 says.
+chk "and the evidence names the seat it found" "author: claude" "$OUT"
+
+# (b) the right seat with no owner — which is exactly what spar-ready leaves
+# BEFORE activation (spar-ready/SKILL.md:110-112 writes author: codex and a bare
+# owner_session:), so the likeliest real near-miss is this one. Only this fixture
+# dies when the owner half is removed.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-live-9
+plant_run "$PWD/ws" converged
+plant_plan_run "$PWD/ws" 'PLAN-REVIEW: CLEAN' ''
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "a prepared but unactivated plan → item 5 failed" "ITEM 5: FAILED" "$OUT"
+chk "and the evidence says the owner is missing" "owner_session: none" "$OUT"
 
 # 9e. a run happened and skipped the plan path entirely → failed, not unknown.
 # The removal is the fixture: plant_run leaves the plan artifacts because a real
@@ -481,6 +508,159 @@ rm -f ./ws/repo/reviews/spar-plan-*.md ./ws/repo/.claude/spar-plan.local.md
 OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
 chk "a run with no plan artifacts → item 5 failed" "ITEM 5: FAILED" "$OUT"
 chk "and says the run happened without it" "left no plan-path artifacts" "$OUT"
+
+# 9f. activation is the threshold: a loop state whose owner_session matches the
+# marker is the same proof of activation item 3 treats it as, so a run that got
+# that far without the plan path has skipped item 5. check is documented to be run
+# when the session is over, so a mid-run reading is off-label and "item 5 is not
+# done" is true there.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-mid; plant_state "$PWD/ws" sess-mid
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "mid-run activation is proof the run happened" "ITEM 3: CONFIRMED" "$OUT"
+chk "so a missing plan path is a failure" "ITEM 5: FAILED" "$OUT"
+chk "and the gate does not pass" "1" "$RC"
+
+# 9f2. a round artifact alone is the same threshold, reached by the other route.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-r1
+mkdir -p ./ws/repo/reviews
+printf 'STATUS: FINDINGS\n' > ./ws/repo/reviews/spar-20260726-120000-aaaaaa-r1.md
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "a round file with no plan path → item 5 failed" "ITEM 5: FAILED" "$OUT"
+chk "a round file with no plan path → nonzero exit" "1" "$RC"
+
+# 9i. a review on disk with no plan state, and NO other run evidence. The result
+# is itself evidence the plan review ran, so this is not "did you get to item 5?"
+# — it is "you got there and the plan was never activated through this seat".
+# spar-cancel leaves exactly this shape, which the checklist warns about.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-orphan
+mkdir -p ./ws/repo/reviews
+printf 'PLAN-REVIEW: CLEAN\n' > ./ws/repo/reviews/spar-plan-20260726-110000-bbbbbb.md
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "a review with no plan state → item 5 failed" "ITEM 5: FAILED" "$OUT"
+chk "and says what is missing" "no plan state" "$OUT"
+chk "a review with no plan state → nonzero exit" "1" "$RC"
+
+# 9i2. a planted plan result with no state at all is still REPORTED. Tamper
+# reporting must not depend on a state naming the file, which is what discovery
+# keyed on the id alone would have made it depend on.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-orphan2
+mkdir -p ./ws/repo/reviews
+ln -s /dev/null ./ws/repo/reviews/spar-plan-20260726-110000-bbbbbb.md
+OUT=$(bash "$V" check --dir ./ws 2>&1)
+chk "an orphaned symlinked result is reported" "IGNORED EVIDENCE" "$OUT"
+chk "and named" "spar-plan-20260726-110000-bbbbbb.md" "$OUT"
+chk_absent "and never counted as a plan review" "ITEM 5: CONFIRMED" "$OUT"
+
+# 9h. a stale review from an abandoned attempt must not vouch for the plan that
+# actually ran. Item 5 tells the human to cancel and re-run spar-ready when the
+# first review comes back CLEAN, and spar-cancel keeps the results — so a
+# workspace with more than one spar-plan-*.md is expected, and picking whichever
+# sorts last would let the earlier one stand in for a plan started with
+# --no-plan-review.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-live-9
+plant_run "$PWD/ws" converged
+mkdir -p ./ws/repo/reviews ./ws/repo/.claude
+# a perfectly valid review from the abandoned first attempt…
+printf 'PLAN-REVIEW: CLEAN\n' > ./ws/repo/reviews/spar-plan-20260726-090000-aaaaaa.md
+# …and a properly stamped state naming a DIFFERENT review that is not there.
+printf -- '---\nactive: true\nphase: running\nauthor: codex\nreviewer: claude\nowner_session: sess-live-9\nplan_review_id: 20260726-190000-cccccc\n---\n' \
+  > ./ws/repo/.claude/spar-plan.local.md
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "a stale review does not vouch for a later plan" "ITEM 5: FAILED" "$OUT"
+chk "and the evidence names the id it looked for" "20260726-190000-cccccc" "$OUT"
+chk "a stale review → nonzero exit" "1" "$RC"
+
+# 9h3. a symlink TO A REGULAR FILE at the named path. The earlier symlink fixture
+# used /dev/null, which is not regular and would be rejected by a plain [ -f ] too
+# — so it could not catch a selection step that followed links. This one can.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-live-9
+plant_run "$PWD/ws" converged
+rm -f ./ws/repo/reviews/spar-plan-*.md
+printf 'PLAN-REVIEW: CLEAN\n' > ./ws/repo/reviews/elsewhere.txt
+ln -s "$PWD/ws/repo/reviews/elsewhere.txt" ./ws/repo/reviews/spar-plan-20260726-110000-bbbbbb.md
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "a symlink to a valid result is reported, not trusted" "IGNORED EVIDENCE" "$OUT"
+chk_absent "and never confirms item 5" "ITEM 5: CONFIRMED" "$OUT"
+chk "a symlinked valid result → nonzero exit" "1" "$RC"
+
+# 9h4. two regular results, and the state names the EARLIER one. Selecting
+# "whatever the candidate loop saw last" would miss it — and that is the shape the
+# checklist's cancel-and-rerun path produces, with the second attempt abandoned.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-live-9
+plant_run "$PWD/ws" converged
+rm -f ./ws/repo/reviews/spar-plan-*.md
+printf 'PLAN-REVIEW: CLEAN\n' > ./ws/repo/reviews/spar-plan-20260726-090000-aaaaaa.md
+printf 'PLAN-REVIEW: FINDINGS\n' > ./ws/repo/reviews/spar-plan-20260726-190000-cccccc.md
+printf -- '---\nactive: true\nphase: running\nauthor: codex\nreviewer: claude\nowner_session: sess-live-9\nplan_review_id: 20260726-090000-aaaaaa\n---\n' \
+  > ./ws/repo/.claude/spar-plan.local.md
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "the named result is found even when it is not the last" "ITEM 5: CONFIRMED" "$OUT"
+chk "and the evidence names the one the state chose" "spar-plan-20260726-090000-aaaaaa.md" "$OUT"
+chk "two results, the named one present → exit 0" "0" "$RC"
+
+# 9h2. a state with no usable plan_review_id names nothing, so nothing can vouch.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-live-9
+plant_run "$PWD/ws" converged
+printf 'PLAN-REVIEW: CLEAN\n' > ./ws/repo/reviews/spar-plan-20260726-090000-aaaaaa.md
+printf -- '---\nactive: true\nphase: running\nauthor: codex\nreviewer: claude\nowner_session: sess-live-9\nplan_review_id: junk\n---\n' \
+  > ./ws/repo/.claude/spar-plan.local.md
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "an unusable review id → item 5 failed" "ITEM 5: FAILED" "$OUT"
+chk "and says the state names nothing" "no usable plan_review_id" "$OUT"
+
+# 9e2. an outcome file with no report. record_outcome runs first at every terminal
+# path, so the outcome is the earlier of the two signals and the report writer can
+# fail after it — a rule keyed on the report alone would let this escape.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-oc
+mkdir -p ./ws/repo/reviews
+printf 'STATUS: CONVERGED\n' > ./ws/repo/reviews/spar-20260726-120000-aaaaaa-r1.md
+printf -- 'reason: converged\n' > ./ws/repo/reviews/spar-20260726-120000-aaaaaa-outcome.md
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "an ended run with no plan path → item 5 failed" "ITEM 5: FAILED" "$OUT"
+chk "an ended run with no plan path → nonzero exit" "1" "$RC"
+
+# 9g. a planted plan artifact is REPORTED, not silently skipped. Discovery has to
+# happen before the IGNORED EVIDENCE block prints, or the note is written after
+# the only place that shows it.
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-link
+plant_run "$PWD/ws" converged
+rm -f ./ws/repo/reviews/spar-plan-*.md
+ln -s /dev/null ./ws/repo/reviews/spar-plan-20260726-110000-bbbbbb.md
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "a symlinked plan result is reported" "IGNORED EVIDENCE" "$OUT"
+chk "and named" "spar-plan-20260726-110000-bbbbbb.md" "$OUT"
+chk "and not counted as a plan review" "ITEM 5: FAILED" "$OUT"
+
+fresh
+bash "$V" setup --dir ./ws >/dev/null 2>&1
+plant_trust "$PWD/ws"; plant_marker "$PWD/ws" sess-link2
+plant_run "$PWD/ws" converged
+rm -f ./ws/repo/.claude/spar-plan.local.md
+ln -s /dev/null ./ws/repo/.claude/spar-plan.local.md
+OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
+chk "a symlinked plan state is reported" "spar-plan.local.md" \
+  "$(printf '%s\n' "$OUT" | sed -n '/IGNORED EVIDENCE/,/^$/p')"
+chk "and its stamps are not read from it" "ITEM 5: FAILED" "$OUT"
 
 # 10. a marker naming a different session than the loop owned is a failure
 fresh
@@ -928,11 +1108,15 @@ OUT=$(bash "$V" check --dir ./ws 2>&1); RC=$?
 chk "mid-run agreement → item 3 confirmed" "ITEM 3: CONFIRMED" "$OUT"
 chk "mid-run agreement → evidence names the matching owner" "sess-M" "$OUT"
 chk_absent "mid-run agreement → never claims nothing activated" "nothing activated" "$OUT"
+# Item 5 makes this state nonzero now: activation without the plan path is a
+# skipped item, and a mid-run reading is off-label (check is for when the session
+# is over). Item 3's own verdict, which is what this fixture is about, is
+# unchanged — the assertions above still pass untouched.
+chk "mid-run agreement → nonzero once item 5 is missing" "1" "$RC"
 chk_absent "mid-run agreement → never asks about a refusal that did not happen" \
   "did spar-fight refuse" "$OUT"
 chk "mid-run agreement → item 4 still open, the loop has not finished" \
   "ITEM 4: NEEDS YOUR ANSWER" "$OUT"
-chk "mid-run agreement → exit 0" "0" "$RC"
 
 # 13aa. converging is not the whole of item 4. This seat exists so that Codex
 # authors and claude -p reviews; a same-model run proves the machinery turns, not
