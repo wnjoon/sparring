@@ -54,6 +54,28 @@ do the thing
 EOF
 }
 
+# A live loop belonging to a DIFFERENT run. Same shape as state(), different id:
+# that one difference is the whole point, so it is a separate helper rather than
+# an argument to the existing one.
+foreign_state() { # $1=round $2=reviewer $3=sweep_result [$4=author]
+  cat > .claude/spar.local.md <<EOF
+---
+active: true
+phase: review
+round: $1
+review_id: 20260101-000000-ffffff
+base_sha: none
+reviewer: $2
+max_rounds: 5
+sweep_done: false
+sweep_result: $3
+${4:+author: $4}
+---
+
+do the thing
+EOF
+}
+
 # ── 1. result header comes from the outcome file ──
 fresh; outcome converged 3 codex clean; state 3 codex clean
 bash "$GEN" "$ID" none >/dev/null 2>&1
@@ -467,4 +489,58 @@ OUT
 bash -O xpg_echo "$GEN" "$ID" none >/dev/null 2>&1
 chk "a backslash in the version does not split the report line" \
   'reviewer build: v1\nrounds: 99' "$(cat "$R")"
+
+# ── the live state is a fallback only for the run it belongs to ─────────────
+# .claude/spar.local.md describes whichever loop is active NOW. Asked for an
+# older run's report while a different loop runs, the script used to state this
+# run's reviewer, rounds, author and sweep as that run's facts, unmarked.
+
+fresh
+foreign_state 4 codex findings codex
+rm -f "reviews/spar-${ID}-outcome.md"
+bash "$GEN" "$ID" none >/dev/null 2>&1
+OUT="$(cat "$R")"
+chk "a foreign run's reviewer is not borrowed" "- reviewer: unknown" "$OUT"
+chk_absent "and its family is not stated" "reviewer: codex" "$OUT"
+chk "a foreign run's rounds are not borrowed" "- rounds: 0" "$OUT"
+chk_absent "and not its round count" "rounds: 4" "$OUT"
+chk "a foreign run's sweep is not borrowed" "- sweep: not-run" "$OUT"
+chk_absent "and not its result" "sweep: findings" "$OUT"
+chk "and the pairing is not invented" "unknown pairing" "$OUT"
+
+# author, on its own. The case above cannot see it: with reviewer guarded it is
+# empty, and spar-report.sh:109 prints "unknown pairing" whatever author says. So
+# author needs a fixture where reviewer IS known — from the outcome file, which
+# records reviewer but never author (spar-record-outcome.sh:59-70). Then the only
+# variable left in the pairing sentence is where author came from.
+fresh
+printf -- '---\nreason: converged\nreview_id: %s\nrounds: 1\nreviewer: claude\nsweep: not-run\n---\n' \
+  "$ID" > "reviews/spar-${ID}-outcome.md"
+foreign_state 1 codex not-run codex
+bash "$GEN" "$ID" none >/dev/null 2>&1
+OUT="$(cat "$R")"
+chk "a foreign run's author is not borrowed" \
+  "same-model (claude author ↔ claude reviewer)" "$OUT"
+chk_absent "so no pairing is invented from it" \
+  "cross-model (codex author ↔ claude reviewer)" "$OUT"
+
+# The control. Without it a fix that simply deleted the fallbacks would pass
+# every check above.
+fresh
+state 4 codex findings
+rm -f "reviews/spar-${ID}-outcome.md"
+bash "$GEN" "$ID" none >/dev/null 2>&1
+OUT="$(cat "$R")"
+chk "its own live state still supplies the reviewer" "- reviewer: codex" "$OUT"
+chk "and the rounds" "- rounds: 4" "$OUT"
+chk "and the sweep" "- sweep: findings" "$OUT"
+
+# The third source of a missing value, and the one that must not start erroring:
+# the report is best-effort and a stateless machine still gets a report.
+fresh
+rm -f .claude/spar.local.md "reviews/spar-${ID}-outcome.md"
+bash "$GEN" "$ID" none >/dev/null 2>&1; RC=$?
+chk "a missing state file is not an error" "0" "$RC"
+chk "and the report still exists" "- reviewer: unknown" "$(cat "$R")"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"
