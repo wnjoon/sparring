@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The precondition /spar:fight puts in front of plan activation.
-# Usage: spar-plan-review-check.sh <plan-path> <state-file>
+# Usage: spar-plan-review-check.sh <plan-path> <state-file> [seat]
 #
 # Exit 0 when activation may proceed. Exit 1, with a message on stderr naming the
 # exact next action, when it may not. A precondition that says only "not allowed"
@@ -14,6 +14,16 @@ set -uo pipefail
 
 plan="${1-}"
 state="${2-.claude/spar-plan.local.md}"
+# The seat this refusal will be read on. Every message below names a command the
+# reader is supposed to run, and the two seats spell those differently — telling
+# a Codex user to run /spar:cancel names something that does not exist there.
+# Defaults to claude so the existing two-argument callers are unchanged.
+seat="${3:-claude}"
+case "$seat" in
+  claude) FIGHT_CMD="/spar:fight"; CANCEL_CMD="/spar:cancel"; READY_CMD="/spar:ready" ;;
+  codex)  FIGHT_CMD="spar-fight";  CANCEL_CMD="spar-cancel";  READY_CMD="spar-ready"  ;;
+  *) echo "error: unknown seat: $seat" >&2; exit 1 ;;
+esac
 RESPONSE=".claude/spar-plan-review-response.md"
 HASHFILE=".claude/spar-plan-review-hash"
 RUNNER=".claude/spar-run-plan-review.sh"
@@ -31,7 +41,7 @@ die() { printf '%s\n' "$@" >&2; exit 1; }
 prid="$(field plan_review_id)"
 printf '%s' "$prid" | grep -qE '^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$' || die \
   "Error: the plan state says a review is required but carries no usable plan_review_id." \
-  "       Clear this plan with /spar:cancel and run /spar:ready again."
+  "       Clear this plan with ${CANCEL_CMD} and run ${READY_CMD} again."
 res="reviews/spar-plan-${prid}.md"
 
 # Naming the runner is only useful when there is one. `/spar:ready` prepares it
@@ -51,7 +61,7 @@ need_runner() { # $1.. = the reason, then whatever next action actually exists
     "       Prepare one and run it:" \
     "         bash \"${PREPARE}\" \"${plan}\" \"${state}\" && bash ${RUNNER}" \
     "" \
-    "       Or start without one: /spar:fight --no-plan-review, which records" \
+    "       Or start without one: ${FIGHT_CMD} --no-plan-review, which records" \
     "       plan_review: overridden rather than skipping silently."
 }
 

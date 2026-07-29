@@ -36,7 +36,7 @@ only), and the trailing sentence of the success line. Everything else is shared.
 An unknown seat is an error, not a default — a typo that silently selected the
 Claude wording would leave a Codex run unstamped and ungated.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_plan_activate.sh`, executable, following `tests/test_plan_review_check.sh`'s harness shape — its own temp repo, `chk`/`chk_absent`/`eqchk`, `cd "$(pwd -P)"` after `mktemp -d` so macOS's `/var` symlink does not confuse path checks:
 
@@ -189,12 +189,12 @@ chk "a loop state exists afterwards" "phase: task" "$(cat .claude/spar.local.md)
 chk "and the success line names the task count" "task 1/2" "$OUT"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `bash tests/test_plan_activate.sh`
 Expected: every check fails — the helper does not exist.
 
-- [ ] **Step 3: Write the helper**
+- [x] **Step 3: Write the helper**
 
 `plugins/spar/commands/spar-plan-activate.sh`. Structure:
 
@@ -272,12 +272,12 @@ still record the override rather than silently do nothing.
 
 `chmod +x` the script.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `bash tests/test_plan_activate.sh`
 Expected: `FAIL=0`.
 
-- [ ] **Step 5: Prove each part is independently caught**
+- [x] **Step 5: Prove each part is independently caught**
 
 Five scratch copies of the repository. In each, make the named change, run
 `bash tests/test_plan_activate.sh`, and confirm the named checks fail and the
@@ -304,7 +304,7 @@ rest stay green:
    confirm the exit status is no longer non-zero; restore. Without this the
    commit guard in step 6 cannot fail.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 bash tests/test_plan_activate.sh || { echo "not committing — the suite failed"; exit 1; }

@@ -71,7 +71,7 @@ MODE="$(plan_field mode "$PLAN_STATE")"
 if [ "$NO_REVIEW_FLAG" = false ]; then
   plan_put_field plan_review overridden "$PLAN_STATE"
   echo "Note: starting without a plan review because --no-plan-review was given."
-elif ! bash "$DIR/spar-plan-review-check.sh" "$PLAN" "$PLAN_STATE"; then
+elif ! bash "$DIR/spar-plan-review-check.sh" "$PLAN" "$PLAN_STATE" "$SEAT"; then
   exit 1
 fi
 

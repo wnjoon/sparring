@@ -97,8 +97,15 @@ refuses "a codex session with a space" "$ST" true codex "bad id"
 # refactor exists to make impossible in one place instead of two.
 reset; mkstate planned per-task "$(printf 'plan_review: required\nplan_review_id: %s' "$PRID")"
 refuses "an unreviewed plan" "$ST" true claude
+chk "and the refusal is in Claude's words" "/spar:fight --no-plan-review" "$REFUSE_OUT"
 reset; mkstate planned per-task "$(printf 'plan_review: required\nplan_review_id: %s' "$PRID")"
 refuses "an unreviewed plan, codex seat" "$ST" true codex sess-1
+# The seat argument exists so a refusal names a command the reader can actually
+# run. The gate's message comes from a delegated script, which is exactly where
+# that guarantee is easiest to lose.
+chk "and the gate's refusal is in Codex's words" "spar-fight --no-plan-review" "$REFUSE_OUT"
+chk_absent "with no slash-prefixed variant" "/spar:fight" "$REFUSE_OUT"
+chk_absent "and no slash-prefixed cancel" "/spar:cancel" "$REFUSE_OUT"
 
 # a CLEAN review clears it
 reset; mkstate planned per-task "$(printf 'plan_review: required\nplan_review_id: %s' "$PRID")"
@@ -135,11 +142,23 @@ reset; mkstate planned whole ''
 bash "$A" "$ST" false claude >/dev/null 2>&1
 chk "whole mode hands over the entire plan" "second" "$(cat .claude/spar-fight-task.txt)"
 
-# ── it launched a real loop ─────────────────────────────────────────────────
+# ── it launched a real loop, and said the right thing about it ──────────────
+# The success line is the third thing the seat argument decides, and the two
+# tails are not interchangeable: Claude's promises an automatic reviewer, which
+# on the Codex seat is a different mechanism the user installs separately.
 reset; mkstate planned per-task ''
 OUT="$(bash "$A" "$ST" false claude 2>&1)"
 chk "a loop state exists afterwards" "phase: task" "$(cat .claude/spar.local.md)"
 chk "and the success line names the task count" "task 1/2" "$OUT"
+chk "and names the plan to follow" "its steps in p.md" "$OUT"
+chk "the claude tail is the full sentence" \
+  "then stop — the sparring reviewer engages automatically and the fight advances task-by-task on convergence." "$OUT"
+
+reset; mkstate planned per-task ''
+OUT="$(bash "$A" "$ST" false codex sess-1 2>&1)"
+chk "the codex seat also reports success" "task 1/2" "$OUT"
+chk "with its own short tail" "then stop." "$OUT"
+chk_absent "and not Claude's sentence" "sparring reviewer engages automatically" "$OUT"
 
 cd /; rm -rf "$TMP" "$STUBS"
 echo; echo "PASS=$PASS FAIL=$FAIL"; exit "$FAIL"

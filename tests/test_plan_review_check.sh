@@ -72,6 +72,30 @@ chk "and names the runner too" "spar-run-plan-review.sh" "$OUT"
 # for a reason that tells the author nothing about what is actually wrong.
 chk "and says what it found instead" "found: STATUS: CONVERGED" "$OUT"
 
+# ── the seat decides which commands the refusal names ───────────────────────
+# Every message here tells the reader to run something. The two seats spell those
+# differently, and naming /spar:cancel to a Codex user names a command that does
+# not exist there. Two arguments means claude, so the callers that predate this
+# argument are unaffected — asserted below rather than assumed.
+mkstate required; rm -f "$RES" .claude/spar-run-plan-review.sh
+OUT="$(bash "$C" p.md "$ST" 2>&1)"
+chk "two arguments still means the claude seat" "/spar:fight --no-plan-review" "$OUT"
+OUT="$(bash "$C" p.md "$ST" claude 2>&1)"
+chk "and naming it explicitly is the same" "/spar:fight --no-plan-review" "$OUT"
+OUT="$(bash "$C" p.md "$ST" codex 2>&1)"
+chk "the codex seat names its own fight command" "spar-fight --no-plan-review" "$OUT"
+chk_absent "with no slash-prefixed variant" "/spar:fight" "$OUT"
+# The other message that names commands: a state whose plan_review_id is unusable.
+printf -- '---\nactive: true\nphase: planned\nmode: per-task\nreviewer: codex\nplan_review: required\nplan_review_id: junk\nplan_path: p.md\ntasks: 1\ncurrent: 1\n---\n' > "$ST"
+OUT="$(bash "$C" p.md "$ST" codex 2>&1)"
+chk "an unusable id refers to the codex cancel" "spar-cancel" "$OUT"
+chk "and the codex ready" "spar-ready" "$OUT"
+chk_absent "not the slash-prefixed ones" "/spar:cancel" "$OUT"
+OUT="$(bash "$C" p.md "$ST" 2>&1)"
+chk "while the claude seat keeps its own" "/spar:cancel" "$OUT"
+eqchk "an unknown seat is an error" "1" "$(bash "$C" p.md "$ST" banana >/dev/null 2>&1; echo $?)"
+printf '#!/bin/sh\nexit 0\n' > .claude/spar-run-plan-review.sh
+
 # ── the result path must be a real file in a real directory ─────────────────
 # The runner refuses to publish into a symlinked reviews/ or over a non-regular
 # result path. A checker that read through either would clear a gate the runner
