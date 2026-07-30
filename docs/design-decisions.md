@@ -1,25 +1,33 @@
 # Design decisions
 
 Decisions settled in design sessions, recorded so a fresh session can write
-each phase's implementation plan without re-litigating them. Implemented
-phases are marked as such and defer to `policy.md`; remaining sections are
-specs awaiting implementation, and each phase's plan document starts from its
-section here. Ideas marked *(EP)* are adapted from the review-loop protocol in
+each phase's implementation plan without re-litigating them, and so a later
+reader can see why a shipped thing is shaped the way it is. Every phase here is
+implemented; each defers to `policy.md` for current behaviour and keeps the
+reasoning `policy.md` has no room for. Ideas marked *(EP)* are adapted from the
+review-loop protocol in
 [jongwony/epistemic-protocols](https://github.com/jongwony/epistemic-protocols) (MIT).
 
 **Document hierarchy (which file is authoritative for what).**
-`plugins/spar/shared/policy.md` is SoT for **currently implemented** behavior
-and moves in lockstep with the hook. This file is SoT for **agreed-but-
-unimplemented** future behavior; when a phase lands, its decisions migrate
-into `policy.md` and the stale future wording is removed here. `README.md` is
-the user-facing overview and labels every diagram/feature row implemented vs
-planned. These are not three copies of one policy — they describe different
-points in time, and consistency means each is correct for its own scope.
+`plugins/spar/shared/policy.md` is SoT for **behaviour** and moves in lockstep
+with the hook: what the loop does, in the present tense, for both seats. This
+file is SoT for **why** — the alternatives weighed, what was rejected and on
+what evidence, and the objections overruled rather than missed. `README.md` is
+the user-facing overview. They are not three copies of one policy: a reader
+asking "what happens" goes to `policy.md`, "why this and not that" comes here,
+and neither answers the other's question.
 
-## Phase 1 — core loop (implemented, as-built)
+Originally this file also held decisions for phases not yet built, and a phase's
+decisions migrated to `policy.md` when it landed. With all nine implemented that
+role is empty; the reasoning stays here rather than being deleted, because a
+decision's basis is what a later change needs in order to know whether it is
+reversing something considered or something overlooked.
+
+## Phase 1 — core loop
 
 Spec: [superpowers/plans/2026-07-21-phase1-core-loop.md](superpowers/plans/2026-07-21-phase1-core-loop.md) ·
-tests: `tests/test_stop_hook.sh` (38 cases) · verified E2E against a real
+tests: `tests/test_stop_hook.sh` (38 cases at the time of this phase; that
+suite now carries the whole loop and is far larger) · verified E2E against a real
 Codex reviewer (planted-bug task: FINDINGS → fix → re-review → CONVERGED, 2 rounds).
 
 - `/spar:fight <task>` writes the state file (`.claude/spar.local.md`); a bash Stop
@@ -40,7 +48,7 @@ Post-plan patches (rationale absorbed from *(EP)*, landed after the plan doc
   reviewed surface or fake convergence. Missing/invalid → `HEAD` fallback.
 - **Untracked files**: the reviewer explicitly lists and reads untracked
   files — new files never appear in a diff.
-- **Pre-existing dirty state (known gap, fix pending)**: `base_sha` = `HEAD`,
+- **Pre-existing dirty state (v1 shipped; the snapshot did not)**: `base_sha` = `HEAD`,
   so tracked edits and untracked files that were already present *before*
   `/spar:fight` are currently mixed into the reviewed surface. A status/file-list
   snapshot is NOT enough — if the same file is edited both before and during
@@ -251,7 +259,7 @@ degradation to a first-class mode.**
   adapter, Phase 6, reusing this family abstraction); per-round lens rotation
   (future, empirical); persistent config (Phase 7).
 
-## Phase 4 — sweep + skip + intent harvest (implemented)
+## Phase 4 — sweep + skip + intent harvest
 
 Implemented behavior has migrated to `plugins/spar/shared/policy.md`, the
 current-behavior source of truth. The Phase 4 brainstorming text was removed
@@ -521,6 +529,70 @@ the instrument — if delegated fixes start causing the following round's findin
 the escalation rule is what should catch it, and if it does not, the tier is
 wrong or the rule is.
 
+## Phase 8 — orchestration (`/spar:ready` + `/spar:fight`)
+
+Specs: [superpowers/specs/2026-07-24-spar-weighin-design.md](superpowers/specs/2026-07-24-spar-weighin-design.md) ·
+plans: [superpowers/plans/2026-07-24-spar-weighin.md](superpowers/plans/2026-07-24-spar-weighin.md),
+[superpowers/plans/2026-07-24-ready-fight-refactor.md](superpowers/plans/2026-07-24-ready-fight-refactor.md) ·
+hook-order spike: [superpowers/notes/weighin-hook-order-spike.md](superpowers/notes/weighin-hook-order-spike.md) ·
+shipped in v0.5.0.
+
+**This section is written after the fact, and that is the point of it.** Phase 8
+is the one phase whose decisions were never recorded here. It did not start from
+a section in this file the way the others did: it began as `/spar-weighin`, a
+command designed in its own spec, and became Phase 8 when a later refactor split
+it into `/spar:ready` and `/spar:fight`. The document's own claim that each
+phase's plan starts from its section here had one exception and did not say so.
+Reconstructed below from the two plans, the spec and the shipped code — decisions
+that are visible in those, not invented for the gap.
+
+**One command that planned and executed was split in two.** `/spar-weighin` did
+prep and execution in one invocation. `/spar:ready` now does the prep half —
+resolve flags, cut a dedicated branch, write the plan, ingest it into a task
+table, write `.claude/spar-plan.local.md` in phase `planned` — and **stops**.
+`/spar:fight` does the execution half. The split exists so the plan is reviewable
+by a human before anything runs; that checkpoint was the whole reason, and Phase 9
+later put a machine reading in the same gap.
+
+**A pending plan plus a task argument is refused.** Not "the argument wins" and
+not "the plan wins": either silently discards work the user asked for. The
+refusal names both ways out — run with no task to execute the plan, or
+`/spar:cancel` to clear it.
+
+**Per-task is the default; `--whole` is offered and not recommended.** Per-task
+commits after each convergence, which hands the next loop a clean worktree and a
+fresh frozen baseline — exactly what the loop's setup requires. It also keeps each
+review diff small, and reviewer signal falls as the diff grows. `--whole` feeds
+the entire plan as one task: simpler orchestration, one large diff, and a single
+late finding re-opens the whole surface. The commit-per-task cadence was called
+load-bearing in the spec's own risk list, and it is.
+
+**The controller is one Stop-hook dispatcher wrapping the loop's own.**
+`stop-fight.sh` wraps `stop-hook.sh` rather than duplicating or replacing it. The
+spec named this "the design's one genuinely new and risky piece" and asked for a
+prototype first — the hook-order spike is that prototype, and it is why the
+dispatcher passes through untouched whenever the plan's phase is not `running`.
+The loop's engine never learned that a plan exists; orchestration reads each
+task's durable outcome to decide whether to advance, so the two layers stay
+separable.
+
+**The orchestrator never writes convergence and stops honestly.** It reads the
+outcome the loop recorded. A task that ended at the cap stops the plan there
+rather than advancing — the same reason the loop cannot grade itself applies one
+layer up.
+
+**Reuse, don't reinvent.** Planning is `writing-plans`, invoked as-is; the plan
+document *is* the progress tracker, its `- [ ]` tasks are the checklist. The
+orchestrator contributes glue and the per-task handoff. Brainstorming is not run
+for the user — with no spec it stops and points at it.
+
+**Vocabulary was renamed thoroughly, once.** No `weighin`/`wgn` token survives in
+`plugins/`, the hooks or `tests/`, and the rename plan carried the authoritative
+map. The boxing identity stays at the command surface (`ready`/`fight`/`cancel`)
+while internal artifacts keep the `spar-` prefix, because they belong to the loop
+rather than to the orchestration above it. Renames went through `git mv` so
+history follows.
+
 ## Phase 9 — plan review
 
 The plan is the one artifact in this system that no independent pass ever reads.
@@ -775,20 +847,37 @@ the failure mode most likely to produce one.
 - **Upstream re-check.** Borrowed ideas are point-in-time forks; skim
   hamelsmu/claude-review-loop and jongwony/epistemic-protocols for changes at
   each phase boundary.
-- **Out of roadmap (candidate Phase 7):** PR-scope review (review a PR by
-  number, stale-checkout reconciliation) — jongwony's remaining structural
-  advantage, deliberately deferred.
-- **Release strategy (decided)**: no incremental release. Each phase merges to
-  `dev` as it completes; `main` is untouched until a single `dev` → `main`
-  merge at the chosen release milestone. `main` is not touched without an
-  explicit "release now".
-- **Release checklist** (run at the `dev` → `main` merge, before tagging):
-  1. Sync `README.md` to what `dev` actually ships — roadmap, feature table,
-     and the "How it works" diagram must mark implemented vs planned against
-     dev's real state (README updates were deferred during development, so
-     this reconciliation is mandatory at release, not optional).
-  2. Confirm `policy.md` (implemented-behavior SoT) matches the shipped hook.
-  3. `bash tests/test_stop_hook.sh` green.
-  4. Merge `dev` → `main`, tag, GitHub release.
-  5. Verify remote install (`claude plugin marketplace add wnjoon/sparring`)
-     as the release gate.
+- **Out of roadmap:** PR-scope review (review a PR by number, stale-checkout
+  reconciliation) — jongwony's remaining structural advantage, deliberately
+  deferred. It was once pencilled in as a candidate Phase 7; Phase 7 became model
+  economics instead and this stayed out of the roadmap rather than moving down it.
+- **Release strategy.** The original plan was to hold `main` untouched and batch
+  every phase through a single `dev` → `main` merge at a milestone. That is not
+  how it went: `dev` stopped early and each phase now lands on `main` directly,
+  through the `spar/<slug>-<timestamp>` branch `/spar:ready` cuts, merged with
+  `--no-ff` so the boundary stays legible. Releases became incremental —
+  v0.1.0 through v0.9.2, with no v0.9.0 (prepared, then superseded by v0.9.1
+  before tagging when a live run found a defect in it) — because a phase that is
+  done and unreleased still has
+  to be described as unreleased everywhere, and that bookkeeping cost more than
+  batching saved.
+- **Release checklist** (before tagging):
+  1. Sync `README.md` to what `main` actually ships — status line, roadmap,
+     feature table, and the "How it works" diagram. README updates get deferred
+     during development, so this reconciliation is mandatory, not optional.
+  2. Confirm `policy.md` matches the shipped hook, for **both** seats.
+  3. Every suite green: `for t in tests/test_*.sh; do bash "$t"; done`. One suite
+     is not enough — the loop, the resolvers, the adapter and the harness each
+     have their own.
+  4. Bump `plugins/spar/.claude-plugin/plugin.json`, merge, tag, GitHub release.
+  5. Live-verify each seat that a shared surface change touches:
+     `/spar:fight` on the Claude seat, and `bash adapters/codex/verify-live.sh
+     setup` → a driven session → `… check` on the Codex seat. Green suites assert
+     what the hook prints, not what each harness does with it. Every live run so far
+     has found a defect the suites did not: three at v0.8.0, the Codex-spelling
+     refusal that became v0.9.1, and item 5's own arrangement at v0.9.2.
+  6. Update the installed plugin and confirm the version:
+     `claude plugin marketplace update sparring && claude plugin update
+     spar@sparring`, then restart the session. The marketplace clone is a
+     separate checkout and goes stale independently — an install that reports
+     success can still hand back the previous version.
