@@ -1,6 +1,6 @@
 {
   "name": "spar",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "Enforced review sparring with blind rounds, safe skips, intent pointers, a risk-triggered final sweep, unattended mode, a final run report (/spar:report), a productive-round cap that separates a deadlock from a review still finding work, a /spar:ready plan \u2192 /spar:fight execute workflow with an independent review of the plan before it is fought, reviewer model and effort configuration, and a Codex-hosted author seat verified end to end against live models",
   "author": {
     "name": "wnjoon"
