@@ -1,9 +1,9 @@
 # sparring loop policy (SoT)
 
-The Claude-hosted adapter implements this policy. The planned Codex-hosted
-adapter mirrors it exactly, including enforcement strength: Codex has a Stop hook
+Both adapters implement this policy. The Codex-hosted seat mirrors the
+Claude-hosted one exactly, including enforcement strength: Codex has a Stop hook
 that honors `decision:block`, so both directions share this policy and one
-gatekeeper implementation.
+gatekeeper implementation. Both are verified end to end against live models.
 
 ## Roles
 
@@ -17,9 +17,12 @@ gatekeeper implementation.
 
 ## Protocol
 
-1. Setup refuses a pre-existing dirty worktree by default because the frozen
-   baseline cannot separate old and loop-induced hunks. `--include-dirty`
-   explicitly adopts the entire dirty surface and disables automatic skip.
+1. A single ad-hoc task refuses a pre-existing dirty worktree by default because
+   the frozen baseline cannot separate old and loop-induced hunks.
+   `--include-dirty` explicitly adopts the entire dirty surface and disables
+   automatic skip. Executing a prepared plan does not check: each task commits on
+   the plan's branch, so uncommitted work at the start is simply part of the first
+   task's surface.
    After implementation, the Stop hook classifies the complete tracked,
    staged, and untracked surface. A non-zero change no larger than 10 lines
    across 2 paths may exit with the reported `skipped` reason only when no
@@ -32,7 +35,7 @@ gatekeeper implementation.
    reviewer is given the diff inline. Conveyance boundary — the reviewer is
    NEVER told what was fixed or rejected; every round is a full fresh
    re-review against the frozen baseline. The only loop-generated context
-   conveyed is the decision ledger (empty until Phase 2c). Each round also
+   conveyed is the decision ledger. Each round also
    receives fresh repository-resident design-intent pointers bounded to its
    current changed surface: applicable `.claude/rules`, ancestor
    `CLAUDE.md`/`AGENTS.md` rationale headings, and hunk-adjacent intentional
@@ -77,7 +80,7 @@ gatekeeper implementation.
    later reviewer prompts as design intent so the settled choice is no longer
    re-flagged. An undecided parked question holds the loop at the gate — it
    is not released by the round cap; the only way out is to record the
-   decision or `/spar-cancel`.
+   decision or `/spar:cancel` (`spar-cancel` on the Codex seat).
 7. Finding identity across rounds is a deterministic fingerprint
    (file + normalized title). When a round raises a finding whose fingerprint
    is new but an already-tracked open or parked finding shares its file, a
@@ -139,13 +142,16 @@ gatekeeper implementation.
 
 ## Phase roadmap
 
-Phases 1–5 (implemented): core loop; design findings, blind judge, gate,
-decision ledger, semantic matcher; same-family Claude review; safe skip,
-changed-surface intent harvest, durable outcomes, and final sweep; unattended
-mode and the final run report (`/spar:report`).
+All nine phases are implemented.
+
+Phases 1–5: core loop; design findings, blind judge, gate, decision ledger,
+semantic matcher; same-family Claude review; safe skip, changed-surface intent
+harvest, durable outcomes, and final sweep; unattended mode and the final run
+report (`/spar:report`).
 Phase 6: Codex-hosted adapter (mirrored seats, same Stop-hook enforcement via
-Codex's own `Stop` hook). Phase 7: model
-economics (reviewer/effort config, tiered fix writers).
+Codex's own `Stop` hook). Phase 7: model economics (reviewer/effort config,
+tiered fix writers) — item 11 above.
+
 Phase 8 (orchestration): `/spar:ready` + `/spar:fight` — a plan-to-fight
 workflow layered ABOVE the loop. `/spar:ready` runs writing-plans → dedicated
 branch → task table, then stops; `/spar:fight` runs the plan (per-task by
@@ -154,3 +160,20 @@ that wraps the loop's own `stop-hook.sh`. It reads each task's durable outcome
 to advance, flips the plan's checkboxes, and commits per task. Depends only on
 Phases 1–4; order-independent of 5–7. It never writes convergence and stops
 honestly on a non-converged task.
+
+Phase 9 (plan review): also above the loop, and the only part of this document
+that gates something other than exit. `/spar:ready` captures the spec it was
+given, prepares ONE read-only pass over the plan it just wrote, and records
+`plan_review: required` with a `plan_review_id`. The result is
+`reviews/spar-plan-<id>.md` behind `PLAN-REVIEW: CLEAN|FINDINGS` — deliberately
+not `STATUS:`, for the same reason the sweep uses `SWEEP:`: convergence is the
+reviewer's word inside a task loop and nothing produced outside one may be
+mistaken for it. `/spar:fight` refuses to activate the plan until every `PR<n>`
+in the result has a disposition in `.claude/spar-plan-review-response.md`
+(`ACCEPTED — …` or `REJECTED — <grounded reason>`); a grounded rejection clears a
+finding exactly as an acceptance does, and the check can verify a disposition is
+present but never that it is true — the same limit item 4 lives with.
+`--no-plan-review` skips the pass and records the decision (`skipped` at ready
+time, `overridden` at fight time) rather than skipping silently. It is one pass,
+not a loop: a plan has no tests to converge on. A plan edited after its review is
+reported at activation, not re-reviewed.

@@ -25,7 +25,7 @@ Phases 1–9 are implemented; the core loop is verified end-to-end against real 
 
 
 
-Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phase 6 (the Codex-hosted mirror) closes in v0.8.0, after a live run in an isolated Codex home: trust accepted, the user-scope `SessionStart` hook firing before the skill's first action, and a planted off-by-one going FINDINGS → fix → blind re-review → CONVERGED with `claude -p` as the reviewer. That run also found three defects no test had, all fixed here. Phase 7 (model economics — reviewer model and effort config, a tiered fix writer) is merged and unreleased; nothing it adds is on by default. Phase 9 (plan review) lands here: a plan written by `/spar:ready` gets one independent reading before it is fought, and `/spar:fight` will not start until every finding has a disposition — accepted or rejected with a grounded reason. A grounded rejection clears a finding; agreement is not required. `--no-plan-review` skips the pass and records that it was skipped. The two-level round cap arrived in v0.7.0 after three dogfooding runs ended at the cap with nothing contested — see [the design note](docs/superpowers/specs/2026-07-26-productive-round-extension-design.md). The [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) ships with this release.
+Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phase 6 (the Codex-hosted mirror) closes in v0.8.0, after a live run in an isolated Codex home: trust accepted, the user-scope `SessionStart` hook firing before the skill's first action, and a planted off-by-one going FINDINGS → fix → blind re-review → CONVERGED with `claude -p` as the reviewer. That run also found three defects no test had, all fixed here. Phase 7 (model economics — reviewer model and effort config, a tiered fix writer) and Phase 9 (plan review) both ship in v0.9.0; nothing Phase 7 adds is on by default. v0.9.1 corrected the plan-review gate's refusal to name the Codex seat's own command spellings, found by the first live run of that seat against it. v0.9.2 fixes three defects that using the tool surfaced rather than reading it: the branch slug mangled an inline spec, the outcome file omitted the author seat so a later report guessed it, and the Codex release-gate checklist never exercised the plan path. The two-level round cap arrived in v0.7.0 after three dogfooding runs ended at the cap with nothing contested — see [the design note](docs/superpowers/specs/2026-07-26-productive-round-extension-design.md). The [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) has shipped since v0.2.0.
 
 ## Direction
 
@@ -152,9 +152,12 @@ claude plugin install spar@sparring
 
 Requires `jq`. The [Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`) is **recommended** — with it, `/spar:fight` runs cross-model (Claude author ↔ Codex reviewer). Without it, single-agent mode reviews with Claude alone. Force a family with `/spar:fight --reviewer codex|claude -- <task>`.
 
-`/spar:fight` starts only from a clean worktree by default. `--include-dirty`
-explicitly adopts the entire pre-existing dirty surface and disables automatic
-skip.
+A single ad-hoc `/spar:fight <task>` starts only from a clean worktree by default.
+`--include-dirty` explicitly adopts the entire pre-existing dirty surface and
+disables automatic skip. Executing a plan prepared by `/spar:ready` does not check
+the worktree: the plan is fought task by task and each task's commit lands on the
+plan's branch, so uncommitted work at the start is part of the first task's review
+surface rather than something to refuse.
 
 ## Repository layout
 
@@ -172,12 +175,16 @@ bench/                   effect benchmark (living report + tasks/oracles)
 
 ## Development
 
-- `main` — releases only. `dev` — integration. `task/<n>-<name>` — one branch per plan task, merged into `dev`.
+- `main` carries releases and the work that leads to them. Each run of `/spar:ready` cuts its own `spar/<slug>-<timestamp>` branch, fights the plan task by task on it, and is merged back with `--no-ff` so the phase boundary stays visible in the history. (An earlier `dev` + `task/<n>-<name>` scheme is no longer used; the `dev` branch is left where it stopped.)
 - Tests are pure bash: `bash tests/test_<name>.sh`, or all of them with `for t in tests/test_*.sh; do bash "$t"; done`. CI ([.github/workflows/tests.yml](.github/workflows/tests.yml)) runs every suite on Linux and macOS for each push and pull request — no reviewer CLI required, since the suites stub it.
-- Phase 6's release gate is a scripted manual run: `bash adapters/codex/verify-live.sh setup`
-  builds an isolated Codex home with a planted bug and prints what to do, and
-  `… check` judges the artifacts afterwards. It does not make Phase 6 done — that
-  needs the run.
+- The Codex seat's release gate is a scripted manual run:
+  `bash adapters/codex/verify-live.sh setup` builds an isolated Codex home with a
+  planted bug and prints a checklist, and `… check` judges the artifacts
+  afterwards. It covers the plan path as well as the single-task loop, so a change
+  to Phase 9's gate is exercised there too. Two of its five items rest on what the
+  human saw — the trust prompt's wording, and whether the plan-review gate actually
+  refused — because neither leaves an artifact; `check` says so rather than
+  implying it judged them.
 - A change to a surface both seats share — the Stop hook's output or exit contract,
   the state file, the runner scripts — is exercised in a live session of each seat
   before the release that carries it. Green suites are not enough: they assert what

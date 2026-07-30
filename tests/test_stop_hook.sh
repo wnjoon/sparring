@@ -548,6 +548,27 @@ OUT=$(run_hook)       # still no ledger → gate incomplete
 chk "gate incomplete → re-block" 'gate' "$OUT"
 chk "gate incomplete → manifest kept" "kept" "$([ -f .claude/spar-gate-manifest.tsv ] && echo kept || echo gone)"
 chk "gate incomplete → not settled" 'parked' "$(cat .claude/spar-registry.tsv)"
+# The message names a command the reader can run. It said /spar-cancel, which is
+# neither seat's spelling — the Claude command is /spar:cancel and the Codex skill
+# is spar-cancel — so it sent every reader to something that does not exist.
+chk "gate incomplete → names the claude seat's cancel" '/spar:cancel' "$OUT"
+chk "and not a command that exists nowhere" "absent" \
+  "$(printf '%s' "$OUT" | grep -qF '/spar-cancel' && echo present || echo absent)"
+
+# Same fixture on the Codex seat: absent author means claude, so the seat has to
+# be stated to change the wording.
+fresh_dir; write_state review 1; mkdir -p reviews
+printf 'author: codex\n' >> .claude/spar.local.md
+printf 'STATUS: FINDINGS\n\n### F1-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFa"
+printf -- '### F1-1: REJECTED — cohesive\n' > "$RPa"
+run_hook >/dev/null
+printf 'STATUS: FINDINGS\n\n### F2-1 [DESIGN] split the module\n- file: mod.py:10\n- problem: big\n- suggestion: split\n' > "$RFb"
+printf -- '### F2-1: REJECTED — cohesive\n' > "$RPb"
+run_hook >/dev/null
+OUT=$(run_hook)
+chk "codex seat → names spar-cancel" 'spar-cancel' "$OUT"
+chk "and not the slash-prefixed one" "absent" \
+  "$(printf '%s' "$OUT" | grep -qF '/spar:cancel' && echo present || echo absent)"
 
 # ── 24. judge template missing → fail open to user escalation (no trap) ──
 mech_stalemate

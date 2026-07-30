@@ -235,6 +235,10 @@ case "$AUTHOR" in
   codex) ;;
   *) log "invalid author: $AUTHOR"; finish_approve error-bypass ;;
 esac
+# The two seats spell their commands differently, and a block message naming the
+# wrong one sends the reader to a command that does not exist in their session.
+# Derived after the validation above, so it reads the normalised value.
+case "$AUTHOR" in codex) CANCEL_CMD="spar-cancel" ;; *) CANCEL_CMD="/spar:cancel" ;; esac
 case "$SWEEP_DONE" in ''|false) SWEEP_DONE=false;; true) ;; *)
   log "invalid sweep_done: $SWEEP_DONE"; finish_approve error-bypass;;
 esac
@@ -1646,7 +1650,7 @@ the user for a decision, apply it, then stop." \
         block "Design gate incomplete. Still need a recorded decision for: ${missing}
 Present each to the user (see ${GATE_FILE}), then append to ${LEDGER_FILE} a
 section per tag: '### P<k>: <the user's decision and its basis>'. Then stop
-again. (To abandon the loop instead: /spar-cancel.)" \
+again. (To abandon the loop instead: ${CANCEL_CMD}.)" \
           "sparring [${REVIEW_ID}]: design gate incomplete"
       fi
       rm -f "$GATE_MANIFEST" "$GATE_FILE"
