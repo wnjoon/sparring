@@ -2,9 +2,23 @@
 
 Does the enforced review loop actually improve the shipped artifact versus the
 author's un-reviewed first pass? This is a small, honest **demonstration** — not
-a statistically rigorous study. It is updated as phases land (see *How to update*).
+a statistically rigorous study.
 
-**Last run:** 2026-07-23 · Phase 3 (single-agent mode) merged on `dev`.
+**Last run:** 2026-07-23, when Phase 3 (single-agent mode) landed. **Not re-run
+since**, through Phases 4-9 — so the numbers below measure the loop as it stood when
+Phase 3 landed, not as it ships today. Which way that cuts is not obvious and is not
+assumed here. Some of what followed adds chances to catch a defect: the final sweep,
+the productive-round cap extension, the plan review. One removes a chance — Phase
+4's safe skip exits without review when the change is no larger than 10 lines across
+2 paths and touches nothing risky. What it measures is the fix diff, not the file,
+and a one-line off-by-one correction in a single small module is squarely in that
+range — so a re-run has to report whether these tasks now reach a reviewer at all.
+That is measurement, and it has not been done.
+
+The graders still work — `python3 tasks/t1-duration/oracle.py
+tasks/t1-duration/planted_bug.py` reports 10/12 today, matching the table below —
+so §2 is reproducible; it is the loop half that is stale. Step 1 of *How to update*
+is the outstanding work.
 
 ## Method
 
@@ -106,7 +120,9 @@ contain. Building such cases is the main open task for this benchmark.
 3. **Add subtle, vendor-blind-spot bugs** to expose the cross-vs-single gap (§3).
 4. When a new phase adds a capability (e.g. the design gate, the sweep), add a task
    that exercises it and record whether the loop's outcome improves.
-5. Bump *Last run* and append results; keep the *Limits* honest.
+5. Bump *Last run* and append results; keep the *Limits* honest. If a phase lands
+   without a re-run, say so at the top rather than leaving the old date to imply
+   currency — that is what happened between Phases 4 and 9.
 
 *(This is a demonstration harness. Grading is automated via `oracle.py`; the P0
 generation and loop steps were orchestrated manually this run and are not yet a
