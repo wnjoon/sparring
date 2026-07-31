@@ -5,7 +5,7 @@
 
 > A cross-model review sparring loop — the author never grades its own work.
 
-**Status: v0.9.3 — a plan gets an independent reading before it is fought. `/spar:ready` prepares one review of the plan it just wrote, and `/spar:fight` refuses to start until every finding has a disposition: accepted, or rejected with a reason grounded in the plan, the spec or the code. A grounded rejection clears a finding — agreement is not required. `--no-plan-review` skips the pass and records that it was skipped. Both seats are verified end to end and use their own command spellings. The Codex release-gate checklist exercises the plan path too, so the seat that mirrors this one is checked against the feature rather than around it. Model economics ships alongside: the reviewer's model and effort are configurable, and nothing is enabled by default.**
+**Status: v0.10.0 — `/spar:ready --verify-spec` can run a blind Claude+Codex spec check before it creates the plan branch or writes plan state. The spec is embedded into both read-only verifier prompts, so workers do not depend on git-excluded `.claude/` scratch files; durable evidence lands in `reviews/spar-spec-verify-*`, and a concise planning summary lands in `.claude/spar-spec-verify.md`. `--unattended --verify-spec` is supported because this path is owned by spar itself and does not call the separate approval-based `parallel-verify` skill. The core fight loop is unchanged.**
 
 Phases 1–9 are implemented; the core loop is verified end-to-end against real reviewers — a planted-bug task went FINDINGS → fix → blind re-review → CONVERGED. Today `/spar:fight` gives you:
 
@@ -25,7 +25,7 @@ Phases 1–9 are implemented; the core loop is verified end-to-end against real 
 
 
 
-Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phase 6 (the Codex-hosted mirror) closes in v0.8.0, after a live run in an isolated Codex home: trust accepted, the user-scope `SessionStart` hook firing before the skill's first action, and a planted off-by-one going FINDINGS → fix → blind re-review → CONVERGED with `claude -p` as the reviewer. That run also found three defects no test had, all fixed here. Phase 7 (model economics — reviewer model and effort config, a tiered fix writer) and Phase 9 (plan review) both first ship in v0.9.1; nothing Phase 7 adds is on by default. There is no v0.9.0 release — the version was prepared, then the first live run of the Codex seat against it found the plan-review gate naming the Claude command spellings in its refusal, so what shipped is v0.9.1 with that corrected. v0.9.2 fixes three defects that using the tool surfaced rather than reading it: the branch slug mangled an inline spec, the outcome file omitted the author seat so a later report guessed it, and the Codex release-gate checklist never exercised the plan path. v0.9.3 is an audit of the living documents against the code, and it carries one user-visible fix out of that audit: the design gate told you to run `/spar-cancel`, which is neither seat's spelling, so the message named a command that does not exist in any session. The two-level round cap arrived in v0.7.0 after three dogfooding runs ended at the cap with nothing contested — see [the design note](docs/superpowers/specs/2026-07-26-productive-round-extension-design.md). The [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) has shipped since v0.2.0.
+Phase 8 (the `/spar:ready` + `/spar:fight` orchestrator) and Phase 5's unattended mode shipped in v0.5.0; Phase 5's final run report (`/spar:report`) completes Phase 5 in v0.6.0. Phase 6 (the Codex-hosted mirror) closes in v0.8.0, after a live run in an isolated Codex home: trust accepted, the user-scope `SessionStart` hook firing before the skill's first action, and a planted off-by-one going FINDINGS → fix → blind re-review → CONVERGED with `claude -p` as the reviewer. That run also found three defects no test had, all fixed here. Phase 7 (model economics — reviewer model and effort config, a tiered fix writer) and Phase 9 (plan review) both first ship in v0.9.1; nothing Phase 7 adds is on by default. There is no v0.9.0 release — the version was prepared, then the first live run of the Codex seat against it found the plan-review gate naming the Claude command spellings in its refusal, so what shipped is v0.9.1 with that corrected. v0.9.2 fixes three defects that using the tool surfaced rather than reading it: the branch slug mangled an inline spec, the outcome file omitted the author seat so a later report guessed it, and the Codex release-gate checklist never exercised the plan path. v0.9.3 is an audit of the living documents against the code, and it carries one user-visible fix out of that audit: the design gate told you to run `/spar-cancel`, which is neither seat's spelling, so the message named a command that does not exist in any session. v0.10.0 adds optional spec verification before planning: the ready command can ask both model families to inspect the spec first, block before branch/state creation on unclear requirements, and carry accepted non-blocking findings into the generated plan. The two-level round cap arrived in v0.7.0 after three dogfooding runs ended at the cap with nothing contested — see [the design note](docs/superpowers/specs/2026-07-26-productive-round-extension-design.md). The [Roadmap](#roadmap) marks what exists today. A small [effect benchmark](bench/README.md) has shipped since v0.2.0.
 
 ## Direction
 
@@ -142,6 +142,7 @@ The same structure runs in both directions. The seats swap; the invariants don't
 | 7 | Model economics: reviewer model + effort config, tiered fix writers (judgment stays on the session model; a cheaper tier types the fixes) | ✅ done |
 | 8 | `/spar:ready` + `/spar:fight` orchestrator: writing-plans → dedicated branch → per-task (or `--whole`) fight loop, single Stop-hook dispatcher wrapping the loop hook, per-task checkbox commits | ✅ done |
 | 9 | Plan review: one blind pass over a `/spar:ready` plan before it is fought — do its claims about the code hold, is every step satisfiable, does it cover the spec — enforced as a `/spar:fight` precondition | ✅ done |
+| 10 | Spec verification: optional blind Claude+Codex preflight before `/spar:ready` creates a branch or plan state; `--verify-spec` and `--unattended --verify-spec` publish durable `reviews/spar-spec-verify-*` evidence | ✅ done |
 
 ## Install
 
@@ -159,6 +160,18 @@ the worktree: the plan is fought task by task and each task's commit lands on th
 plan's branch, so uncommitted work at the start is part of the first task's review
 surface rather than something to refuse.
 
+`/spar:ready --verify-spec -- <spec>` runs a pre-plan spec check before the
+dedicated branch exists. It generates two read-only verifier runners, one Claude
+family and one Codex family, embeds the spec text directly in their prompts, and
+publishes `reviews/spar-spec-verify-<id>-claude.md` plus
+`reviews/spar-spec-verify-<id>-codex.md`. Clean or non-blocking findings produce
+`.claude/spar-spec-verify.md`, which the plan must cite as context. Blocking
+ambiguity, contradiction, missing acceptance criteria, or missing oracle stops
+before branch/state creation. `--no-verify-spec` is the explicit default.
+This is distinct from plan review: spec verification checks the request before a
+plan is written; plan review checks the finished plan before `/spar:fight`
+executes it.
+
 ## Repository layout
 
 ```
@@ -166,7 +179,7 @@ plugins/spar/            Claude Code plugin (commands, Stop hook)
   commands/              /spar:ready, /spar:fight, /spar:cancel, /spar:report, setup guards + surface helpers
   hooks/                 Stop dispatcher + round engine + SessionStart
   shared/policy.md       loop policy — source of truth for both seats
-  shared/prompts/        reviewer / judge / matcher / sweeper / plan-reviewer templates
+  shared/prompts/        reviewer / judge / matcher / sweeper / plan-reviewer / spec-verifier templates
 adapters/codex/          Codex-hosted seat: hooks.json template, installer, skills
 docs/superpowers/        specs, plans, and design-decisions per phase
 tests/                   pure-bash hook + resolver tests
@@ -181,7 +194,11 @@ bench/                   effect benchmark (living report + tasks/oracles)
   `bash adapters/codex/verify-live.sh setup` builds an isolated Codex home with a
   planted bug and prints a checklist, and `… check` judges the artifacts
   afterwards. It covers the plan path as well as the single-task loop, so a change
-  to Phase 9's gate is exercised there too. Two of its five items rest on what the
+  to Phase 9's gate is exercised there too. It also includes a v0.10.0 smoke item
+  for `spar-ready --verify-spec` and `--unattended --verify-spec`: verification
+  must run before branch/state creation, publish durable spec-verifier reports,
+  and either block cleanly or feed `.claude/spar-spec-verify.md` into planning.
+  Two of its items rest on what the
   human saw — the trust prompt's wording, and whether the plan-review gate actually
   refused — because neither leaves an artifact; `check` says so rather than
   implying it judged them.

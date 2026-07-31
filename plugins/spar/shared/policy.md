@@ -142,7 +142,7 @@ gatekeeper implementation. Both are verified end to end against live models.
 
 ## Phase roadmap
 
-All nine phases are implemented.
+All ten phases are implemented.
 
 Phases 1–5: core loop; design findings, blind judge, gate, decision ledger,
 semantic matcher; same-family Claude review; safe skip, changed-surface intent
@@ -177,3 +177,18 @@ present but never that it is true — the same limit item 4 lives with.
 time, `overridden` at fight time) rather than skipping silently. It is one pass,
 not a loop: a plan has no tests to converge on. A plan edited after its review is
 reported at activation, not re-reviewed.
+
+Phase 10 (spec verification): also above the loop, before Phase 8 writes plan
+state or creates the dedicated branch. `/spar:ready --verify-spec` prepares two
+read-only verifier runners, one Claude-family and one Codex-family, with the spec
+content embedded directly into both prompts. The durable results are
+`reviews/spar-spec-verify-<id>-claude.md` and
+`reviews/spar-spec-verify-<id>-codex.md`, each headed by
+`SPEC-VERIFY: CLEAN|FINDINGS|BLOCKED`. The cross-check writes
+`.claude/spar-spec-verify.md` for the planner and blocks before planning on a
+missing report, invalid marker, `BLOCKED`, or unresolved ambiguity,
+contradiction, missing acceptance criteria, or missing oracle. This is not the
+same as plan review: it checks the request before the plan exists; Phase 9 checks
+the plan after it is written. It is also not a dependency on the standalone
+`parallel-verify` skill: spar owns this path so `--unattended --verify-spec` can
+run without asking the user to approve a brief.
