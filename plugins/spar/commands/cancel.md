@@ -19,7 +19,7 @@ fi
 rm -f .claude/spar-plan.local.md .claude/spar-fight.log .claude/spar-fight-task.txt
 # Plan-review artifacts. The result under reviews/ is kept, like every other
 # review artifact — only the working files that would outlive the plan go.
-rm -f .claude/spar-plan-spec.txt .claude/spar-run-plan-review.sh .claude/spar-plan-review-prompt.txt .claude/spar-plan-review-hash .claude/spar-plan-review-response.md
+rm -f .claude/spar-plan-spec.txt .claude/spar-run-plan-review.sh .claude/spar-plan-review-prompt.txt .claude/spar-plan-review-hash .claude/spar-plan-review-response.md .claude/spar-run-spec-verify-claude.sh .claude/spar-run-spec-verify-codex.sh .claude/spar-spec-verify-prompt-claude.txt .claude/spar-spec-verify-prompt-codex.txt .claude/spar-spec-verify-id .claude/spar-spec-verify.md
 rm -f .claude/spar.local.md .claude/spar-run-reviewer.sh .claude/spar-reviewer-prompt.txt .claude/spar-retries .claude/spar-ledger.md .claude/spar-registry.tsv .claude/spar-registry-round .claude/spar-run-judge.sh .claude/spar-judge-prompt.txt .claude/spar-judge-pending .claude/spar-judge-seq .claude/spar-judge-retries .claude/spar-gate-manifest.tsv .claude/spar-gate.md .claude/spar-gate-seq .claude/spar-run-matcher.sh .claude/spar-matcher-prompt.txt .claude/spar-matcher-pending .claude/spar-matcher-manifest.tsv .claude/spar-matcher-round .claude/spar-matcher-retries .claude/spar-aliases.tsv .claude/spar-diff.txt .claude/spar-intent-pointers.txt .claude/spar-run-sweep.sh .claude/spar-sweep-prompt.txt .claude/spar-sweep-retries .claude/spar-fix-brief.md
 rmdir .claude/spar-sweep.lock 2>/dev/null || true
 echo "Sparring loop cancelled. Review artifacts in reviews/ were kept."

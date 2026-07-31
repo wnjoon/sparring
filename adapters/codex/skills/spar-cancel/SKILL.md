@@ -18,7 +18,10 @@ rm -f .claude/spar-plan.local.md .claude/spar-fight.log .claude/spar-fight-task.
 # review artifact — only the working files that would outlive the plan go.
 rm -f .claude/spar-plan-spec.txt .claude/spar-run-plan-review.sh \
       .claude/spar-plan-review-prompt.txt .claude/spar-plan-review-hash \
-      .claude/spar-plan-review-response.md
+      .claude/spar-plan-review-response.md .claude/spar-run-spec-verify-claude.sh \
+      .claude/spar-run-spec-verify-codex.sh .claude/spar-spec-verify-prompt-claude.txt \
+      .claude/spar-spec-verify-prompt-codex.txt .claude/spar-spec-verify-id \
+      .claude/spar-spec-verify.md
 rm -f .claude/spar.local.md .claude/spar-run-reviewer.sh .claude/spar-reviewer-prompt.txt \
       .claude/spar-retries .claude/spar-ledger.md .claude/spar-registry.tsv \
       .claude/spar-registry-round .claude/spar-run-judge.sh .claude/spar-judge-prompt.txt \
