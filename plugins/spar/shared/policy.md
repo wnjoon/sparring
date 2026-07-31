@@ -186,9 +186,12 @@ content embedded directly into both prompts. The durable results are
 `reviews/spar-spec-verify-<id>-codex.md`, each headed by
 `SPEC-VERIFY: CLEAN|FINDINGS|BLOCKED`. The cross-check writes
 `.claude/spar-spec-verify.md` for the planner and blocks before planning on a
-missing report, invalid marker, `BLOCKED`, or unresolved ambiguity,
-contradiction, missing acceptance criteria, or missing oracle. This is not the
-same as plan review: it checks the request before the plan exists; Phase 9 checks
-the plan after it is written. It is also not a dependency on the standalone
+missing report, invalid marker, or `BLOCKED`. The verifier prompt requires
+workers to use `BLOCKED` for unresolved ambiguity, contradiction, missing
+acceptance criteria, or missing oracle; the checker does not reclassify
+`FINDINGS` by keyword because non-blocking planning notes often discuss the same
+concepts. This is not the same as plan review: it checks the request before the
+plan exists; Phase 9 checks the plan after it is written. It is also not a
+dependency on the standalone
 `parallel-verify` skill: spar owns this path so `--unattended --verify-spec` can
 run without asking the user to approve a brief.

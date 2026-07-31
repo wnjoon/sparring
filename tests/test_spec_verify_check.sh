@@ -49,9 +49,9 @@ bash "$C" "$VID" >/dev/null 2>&1
 chk "symlink artifact fails" "1" "$?"
 
 rm -rf .claude reviews; mkdir reviews
-write_pair "SPEC-VERIFY: FINDINGS" "SPEC-VERIFY: CLEAN" "- missing oracle for done"
+write_pair "SPEC-VERIFY: FINDINGS" "SPEC-VERIFY: CLEAN" "- weak oracle and ambiguous wording, but not blocked"
 bash "$C" "$VID" >/dev/null 2>&1
-chk "blocking findings fail" "1" "$?"
+chk "findings body does not override the marker" "0" "$?"
 
 bash "$C" "../bad" >/dev/null 2>&1
 chk "unsafe id is usage error" "2" "$?"

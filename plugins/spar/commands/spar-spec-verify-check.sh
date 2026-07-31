@@ -26,11 +26,6 @@ status_for() {
   esac
 }
 
-blocks_by_content() {
-  file="$1"
-  LC_ALL=C grep -Eiq 'ambig|contradict|missing[[:space:]-]+(acceptance|oracle)|no[[:space:]-]+oracle|unclear[[:space:]-]+oracle' "$file"
-}
-
 overall=0
 {
   printf '# Spec Verification\n\n'
@@ -46,10 +41,6 @@ overall=0
       3) label=MISSING_OR_UNSAFE; overall=1 ;;
       *) label=INVALID; overall=1 ;;
     esac
-    if [ "$rc" -eq 1 ] && blocks_by_content "$file"; then
-      label=FINDINGS_BLOCKING
-      overall=1
-    fi
     printf '## %s\n\n' "$family"
     printf 'status: %s\n\n' "$label"
     if [ -f "$file" ] && [ ! -L "$file" ]; then
