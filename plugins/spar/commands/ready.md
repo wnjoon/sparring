@@ -37,6 +37,21 @@ if [ -z "$RDY_REVIEWER" ]; then
   if command -v codex >/dev/null 2>&1; then RDY_REVIEWER=codex; else RDY_REVIEWER=claude; fi
 fi
 command -v "$RDY_REVIEWER" >/dev/null 2>&1 || { echo "Error: '$RDY_REVIEWER' CLI not on PATH."; exit 1; }
+for D in .claude reviews docs/superpowers/plans; do mkdir -p "$D"; done
+# Reuse spar's git-excludes so fight's own commits never stage loop artifacts.
+EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
+for pat in 'reviews/spar-*' '.claude/spar*'; do
+  grep -qxF "$pat" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$pat" >> "$EXCLUDE"
+done
+if [ "$RDY_VERIFY_SPEC" = true ]; then
+  command -v claude >/dev/null 2>&1 || { echo "Error: spec verification requires the claude CLI on PATH."; exit 1; }
+  command -v codex >/dev/null 2>&1 || { echo "Error: spec verification requires the codex CLI on PATH."; exit 1; }
+  bash "${CLAUDE_PLUGIN_ROOT}/commands/spar-spec-verify-prepare.sh" "$RDY_SPEC" "$RDY_REVIEWER" claude
+  bash .claude/spar-run-spec-verify-claude.sh
+  bash .claude/spar-run-spec-verify-codex.sh
+  RDY_SV_ID="$(cat .claude/spar-spec-verify-id)"
+  bash "${CLAUDE_PLUGIN_ROOT}/commands/spar-spec-verify-check.sh" "$RDY_SV_ID"
+fi
 # Isolate this run on a dedicated branch in the CURRENT directory. No separate
 # worktree, so the working directory — and thus every state path the Stop hook
 # reads — never changes mid-run. All task commits land on this branch.
@@ -54,7 +69,6 @@ RDY_SLUG="$(printf '%s' "$RDY_SLUG_SRC" | tr '[:upper:] ' '[:lower:]-' | tr -cd 
 [ -n "$RDY_SLUG" ] || RDY_SLUG=run
 RDY_BRANCH="spar/${RDY_SLUG}-$(date +%Y%m%d-%H%M%S)"
 git checkout -b "$RDY_BRANCH" || { echo "Error: could not create branch $RDY_BRANCH."; exit 1; }
-for D in .claude reviews docs/superpowers/plans; do mkdir -p "$D"; done
 # The captured copy is authoritative from here: a spec file edited later does not
 # change what the plan was written against. A path is copied byte for byte;
 # inline text gets a trailing newline.
@@ -63,11 +77,6 @@ else printf '%s\n' "$RDY_SPEC" > .claude/spar-plan-spec.txt; fi
 RDY_PR_ID="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 if [ "$RDY_PLAN_REVIEW" = false ]; then RDY_PR=skipped; else RDY_PR=required; fi
 if [ "$RDY_VERIFY_SPEC" = true ]; then RDY_SV=required; else RDY_SV=skipped; fi
-# Reuse spar's git-excludes so fight's own commits never stage loop artifacts.
-EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
-for pat in 'reviews/spar-*' '.claude/spar*'; do
-  grep -qxF "$pat" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$pat" >> "$EXCLUDE"
-done
 # The 'branch' state field holds the dedicated branch name (there is no separate
 # worktree; the working directory stays put so the Stop hook's paths never move).
 TMP="$(mktemp .claude/spar-plan.local.md.tmp.XXXXXX)"
@@ -96,7 +105,9 @@ printf 'Ready — plan branch %s (reviewer=%s, unattended=%s, plan-review=%s, sp
 Then run every step below in order, and **stop at the last one** — `/spar:ready`
 prepares the plan but does NOT execute it. Execution is `/spar:fight`.
 
-1. **Produce the plan.** Read `.claude/spar-plan-spec.txt` — the setup command
+1. **Produce the plan.** If `.claude/spar-spec-verify.md` exists, read it first
+   and include a short verification context section in the plan naming the
+   accepted non-blocking findings that shaped it. Then read `.claude/spar-plan-spec.txt` — the setup command
    captured the spec there, and that copy is what the plan will be reviewed
    against. Read it rather than the `SPEC=` path, so an edit to the original
    after setup cannot put the plan and the review on different specs. Use the

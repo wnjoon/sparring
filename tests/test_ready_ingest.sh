@@ -60,6 +60,12 @@ chk "ready.md records plan_review_id" "yes" \
   "$(has "$ROOT/plugins/spar/commands/ready.md" 'plan_review_id:')"
 chk "ready.md prints spec verification mode" "yes" \
   "$(has "$ROOT/plugins/spar/commands/ready.md" 'spec-verify=')"
+chk "ready.md runs spec verification before branch creation" "yes" \
+  "$(awk '/spar-spec-verify-check\.sh/{v=NR} /git checkout -b/{b=NR} END{print (v && b && v < b) ? "yes" : "no"}' "$ROOT/plugins/spar/commands/ready.md")"
+chk "ready.md runs spec verification before plan state" "yes" \
+  "$(awk '/spar-spec-verify-check\.sh/{v=NR} /cat > "\$TMP" <<STATE_EOF/{s=NR} END{print (v && s && v < s) ? "yes" : "no"}' "$ROOT/plugins/spar/commands/ready.md")"
+chk "ready.md tells planner to read spec verification" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/ready.md" '.claude/spar-spec-verify.md')"
 # The capture is only authoritative if the plan is written from it. Scoped to the
 # authoring step, not the whole document: the path appears in the setup block
 # regardless, so a document-wide grep would pass while step 1 still sent the

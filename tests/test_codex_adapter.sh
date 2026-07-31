@@ -250,6 +250,10 @@ chk "ready skill captures the spec" "spar-plan-spec.txt" "$READY"
 chk "ready skill records plan_review" "plan_review:" "$READY"
 chk "ready skill records plan_review_id" "plan_review_id:" "$READY"
 chk "ready skill prints spec verification mode" "spec-verify=" "$READY"
+chk "ready skill runs spec verification before branch creation" "yes" \
+  "$(awk '/spar-spec-verify-check\.sh/{v=NR} /git checkout -b/{b=NR} END{print (v && b && v < b) ? "yes" : "no"}' \
+       "$ROOT/adapters/codex/skills/spar-ready/SKILL.md")"
+chk "ready skill tells planner to read spec verification" ".claude/spar-spec-verify.md" "$READY"
 # Scoped to the authoring section: the path is in section 1's setup block either
 # way, so a whole-document check would pass while section 2 still sent the author
 # back to the mutable original and put the plan and the review on different specs.
