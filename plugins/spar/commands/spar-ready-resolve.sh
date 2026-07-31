@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Resolve /spar:ready flags from the ONE-string argument, strip them, and
-# print: "<mode>\t<reviewer|empty>\t<unattended>\t<plan_review>\t<spec>"
-# (unattended and plan_review ∈ true|false). The free text is LAST so a spec
+# print: "<mode>\t<reviewer|empty>\t<unattended>\t<plan_review>\t<verify_spec>\t<spec>"
+# (unattended, plan_review, and verify_spec are true|false). The free text is LAST so a spec
 # carrying tabs or newlines is still unambiguous. Never argv-split the input.
 set -uo pipefail
 raw="${1-}"
@@ -9,8 +9,8 @@ stripped="$raw"
 if [ "$stripped" = "--" ]; then stripped=""
 elif [ "${stripped#-- }" != "$stripped" ]; then stripped="${stripped#-- }"; fi
 
-mode="per-task"; reviewer=""; unattended=false; plan_review=true
-seen_mode=false; seen_rev=false; seen_unatt=false; seen_pr=false
+mode="per-task"; reviewer=""; unattended=false; plan_review=true; verify_spec=false
+seen_mode=false; seen_rev=false; seen_unatt=false; seen_pr=false; seen_sv=false
 remainder="$stripped"
 while :; do
   if [ "$remainder" = "--" ]; then remainder=""; break
@@ -27,6 +27,18 @@ while :; do
   elif [ "${remainder#--no-plan-review }" != "$remainder" ]; then
     [ "$seen_pr" = false ] || { echo "error: --no-plan-review specified more than once" >&2; exit 2; }
     seen_pr=true; plan_review=false; remainder="${remainder#--no-plan-review }"
+  elif [ "$remainder" = "--verify-spec" ]; then
+    [ "$seen_sv" = false ] || { echo "error: spec verification flag specified more than once" >&2; exit 2; }
+    seen_sv=true; verify_spec=true; remainder=""
+  elif [ "${remainder#--verify-spec }" != "$remainder" ]; then
+    [ "$seen_sv" = false ] || { echo "error: spec verification flag specified more than once" >&2; exit 2; }
+    seen_sv=true; verify_spec=true; remainder="${remainder#--verify-spec }"
+  elif [ "$remainder" = "--no-verify-spec" ]; then
+    [ "$seen_sv" = false ] || { echo "error: spec verification flag specified more than once" >&2; exit 2; }
+    seen_sv=true; verify_spec=false; remainder=""
+  elif [ "${remainder#--no-verify-spec }" != "$remainder" ]; then
+    [ "$seen_sv" = false ] || { echo "error: spec verification flag specified more than once" >&2; exit 2; }
+    seen_sv=true; verify_spec=false; remainder="${remainder#--no-verify-spec }"
   elif [ "$remainder" = "--unattended" ]; then
     [ "$seen_unatt" = false ] || { echo "error: --unattended specified more than once" >&2; exit 2; }
     seen_unatt=true; unattended=true; remainder=""
@@ -43,4 +55,4 @@ while :; do
 done
 spec="${remainder%$'\n'}"
 [ -n "$spec" ] || { echo "error: no spec path or description given" >&2; exit 2; }
-printf '%s\t%s\t%s\t%s\t%s\n' "$mode" "$reviewer" "$unattended" "$plan_review" "$spec"
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$mode" "$reviewer" "$unattended" "$plan_review" "$verify_spec" "$spec"

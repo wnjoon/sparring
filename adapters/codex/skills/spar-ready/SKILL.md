@@ -37,7 +37,9 @@ RDY_REST2="${RDY_REST#*$'\t'}"
 RDY_UNATTENDED="${RDY_REST2%%$'\t'*}"
 RDY_REST3="${RDY_REST2#*$'\t'}"
 RDY_PLAN_REVIEW="${RDY_REST3%%$'\t'*}"
-RDY_SPEC="${RDY_REST3#*$'\t'}"
+RDY_REST4="${RDY_REST3#*$'\t'}"
+RDY_VERIFY_SPEC="${RDY_REST4%%$'\t'*}"
+RDY_SPEC="${RDY_REST4#*$'\t'}"
 # Mirror of the Claude seat's auto-detect: Codex authors here, so claude reviews
 # when it is installed and only a machine without it falls back to same-family.
 if [ -z "$RDY_REVIEWER" ]; then
@@ -91,6 +93,7 @@ if [ -f "$RDY_SPEC" ]; then cp "$RDY_SPEC" .claude/spar-plan-spec.txt
 else printf '%s\n' "$RDY_SPEC" > .claude/spar-plan-spec.txt; fi
 RDY_PR_ID="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 if [ "$RDY_PLAN_REVIEW" = false ]; then RDY_PR=skipped; else RDY_PR=required; fi
+if [ "$RDY_VERIFY_SPEC" = true ]; then RDY_SV=required; else RDY_SV=skipped; fi
 # Reuse spar's git-excludes so fight's own commits never stage loop artifacts.
 EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
 for pat in 'reviews/spar-*' '.claude/spar*'; do
@@ -122,8 +125,8 @@ current_review_id:
 STATE_EOF
 mv "$TMP" .claude/spar-plan.local.md
 trap - EXIT
-printf 'Ready — plan branch %s (author=codex, reviewer=%s, unattended=%s, plan-review=%s).\nSPEC=%s\n' \
-  "$RDY_BRANCH" "$RDY_REVIEWER" "$RDY_UNATTENDED" "$RDY_PR" "$RDY_SPEC"
+printf 'Ready — plan branch %s (author=codex, reviewer=%s, unattended=%s, plan-review=%s, spec-verify=%s).\nSPEC=%s\n' \
+  "$RDY_BRANCH" "$RDY_REVIEWER" "$RDY_UNATTENDED" "$RDY_PR" "$RDY_SV" "$RDY_SPEC"
 ```
 
 ## 2. Write the plan

@@ -30,7 +30,7 @@ chk "whole → 1 task" "1" "$(plan_field tasks "$ST")"
 chk "whole heading" "WHOLE PLAN" "$(plan_task_line 1 "$ST" | cut -f3)"
 
 rm -rf "$TMP"
-# ── Phase 9: the fifth resolver field is destructured, and the spec stays last ─
+# v0.10.0: the sixth resolver field is destructured, and the spec stays last.
 # Nothing fails loudly if this is missed: the spec text silently becomes the word
 # "true" and the plan gets written against it.
 # chk here is an exact-equality check, so ask for a computed yes/no.
@@ -40,13 +40,16 @@ has() { grep -qF -- "$2" "$1" && echo yes || echo no; }
 # drifts — putting them here would leave that suite green on a broken adapter.
 chk "ready.md destructures plan_review" "yes" \
   "$(has "$ROOT/plugins/spar/commands/ready.md" 'RDY_PLAN_REVIEW=')"
+chk "ready.md destructures verify_spec" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/ready.md" 'RDY_VERIFY_SPEC=')"
 chk "fight.md destructures plan_review" "yes" \
   "$(has "$ROOT/plugins/spar/commands/fight.md" 'SPAR_PLAN_REVIEW=')"
-# Behavioural, not a substring: the resolver's own output must put the flag in
-# field 4 and the free text in field 5.
+# Behavioural, not a substring: the resolver's own output must put flags before
+# the final free-text field.
 RR="$ROOT/plugins/spar/commands/spar-ready-resolve.sh"
 chk "the flag lands in field 4" "false" "$(bash "$RR" "--no-plan-review -- some spec" | cut -f4)"
-chk "and the spec in field 5" "some spec" "$(bash "$RR" "--no-plan-review -- some spec" | cut -f5)"
+chk "the spec verification flag lands in field 5" "true" "$(bash "$RR" "--verify-spec -- some spec" | cut -f5)"
+chk "and the spec in field 6" "some spec" "$(bash "$RR" "--no-plan-review -- some spec" | cut -f6)"
 
 # ── Phase 9: the Claude seat captures the spec and records the fields ───────
 chk "ready.md captures the spec" "yes" \
@@ -55,6 +58,8 @@ chk "ready.md records plan_review" "yes" \
   "$(has "$ROOT/plugins/spar/commands/ready.md" 'plan_review:')"
 chk "ready.md records plan_review_id" "yes" \
   "$(has "$ROOT/plugins/spar/commands/ready.md" 'plan_review_id:')"
+chk "ready.md prints spec verification mode" "yes" \
+  "$(has "$ROOT/plugins/spar/commands/ready.md" 'spec-verify=')"
 # The capture is only authoritative if the plan is written from it. Scoped to the
 # authoring step, not the whole document: the path appears in the setup block
 # regardless, so a document-wide grep would pass while step 1 still sent the
