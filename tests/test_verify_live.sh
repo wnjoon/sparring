@@ -181,6 +181,10 @@ chk "and names the prerequisite for re-running ready" "run spar-cancel FIRST" "$
 # And it says the FAILED verdict a cancelled workspace produces is correct, so it
 # is not read as a defect in the harness.
 chk "and explains the verdict after a bare cancel" "not a bug" "$CL"
+chk "checklist covers spec verification" "--verify-spec" "$CL"
+chk "checklist covers unattended spec verification" "--unattended --verify-spec" "$CL"
+chk "checklist requires durable spec verifier artifacts" "reviews/spar-spec-verify-" "$CL"
+chk "checklist requires verification before branch creation" "before any new spar/" "$CL"
 
 # 6c. paths the human is told to TYPE are shell-quoted; a space must not break
 # the commands and a $(...) must not run when they are pasted.

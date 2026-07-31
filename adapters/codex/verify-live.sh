@@ -650,6 +650,15 @@ Nothing here touches your real Codex configuration.
    FAILED — spar-cancel keeps the review but deletes the plan state, so its stamps
    are gone. That verdict is correct for the artifacts, not a bug.
 
+6. SPEC VERIFICATION. Run spar-ready twice with a small spec: once with
+   --verify-spec, and once with --unattended --verify-spec. In both runs, the
+   setup output should say spec-verify=required, verification should happen
+   before any new spar/<slug>-<timestamp> branch is created, and durable
+   reviews/spar-spec-verify-<id>-claude.md plus
+   reviews/spar-spec-verify-<id>-codex.md should appear. If the verifier blocks,
+   the plan state should not exist yet. If it passes, the generated plan should
+   cite .claude/spar-spec-verify.md before ordinary plan review runs.
+
 When the session is over:
 
     bash @@SELFQ@@ check --dir @@WSQ@@

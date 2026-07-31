@@ -37,7 +37,9 @@ RDY_REST2="${RDY_REST#*$'\t'}"
 RDY_UNATTENDED="${RDY_REST2%%$'\t'*}"
 RDY_REST3="${RDY_REST2#*$'\t'}"
 RDY_PLAN_REVIEW="${RDY_REST3%%$'\t'*}"
-RDY_SPEC="${RDY_REST3#*$'\t'}"
+RDY_REST4="${RDY_REST3#*$'\t'}"
+RDY_VERIFY_SPEC="${RDY_REST4%%$'\t'*}"
+RDY_SPEC="${RDY_REST4#*$'\t'}"
 # Mirror of the Claude seat's auto-detect: Codex authors here, so claude reviews
 # when it is installed and only a machine without it falls back to same-family.
 if [ -z "$RDY_REVIEWER" ]; then
@@ -66,6 +68,21 @@ if [ "$(head -1 "$RDY_LIVE" 2>/dev/null || true)" != "${CODEX_THREAD_ID:-}" ]; t
   echo "         spar-fight will refuse to start until they do (install them, then" >&2
   echo "         start a new session and accept the trust prompt)." >&2
 fi
+for D in .claude reviews docs/superpowers/plans; do mkdir -p "$D"; done
+# Reuse spar's git-excludes so fight's own commits never stage loop artifacts.
+EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
+for pat in 'reviews/spar-*' '.claude/spar*'; do
+  grep -qxF "$pat" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$pat" >> "$EXCLUDE"
+done
+if [ "$RDY_VERIFY_SPEC" = true ]; then
+  command -v claude >/dev/null 2>&1 || { echo "Error: spec verification requires the claude CLI on PATH." >&2; exit 1; }
+  command -v codex >/dev/null 2>&1 || { echo "Error: spec verification requires the codex CLI on PATH." >&2; exit 1; }
+  bash "$SPAR_ROOT/commands/spar-spec-verify-prepare.sh" "$RDY_SPEC" "$RDY_REVIEWER" codex
+  bash .claude/spar-run-spec-verify-claude.sh
+  bash .claude/spar-run-spec-verify-codex.sh
+  RDY_SV_ID="$(cat .claude/spar-spec-verify-id)"
+  bash "$SPAR_ROOT/commands/spar-spec-verify-check.sh" "$RDY_SV_ID"
+fi
 # Isolate this run on a dedicated branch in the CURRENT directory. No separate
 # worktree, so the working directory — and thus every state path the Stop hook
 # reads — never changes mid-run. All task commits land on this branch.
@@ -83,7 +100,6 @@ RDY_SLUG="$(printf '%s' "$RDY_SLUG_SRC" | tr '[:upper:] ' '[:lower:]-' | tr -cd 
 [ -n "$RDY_SLUG" ] || RDY_SLUG=run
 RDY_BRANCH="spar/${RDY_SLUG}-$(date +%Y%m%d-%H%M%S)"
 git checkout -b "$RDY_BRANCH" || { echo "Error: could not create branch $RDY_BRANCH." >&2; exit 1; }
-for D in .claude reviews docs/superpowers/plans; do mkdir -p "$D"; done
 # The captured copy is authoritative from here: a spec file edited later does not
 # change what the plan was written against. A path is copied byte for byte;
 # inline text gets a trailing newline.
@@ -91,11 +107,7 @@ if [ -f "$RDY_SPEC" ]; then cp "$RDY_SPEC" .claude/spar-plan-spec.txt
 else printf '%s\n' "$RDY_SPEC" > .claude/spar-plan-spec.txt; fi
 RDY_PR_ID="$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 3 2>/dev/null || head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 if [ "$RDY_PLAN_REVIEW" = false ]; then RDY_PR=skipped; else RDY_PR=required; fi
-# Reuse spar's git-excludes so fight's own commits never stage loop artifacts.
-EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
-for pat in 'reviews/spar-*' '.claude/spar*'; do
-  grep -qxF "$pat" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$pat" >> "$EXCLUDE"
-done
+if [ "$RDY_VERIFY_SPEC" = true ]; then RDY_SV=required; else RDY_SV=skipped; fi
 # 'author: codex' is the seat — it decides which family runs the final sweep for
 # every task of this plan. Recorded here so the prepared plan is self-describing;
 # spar-fight re-stamps it (and the owning session, which is only knowable once the
@@ -122,13 +134,15 @@ current_review_id:
 STATE_EOF
 mv "$TMP" .claude/spar-plan.local.md
 trap - EXIT
-printf 'Ready — plan branch %s (author=codex, reviewer=%s, unattended=%s, plan-review=%s).\nSPEC=%s\n' \
-  "$RDY_BRANCH" "$RDY_REVIEWER" "$RDY_UNATTENDED" "$RDY_PR" "$RDY_SPEC"
+printf 'Ready — plan branch %s (author=codex, reviewer=%s, unattended=%s, plan-review=%s, spec-verify=%s).\nSPEC=%s\n' \
+  "$RDY_BRANCH" "$RDY_REVIEWER" "$RDY_UNATTENDED" "$RDY_PR" "$RDY_SV" "$RDY_SPEC"
 ```
 
 ## 2. Write the plan
 
-Read `.claude/spar-plan-spec.txt` — section 1 captured the spec there, and that
+If `.claude/spar-spec-verify.md` exists, read it first and include a short
+verification context section in the plan naming the accepted non-blocking
+findings that shaped it. Then read `.claude/spar-plan-spec.txt` — section 1 captured the spec there, and that
 copy is what the plan will be reviewed against. Read it rather than the `SPEC=`
 path, so an edit to the original after setup cannot put the plan and the review
 on different specs. If it is empty, stop and say so.
